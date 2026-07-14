@@ -1,0 +1,251 @@
+@import "tailwindcss";
+
+/* Enlight Lab · StackForge - Professional Light Theme */
+
+/* Custom CSS Variables */
+:root {
+  --primary-blue: #4f46e5;
+  --primary-blue-hover: #4338ca;
+  --teal-accent: #14b8a6;
+  --navy-heading: #111827;
+  --body-text: #1f2937;
+  --muted-text: #6b7280;
+  --page-bg: #ffffff;
+  --border-color: #f3f4f6;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --purple: #6366f1;
+  --purple-to: #a855f7;
+}
+
+/* Base styles */
+body {
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  background-color: var(--page-bg);
+  color: var(--body-text);
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--navy-heading);
+  font-weight: 700;
+}
+
+/* Component classes */
+.header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.card {
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+  border: 1px solid var(--border-color);
+}
+
+.btn {
+  border-radius: 9999px;
+  font-weight: 600;
+  padding: 0.625rem 1.5rem;
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: var(--primary-blue);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--primary-blue-hover);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.25);
+}
+
+.btn-terraform {
+  background: linear-gradient(to right, #10b981, #059669);
+  color: white;
+}
+
+.btn-purple {
+  background: var(--navy-heading);
+  color: white;
+}
+
+.btn-ghost {
+  background: white;
+  border: 1px solid var(--border-color);
+  color: var(--navy-heading);
+}
+
+.btn-ghost:hover {
+  background: #f9fafb;
+}
+
+.text-gradient {
+  color: var(--primary-blue);
+}
+
+.section-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-text);
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+/* Assessment-style choice cards (like ai-readiness) */
+.choice-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  text-align: left;
+  padding: 1rem 1.25rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.choice-card:hover {
+  border-color: var(--primary-blue);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
+}
+
+.choice-card-title {
+  font-weight: 700;
+  color: var(--navy-heading);
+  font-size: 1.05rem;
+}
+
+.choice-card-desc {
+  font-size: 0.875rem;
+  color: var(--muted-text);
+}
+
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  transition: all 0.2s;
+}
+
+.input:focus {
+  outline: none;
+  ring: 2px;
+  ring-color: rgba(37, 99, 235, 0.2);
+  border-color: var(--primary-blue);
+}
+
+.textarea {
+  resize: none;
+}
+
+.file-item {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+}
+
+.file-item:hover {
+  background: #f9fafb;
+}
+
+.file-item.active {
+  background: #eff6ff;
+  color: var(--primary-blue);
+}
+
+.code-viewer {
+  background: #111827;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.code-header {
+  padding: 0.5rem 1rem;
+  background: #1f2937;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #d1d5db;
+  font-size: 0.875rem;
+}
+
+.progress-track {
+  height: 0.5rem;
+  background: #f3f4f6;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: all 0.5s;
+}
+
+.progress-fill-blue {
+  background: linear-gradient(to right, var(--primary-blue), var(--teal-accent));
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 0;
+  color: var(--muted-text);
+}
+
+/* Shiki code blocks — keep readable full-width layout */
+.code-highlight {
+  width: 100%;
+  min-width: 0;
+}
+
+.code-highlight pre,
+.code-highlight .shiki {
+  margin: 0 !important;
+  padding: 1rem !important;
+  background: transparent !important;
+  overflow-x: auto !important;
+  white-space: pre !important;
+  word-wrap: normal !important;
+  word-break: normal !important;
+  max-width: 100%;
+}
+
+.code-highlight code {
+  white-space: pre !important;
+  word-break: normal !important;
+}
+
+/* Animation for loading dots */
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Disabled button state */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

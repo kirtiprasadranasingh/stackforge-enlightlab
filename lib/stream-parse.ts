@@ -1,0 +1,161 @@
+import type { GeneratedFile } from '@/types';
+import { getLanguageFromPath, validateFilePath, validateFileSize } from '@/lib/utils';
+
+/**
+ * Incremental parser for StackForge streaming markers.
+ */
+
+const FILE_START =
+  /<<<FILE\s+path="([^"]+)"\s+language="([^"]*)"(?:\s+description="([^"]*)")?\s*>>>/g;
+const END_FILE = '<<<END_FILE>>>';
+const DELETE_RE = /<<<DELETE\s+path="([^"]+)"\s*>>>/g;
+const STATUS_RE = /<<<STATUS>>>\s*([\s\S]*?)(?=<<<|\s*$)/;
+const SUMMARY_RE = /<<<SUMMARY>>>\s*([\s\S]*?)(?=<<<WARNINGS>>>|\s*$)/;
+const WARNINGS_RE = /<<<WARNINGS>>>\s*([\s\S]*?)$/;
+
+export interface ParseState {
+  buffer: string;
+  emittedPaths: Set<string>;
+}
+
+export interface ParseResult {
+  status?: string;
+  files: GeneratedFile[];
+  deletedPaths: string[];
+  summary?: string;
+  warnings?: string[];
+  doneMarkers: boolean;
+}
+
+export function createParseState(): ParseState {
+  return { buffer: '', emittedPaths: new Set() };
+}
+
+export function appendAndParse(state: ParseState, chunk: string): ParseResult {
+  state.buffer += chunk;
+  const files: GeneratedFile[] = [];
+  const deletedPaths: string[] = [];
+  let status: string | undefined;
+  let summary: string | undefined;
+  let warnings: string[] | undefined;
+
+  const statusMatch = state.buffer.match(STATUS_RE);
+  if (statusMatch) {
+    status = statusMatch[1].trim();
+  }
+
+  // Deletes
+  DELETE_RE.lastIndex = 0;
+  let del: RegExpExecArray | null;
+  const delRemove: Array<{ start: number; end: number }> = [];
+  while ((del = DELETE_RE.exec(state.buffer)) !== null) {
+    const path = del[1].trim();
+    if (validateFilePath(path)) deletedPaths.push(path);
+    delRemove.push({ start: del.index, end: del.index + del[0].length });
+  }
+  for (let i = delRemove.length - 1; i >= 0; i--) {
+    const { start, end } = delRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+
+  // Extract complete FILE blocks
+  FILE_START.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const toRemove: Array<{ start: number; end: number }> = [];
+
+  while ((match = FILE_START.exec(state.buffer)) !== null) {
+    const startIdx = match.index;
+    const headerEnd = match.index + match[0].length;
+    const endIdx = state.buffer.indexOf(END_FILE, headerEnd);
+    if (endIdx === -1) break;
+
+    const path = match[1].trim();
+    const language = match[2].trim() || getLanguageFromPath(path);
+    const description = match[3]?.trim();
+    const content = state.buffer.slice(headerEnd, endIdx).replace(/^\r?\n/, '').replace(/\r?\n$/, '');
+
+    if (
+      validateFilePath(path) &&
+      validateFileSize(content) &&
+      !state.emittedPaths.has(path)
+    ) {
+      state.emittedPaths.add(path);
+      files.push({ path, language, content, description });
+    }
+
+    toRemove.push({ start: startIdx, end: endIdx + END_FILE.length });
+    FILE_START.lastIndex = endIdx + END_FILE.length;
+  }
+
+  for (let i = toRemove.length - 1; i >= 0; i--) {
+    const { start, end } = toRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+
+  const summaryMatch = state.buffer.match(SUMMARY_RE);
+  if (summaryMatch) {
+    summary = summaryMatch[1].trim();
+  }
+
+  const warningsMatch = state.buffer.match(WARNINGS_RE);
+  if (warningsMatch) {
+    const raw = warningsMatch[1].trim();
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        warnings = parsed.map(String);
+      }
+    } catch {
+      warnings = raw
+        .split('\n')
+        .map((l) => l.replace(/^[-*]\s*/, '').replace(/^"|"$/g, '').trim())
+        .filter(Boolean);
+    }
+  }
+
+  const doneMarkers =
+    state.buffer.includes('<<<SUMMARY>>>') && state.buffer.includes('<<<WARNINGS>>>');
+
+  return { status, files, deletedPaths, summary, warnings, doneMarkers };
+}
+
+/**
+ * Fallback: parse final ```json ... ``` blob if model ignored markers.
+ */
+export function parseJsonFallback(text: string): {
+  files: GeneratedFile[];
+  summary?: string;
+  warnings?: string[];
+} {
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/(\{[\s\S]*"files"\s*:\s*\[[\s\S]*\}\s*)$/);
+  if (!jsonMatch) return { files: [] };
+
+  try {
+    const parsed = JSON.parse(jsonMatch[1].trim());
+    const files: GeneratedFile[] = [];
+    if (Array.isArray(parsed.files)) {
+      for (const file of parsed.files) {
+        if (
+          file?.path &&
+          file?.content &&
+          validateFilePath(file.path) &&
+          validateFileSize(file.content)
+        ) {
+          files.push({
+            path: file.path,
+            language: file.language || getLanguageFromPath(file.path),
+            content: file.content,
+            description: file.description,
+          });
+        }
+      }
+    }
+    return {
+      files,
+      summary: typeof parsed.summary === 'string' ? parsed.summary : undefined,
+      warnings: Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : undefined,
+    };
+  } catch {
+    return { files: [] };
+  }
+}
