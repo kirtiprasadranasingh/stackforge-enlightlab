@@ -90,15 +90,22 @@ export function FileViewer({ files, isGenerating }: FileViewerProps) {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => selected && copyFile(selected.content)}
-            className="btn-ghost text-xs px-3 py-1.5"
+            className="text-xs font-semibold px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50"
             disabled={!selected}
           >
             {copied === 'file' ? 'Copied' : 'Copy file'}
           </button>
-          <button onClick={copyAll} className="btn-ghost text-xs px-3 py-1.5">
+          <button
+            onClick={copyAll}
+            className="text-xs font-semibold px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg shadow-sm transition-all active:scale-95"
+          >
             {copied === 'all' ? 'Copied' : 'Copy all'}
           </button>
-          <button onClick={downloadAll} className="btn-primary text-xs px-3 py-1.5" disabled={isGenerating}>
+          <button
+            onClick={downloadAll}
+            className="text-xs font-semibold px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-sm rounded-lg transition-all active:scale-95"
+            disabled={isGenerating}
+          >
             Download ZIP
           </button>
         </div>

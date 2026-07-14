@@ -68,7 +68,7 @@ export function LeadCapture({ summary, fileCount }: LeadCaptureProps) {
             href={DIAGNOSTIC_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-purple inline-flex text-sm"
+            className="inline-flex text-sm font-semibold px-6 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white shadow-sm rounded-xl transition-all active:scale-95 no-underline"
           >
             Book a diagnostic
           </a>
@@ -94,7 +94,7 @@ export function LeadCapture({ summary, fileCount }: LeadCaptureProps) {
           required
         />
         {error && <p className="text-xs text-[var(--error)]">{error}</p>}
-        <button type="submit" className="btn-primary w-full text-sm" disabled={submitting}>
+        <button type="submit" className="w-full text-sm font-semibold py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-sm rounded-xl transition-all active:scale-95" disabled={submitting}>
           {submitting ? 'Sending…' : 'Email this stack'}
         </button>
       </form>
@@ -105,7 +105,7 @@ export function LeadCapture({ summary, fileCount }: LeadCaptureProps) {
         </p>
         <button
           type="button"
-          className="btn-purple w-full text-sm"
+          className="w-full text-sm font-semibold py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white shadow-sm rounded-xl transition-all active:scale-95"
           disabled={submitting}
           onClick={() => {
             if (email.trim()) {

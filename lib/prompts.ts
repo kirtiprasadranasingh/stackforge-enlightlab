@@ -58,7 +58,7 @@ file contents here (raw, not escaped)
 <<<DELETE path="relative/path">>>
 (optional — only when a file should be removed)
 <<<SUMMARY>>>
-2–4 sentence chat reply explaining what you did / how pieces connect
+A detailed, professional, senior-level architectural description (4–8 sentences) explaining exactly what you generated, key configurations (like VPC CIDRs, cluster setup, and ingress paths), and how the pieces (Terraform, Dockerfile, Helm/Kubernetes, and CI/CD pipelines) connect and deploy together. Keep it professional, informative, and detailed.
 <<<WARNINGS>>>
 ["assumption 1", "replace {{VAR}}", "review IAM before apply"]
 

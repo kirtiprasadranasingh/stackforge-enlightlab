@@ -158,6 +158,16 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          // Send the final complete summary and warnings if parsed from markers
+          const finalParsed = appendAndParse(parseState, '');
+          if (finalParsed.summary) {
+            anyOutput = true;
+            controller.enqueue(sse({ type: 'summary', summary: finalParsed.summary }));
+          }
+          if (finalParsed.warnings && finalParsed.warnings.length > 0) {
+            controller.enqueue(sse({ type: 'warnings', warnings: finalParsed.warnings }));
+          }
+
           if (collectedFiles.length === 0 && !isFollowUp) {
             const fallback = parseJsonFallback(fullText);
             for (const file of fallback.files) {
@@ -166,11 +176,11 @@ export async function POST(request: NextRequest) {
               anyOutput = true;
               controller.enqueue(sse({ type: 'file', file }));
             }
-            if (fallback.summary && !summarySent) {
+            if (fallback.summary) {
               anyOutput = true;
               controller.enqueue(sse({ type: 'summary', summary: fallback.summary }));
             }
-            if (fallback.warnings && !warningsSent) {
+            if (fallback.warnings && fallback.warnings.length > 0) {
               controller.enqueue(sse({ type: 'warnings', warnings: fallback.warnings }));
             }
           }
