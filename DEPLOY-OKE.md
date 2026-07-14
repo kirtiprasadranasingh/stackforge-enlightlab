@@ -1,104 +1,66 @@
-# StackForge on your EXISTING OKE cluster (1 shared Load Balancer)
+# StackForge → existing OKE (Mumbai) + shared LB 144.24.100.85
 
-Do **not** create a new LoadBalancer Service. We use **ClusterIP + Ingress** so StackForge shares the LB you already have (saves free-trial credits).
+## Confirmed from your cluster
+- Region: `ap-mumbai-1` → OCIR: `bom.ocir.io`
+- Ingress class: `nginx`
+- Shared LB: `144.24.100.85`
+- App URL: **http://stackforge.144-24-100-85.nip.io**
 
-## What you already have
-- 1 OKE cluster
-- 1 Load Balancer (Ingress controller in front of apps)
+## A) Create OCIR repo
+OCI Console → Container Registry → **Create repository** → name: `stackforge` (Private)
 
-## 1. Confirm cluster access
+Click any existing repo and copy the path prefix, e.g.:
+`bom.ocir.io/axxxxxxx /enlight-console` → tenancy namespace is `axxxxxxx`
+
+## B) Build & push (laptop with Docker)
 
 ```bash
-kubectl get nodes
-kubectl get ingress -A
-kubectl get svc -A | findstr LoadBalancer
+docker login bom.ocir.io
+# username: <TENANCY_NAMESPACE>/<oci-username>   (or <TENANCY_NAMESPACE>/oracleidentitycloudservice/<user>)
+# password: Auth Token
+
+docker build -t bom.ocir.io/<TENANCY_NAMESPACE>/stackforge:latest .
+docker push bom.ocir.io/<TENANCY_NAMESPACE>/stackforge:latest
 ```
 
-Note:
-- **Ingress class** (often `nginx`) — edit `k8s/ingress.yaml` if different  
-- **Existing LB IP / domain**
+(No `NEXT_BASE_PATH` — we use host-based ingress.)
 
-## 2. Build & push image to OCIR
-
-For path `/stackforge` on the shared LB (recommended with 1 LB):
+## C) In Cloud Shell
 
 ```bash
-docker login <region-key>.ocir.io
+git clone https://github.com/kirtiprasadranasingh/stackforge-enlightlab.git
+cd stackforge-enlightlab
+git pull
 
-docker build --build-arg NEXT_BASE_PATH=/stackforge \
-  -t <region-key>.ocir.io/<tenancy-namespace>/stackforge:latest .
+# 1) Edit image in k8s/deployment.yaml — replace TENANCY_NAMESPACE
 
-docker push <region-key>.ocir.io/<tenancy-namespace>/stackforge:latest
-```
-
-Mumbai region key is often `bom.ocir.io`.
-
-## 3. Image pull secret (private OCIR)
-
-```bash
+# 2) Namespace + OCIR pull secret
 kubectl create namespace stackforge --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl create secret docker-registry ocir-secret \
   -n stackforge \
-  --docker-server=<region-key>.ocir.io \
-  --docker-username='<tenancy-namespace>/<oci-username>' \
+  --docker-server=bom.ocir.io \
+  --docker-username='<TENANCY_NAMESPACE>/<oci-username>' \
   --docker-password='<AUTH_TOKEN>' \
   --docker-email='you@example.com'
-```
 
-Uncomment `imagePullSecrets` in `k8s/deployment.yaml`.
-
-## 4. App secret
-
-```bash
+# 3) App secret
 cp k8s/secret.yaml.example k8s/secret.yaml
-```
-
-Set:
-
-```yaml
-GEMINI_API_KEY: "your-key"
-NEXT_PUBLIC_APP_URL: "http://<LB_IP_OR_DOMAIN>/stackforge"
-ALLOWED_ORIGINS: "http://<LB_IP_OR_DOMAIN>"
-NEXT_PUBLIC_DIAGNOSTIC_URL: "https://enlightlabs.com/contact"
-```
-
-```bash
+# put real GEMINI_API_KEY in k8s/secret.yaml
 kubectl apply -f k8s/secret.yaml
-```
 
-## 5. Point deployment at your image
-
-Edit `k8s/deployment.yaml` → replace image line with your OCIR URL.
-
-```bash
+# 4) Deploy + Ingress (ClusterIP only — reuses LB)
 kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/ingress.yaml
+
 kubectl -n stackforge rollout status deploy/stackforge
-kubectl -n stackforge get ingress
+kubectl -n stackforge get pods,svc,ingress
 ```
 
-## 6. Open the app
+## D) Open
+http://stackforge.144-24-100-85.nip.io
 
-```text
-http://<EXISTING_LB_IP>/stackforge
-```
-
-If 404, check `ingressClassName` matches your cluster:
-
-```bash
-kubectl get ingressclass
-```
-
-Update `k8s/ingress.yaml` and re-apply.
-
-## 7. Tear down only StackForge (keep cluster/LB)
-
+## E) Remove later (keep cluster/LB)
 ```bash
 kubectl delete namespace stackforge
 ```
-
-## Files
-- `k8s/deployment.yaml` — Deployment + **ClusterIP** Service  
-- `k8s/ingress.yaml` — path `/stackforge` on shared LB  
-- `k8s/secret.yaml.example` — copy to `secret.yaml` (gitignored)

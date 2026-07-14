@@ -1,42 +1,23 @@
-# Share the EXISTING Load Balancer via Ingress (path-based).
-# Adjust ingressClassName / annotations to match your cluster (nginx is common).
+# Shared existing LB (144.24.100.85) — host-based, same pattern as other enlightlab apps.
+# URL: http://stackforge.144-24-100-85.nip.io
 #
-# After apply, open:
-#   http://<EXISTING_LB_IP_OR_DOMAIN>/stackforge
-#
-# If your ingress controller does not strip the prefix, you may need
-# rewrite annotations (nginx example included below).
+# No NEXT_BASE_PATH needed for this host style.
 
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: stackforge
   namespace: stackforge
-  annotations:
-    # nginx ingress — rewrite /stackforge and /stackforge/* to /
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
-    nginx.ingress.kubernetes.io/use-regex: "true"
-    # If your cluster uses a different annotation set, replace these.
 spec:
   ingressClassName: nginx
   rules:
-    - http:
+    - host: stackforge.144-24-100-85.nip.io
+      http:
         paths:
-          - path: /stackforge(/|$)(.*)
-            pathType: ImplementationSpecific
+          - path: /
+            pathType: Prefix
             backend:
               service:
                 name: stackforge
                 port:
                   name: http
-    # Optional: host-based instead of /stackforge path
-    # - host: stackforge.yourdomain.com
-    #   http:
-    #     paths:
-    #       - path: /
-    #         pathType: Prefix
-    #         backend:
-    #           service:
-    #             name: stackforge
-    #             port:
-    #               name: http

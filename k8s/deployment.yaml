@@ -3,7 +3,6 @@ kind: Namespace
 metadata:
   name: stackforge
 ---
-# ClusterIP only — do NOT create a second LoadBalancer (share the existing one via Ingress)
 apiVersion: v1
 kind: Service
 metadata:
@@ -38,11 +37,12 @@ spec:
       labels:
         app: stackforge
     spec:
+      imagePullSecrets:
+        - name: ocir-secret
       containers:
         - name: stackforge
-          # Replace after OCIR push:
-          # bom.ocir.io/<tenancy-namespace>/stackforge:latest
-          image: <REGION_KEY>.ocir.io/<TENANCY_NAMESPACE>/stackforge:latest
+          # Replace TENANCY_NAMESPACE after you check OCIR (see DEPLOY steps)
+          image: bom.ocir.io/bmitpaosivqx/stackforge:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
@@ -69,6 +69,3 @@ spec:
             limits:
               cpu: "500m"
               memory: 768Mi
-      # Uncomment if OCIR repo is private
-      # imagePullSecrets:
-      #   - name: ocir-secret
