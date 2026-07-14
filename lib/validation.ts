@@ -40,14 +40,10 @@ export const GenerateRequestSchema = z
     existingFiles: z.array(ExistingFileSchema).max(40).optional(),
   })
   .superRefine((data, ctx) => {
-    const isFollowUp = (data.existingFiles?.length ?? 0) > 0;
-    const minLen = isFollowUp ? 3 : 10;
-    if (data.prompt.trim().length < minLen) {
+    if (data.prompt.trim().length < 1) {
       ctx.addIssue({
         code: 'custom',
-        message: isFollowUp
-          ? 'Message too short'
-          : 'Description must be at least 10 characters',
+        message: 'Message cannot be empty',
         path: ['prompt'],
       });
     }
