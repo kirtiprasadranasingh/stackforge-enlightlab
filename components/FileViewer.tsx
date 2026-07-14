@@ -46,12 +46,6 @@ export function FileViewer({ files, isGenerating }: FileViewerProps) {
     return Array.from(tree.keys()).sort((a, b) => a.localeCompare(b));
   }, [files]);
 
-  const copyFile = useCallback(async (content: string) => {
-    await copyToClipboard(content);
-    setCopied('file');
-    setTimeout(() => setCopied(null), 1500);
-  }, []);
-
   const copyAll = useCallback(async () => {
     const blob = files
       .map((f) => `===== ${f.path} =====\n${f.content}`)
@@ -89,13 +83,6 @@ export function FileViewer({ files, isGenerating }: FileViewerProps) {
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => selected && copyFile(selected.content)}
-            className="text-xs font-semibold px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-50"
-            disabled={!selected}
-          >
-            {copied === 'file' ? 'Copied' : 'Copy file'}
-          </button>
           <button
             onClick={copyAll}
             className="text-xs font-semibold px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-lg shadow-sm transition-all active:scale-95"
@@ -167,7 +154,7 @@ export function FileViewer({ files, isGenerating }: FileViewerProps) {
               )}
             </div>
             <button
-              onClick={() => selected && copyFile(selected.content)}
+              onClick={() => selected && void copyToClipboard(selected.content)}
               className="text-xs text-gray-400 hover:text-white transition-colors shrink-0"
             >
               Copy

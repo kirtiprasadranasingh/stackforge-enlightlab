@@ -46,6 +46,7 @@ export default function GeneratePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [files, setFiles] = useState<GeneratedFile[]>([]);
+  const [hasGeneratedFiles, setHasGeneratedFiles] = useState(false);
   const [summary, setSummary] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +83,15 @@ export default function GeneratePage() {
 
   const pickCi = (ci: CIProvider) => {
     setPresets((p) => ({ ...p, ci }));
-    setStep(4);
+    setSetupDone(true);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `sys-${Date.now()}`,
+        role: 'system',
+        content: `StackForge initialized with presets: Cloud: ${presets.cloud.toUpperCase()} · Orchestrator: ${presets.orchestrator} · CI/CD: ${ci}. Ask below to build your cloud stack!`,
+      },
+    ]);
   };
 
   const mergeFile = useCallback((file: GeneratedFile) => {
@@ -190,7 +199,10 @@ export default function GeneratePage() {
                 if (event.message) setStatusMessage(event.message);
                 break;
               case 'file':
-                if (event.file) mergeFile(event.file);
+                if (event.file) {
+                  mergeFile(event.file);
+                  setHasGeneratedFiles(true);
+                }
                 break;
               case 'delete':
                 if (event.path) {
@@ -246,20 +258,7 @@ export default function GeneratePage() {
     [isGenerating, presets, mergeFile]
   );
 
-  const startSession = () => {
-    if (input.trim().length < 10) return;
-    const first = input.trim();
-    setSetupDone(true);
-    setMessages([
-      {
-        id: 'sys-0',
-        role: 'system',
-        content: `Presets: ${presets.cloud.toUpperCase()} · ${presets.orchestrator} · ${presets.ci}. Chat to build and keep editing — files update on the right.`,
-      },
-    ]);
-    // Defer send so setupDone renders workspace first
-    setTimeout(() => void sendMessage(first), 0);
-  };
+
 
   const handleStop = () => {
     abortController.current?.abort();
@@ -279,6 +278,7 @@ export default function GeneratePage() {
       }
     ]);
     setFiles([]);
+    setHasGeneratedFiles(false);
     setSummary('');
     setWarnings([]);
     setError(null);
@@ -305,20 +305,20 @@ export default function GeneratePage() {
         <main className="flex-1 max-w-3xl mx-auto w-full px-4 sm:px-6 py-10">
           <div className="mb-8">
             <div className="flex justify-between text-sm mb-2">
-              <span className="font-medium">Step {step} of 4</span>
-              <span className="text-[var(--muted-text)]">{Math.round((step / 4) * 100)}%</span>
+              <span className="font-medium">Step {step} of 3</span>
+              <span className="text-[var(--muted-text)]">{Math.round((step / 3) * 100)}%</span>
             </div>
             <div className="progress-track h-1.5">
               <div
                 className="progress-fill-blue h-full"
-                style={{ width: `${(step / 4) * 100}%`, animation: 'none' }}
+                style={{ width: `${(step / 3) * 100}%`, animation: 'none' }}
               />
             </div>
           </div>
 
           {step === 1 && (
             <div>
-              <p className="section-label mb-2">Cloud · 1 of 4</p>
+              <p className="section-label mb-2">Cloud · 1 of 3</p>
               <h1 className="text-3xl font-bold mb-2">Which cloud are you on?</h1>
               <p className="text-[var(--muted-text)] mb-8">Then we’ll open a chat + file workspace.</p>
               <div className="grid gap-3">
@@ -335,7 +335,7 @@ export default function GeneratePage() {
           {step === 2 && (
             <div>
               <button type="button" className="text-sm text-[var(--muted-text)] mb-4" onClick={() => setStep(1)}>← Back</button>
-              <p className="section-label mb-2">Orchestration · 2 of 4</p>
+              <p className="section-label mb-2">Orchestration · 2 of 3</p>
               <h1 className="text-3xl font-bold mb-2">How do you run containers?</h1>
               <div className="grid gap-3 mt-8">
                 {orchOptions.map((opt) => (
@@ -351,7 +351,7 @@ export default function GeneratePage() {
           {step === 3 && (
             <div>
               <button type="button" className="text-sm text-[var(--muted-text)] mb-4" onClick={() => setStep(2)}>← Back</button>
-              <p className="section-label mb-2">CI / CD · 3 of 4</p>
+              <p className="section-label mb-2">CI / CD · 3 of 3</p>
               <h1 className="text-3xl font-bold mb-2">Where does your pipeline live?</h1>
               <div className="grid gap-3 mt-8">
                 {CI_OPTIONS.map((opt) => (
@@ -360,38 +360,6 @@ export default function GeneratePage() {
                     <span className="choice-card-desc">{opt.description}</span>
                   </button>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {step === 4 && (
-            <div>
-              <button type="button" className="text-sm text-[var(--muted-text)] mb-4" onClick={() => setStep(3)}>← Back</button>
-              <p className="section-label mb-2">Describe · 4 of 4</p>
-              <h1 className="text-3xl font-bold mb-2">What should we build?</h1>
-              <p className="text-[var(--muted-text)] mb-6">
-                Locked:{' '}
-                <span className="font-medium text-[var(--navy-heading)]">
-                  {presets.cloud.toUpperCase()} · {presets.orchestrator} · {presets.ci}
-                </span>
-              </p>
-              <textarea
-                className="textarea w-full rounded-xl border border-[var(--border-color)] bg-white p-4 text-base min-h-[120px] focus:outline-none focus:ring-2 focus:ring-[var(--primary-blue)]/20"
-                placeholder="e.g., Create Terraform for a Node API on EKS with autoscaling and staging"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                maxLength={4000}
-              />
-              <div className="flex justify-between items-center mt-4 gap-3">
-                <p className="text-xs text-[var(--muted-text)]">You’ll chat + edit files next (Lovable-style)</p>
-                <button
-                  type="button"
-                  className="btn-primary disabled:opacity-50"
-                  disabled={input.trim().length < 10}
-                  onClick={startSession}
-                >
-                  Open workspace →
-                </button>
               </div>
             </div>
           )}
@@ -443,7 +411,7 @@ export default function GeneratePage() {
       </header>
 
       {/* Dynamic Workspace: Split vs. Full-Width Chat */}
-      {files.length > 0 || isGenerating ? (
+      {hasGeneratedFiles ? (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-gray-50 bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_800px_at_50%_150px,#eeeffc,transparent)] before:pointer-events-none">
           {/* LEFT — Chat card */}
           <section className="w-full lg:w-[420px] shrink-0 bg-white border border-gray-150 rounded-[28px] shadow-md flex flex-col min-h-0 max-h-[40vh] lg:max-h-none relative z-10 overflow-hidden">
@@ -703,6 +671,10 @@ export default function GeneratePage() {
           <div className="mt-4 z-10 animate-fade-slide-up" style={{ animationDelay: '100ms' }}>
             <button
               type="button"
+              onClick={() => {
+                setSetupDone(false);
+                setStep(1);
+              }}
               className="text-xs bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 px-4 py-2.5 rounded-full shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
@@ -764,6 +736,10 @@ export default function GeneratePage() {
               {/* Quick Questions Pill */}
               <button
                 type="button"
+                onClick={() => {
+                  setSetupDone(false);
+                  setStep(1);
+                }}
                 className="text-xs bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 px-4 py-2 rounded-full shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer animate-fade-slide-up"
                 style={{ animationDelay: '150ms' }}
               >
