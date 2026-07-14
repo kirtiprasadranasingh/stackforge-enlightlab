@@ -26,7 +26,7 @@ interface ChatMessage {
 }
 
 export default function GeneratePage() {
-  const [setupDone, setSetupDone] = useState(false);
+  const [setupDone, setSetupDone] = useState(true);
   const [step, setStep] = useState<SetupStep>(1);
   const [presets, setPresets] = useState<Presets>({
     cloud: 'aws',
@@ -34,7 +34,13 @@ export default function GeneratePage() {
     ci: 'github-actions',
   });
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: "Hello! I'm StackForge, your AI platform engineering assistant. Describe the infrastructure stack you want to build (e.g., 'A Node.js REST API on Oracle Cloud OKE with a load balancer and GitHub Actions CI'), and I'll generate the Terraform configurations, Dockerfiles, Helm charts, and CI/CD pipelines for you!",
+    }
+  ]);
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
@@ -262,9 +268,15 @@ export default function GeneratePage() {
 
   const handleNew = () => {
     abortController.current?.abort();
-    setSetupDone(false);
+    setSetupDone(true);
     setStep(1);
-    setMessages([]);
+    setMessages([
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: "Hello! I'm StackForge, your AI platform engineering assistant. Describe the infrastructure stack you want to build (e.g., 'A Node.js REST API on Oracle Cloud OKE with a load balancer and GitHub Actions CI'), and I'll generate the Terraform configurations, Dockerfiles, Helm charts, and CI/CD pipelines for you!",
+      }
+    ]);
     setFiles([]);
     setSummary('');
     setWarnings([]);
@@ -397,7 +409,7 @@ export default function GeneratePage() {
               <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-10 w-auto object-contain" />
             </Link>
             <span className="text-xs text-[var(--muted-text)] truncate hidden md:inline border-l border-gray-200 pl-3">
-              {presets.cloud.toUpperCase()} · {presets.orchestrator.toUpperCase()} · {presets.ci.toUpperCase()}
+              Infrastructure Workspace
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">

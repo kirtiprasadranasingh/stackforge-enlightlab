@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       throw new ValidationError('Invalid request', validation.error);
     }
 
-    const { prompt: rawPrompt, presets, history = [], existingFiles = [] } =
+    const { prompt: rawPrompt, presets = { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' }, history = [], existingFiles = [] } =
       validation.data;
     const prompt = sanitizeInput(rawPrompt);
     const isFollowUp = existingFiles.length > 0;
