@@ -1,7 +1,8 @@
 import { RateLimiterMemory } from 'rate-limiter-flexible';
 
 /**
- * Rate limiting + locked request origin for StackForge
+ * Rate limiting + dynamic origin lock for StackForge
+ * Works on localhost, fixed domains, and Vercel (prod + preview) without hardcoding every URL.
  */
 
 const RATE_LIMIT_REQUESTS = Number(process.env.RATE_LIMIT_REQUESTS || 8);
@@ -46,28 +47,50 @@ export function getClientIP(request: Request): string {
   );
 }
 
+/** Public URL that updates with the active deployment (Vercel-aware). */
+export function getPublicAppUrl(): string {
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '');
+  }
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.replace(/\/$/, '')}`;
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL.replace(/\/$/, '')}`;
+  }
+  return 'http://localhost:3000';
+}
+
 function defaultAllowedOrigins(): string[] {
   const fromEnv = (process.env.ALLOWED_ORIGINS || '')
     .split(',')
-    .map((o) => o.trim())
+    .map((o) => o.trim().replace(/\/$/, ''))
     .filter(Boolean);
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '');
 
   const defaults = [
     'http://localhost:3000',
     'http://localhost:3001',
     'http://127.0.0.1:3000',
-  ];
-
-  if (appUrl) defaults.push(appUrl);
-
-  // Production Enlight Labs domains (locked origin — no wildcard)
-  defaults.push(
+    getPublicAppUrl(),
     'https://enlightlabs.com',
     'https://www.enlightlabs.com',
-    'https://stackforge.enlightlabs.com'
-  );
+    'https://enlightlab.com',
+    'https://www.enlightlab.com',
+    'https://stackforge.enlightlabs.com',
+    'https://stackforge.enlightlab.com',
+  ];
+
+  if (process.env.VERCEL_URL) {
+    defaults.push(`https://${process.env.VERCEL_URL.replace(/\/$/, '')}`);
+  }
+  if (process.env.VERCEL_BRANCH_URL) {
+    defaults.push(`https://${process.env.VERCEL_BRANCH_URL.replace(/\/$/, '')}`);
+  }
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    defaults.push(
+      `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.replace(/\/$/, '')}`
+    );
+  }
 
   return Array.from(new Set([...defaults, ...fromEnv]));
 }
@@ -76,23 +99,56 @@ export function getAllowedOrigins(): string[] {
   return defaultAllowedOrigins();
 }
 
+function isTrustedVercelOrigin(origin: string): boolean {
+  // Allow *.vercel.app so preview deploys work without listing every URL
+  try {
+    const host = new URL(origin).hostname;
+    return host === 'vercel.app' || host.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+}
+
 export function isOriginAllowed(origin: string | null): boolean {
   if (!origin) return false;
-  return getAllowedOrigins().includes(origin);
+  const normalized = origin.replace(/\/$/, '');
+  if (getAllowedOrigins().includes(normalized)) return true;
+
+  const allowVercel =
+    process.env.VERCEL === '1' ||
+    process.env.ALLOW_VERCEL_ORIGINS === 'true' ||
+    process.env.ALLOW_VERCEL_ORIGINS === '1';
+
+  if (allowVercel && isTrustedVercelOrigin(normalized)) return true;
+
+  return false;
 }
 
 /**
- * Hard origin lock for the generate API.
- * Same-origin browser requests send Origin; reject unknown origins.
- * Missing Origin allowed only in development (curl/local tooling).
+ * Origin lock for the generate API.
+ * Missing Origin allowed in development, or same-origin style calls without Origin
+ * when ALLOW_NO_ORIGIN=true.
  */
-export function assertOriginAllowed(request: Request): { ok: true } | { ok: false; status: number; error: string } {
+export function assertOriginAllowed(
+  request: Request
+): { ok: true } | { ok: false; status: number; error: string } {
   const origin = request.headers.get('origin');
   const isDev = process.env.NODE_ENV !== 'production';
 
   if (!origin) {
     if (isDev || process.env.ALLOW_NO_ORIGIN === 'true') {
       return { ok: true };
+    }
+    // Same-origin browser posts sometimes omit Origin on older agents; allow on Vercel
+    // when Referer matches our deployment host.
+    const referer = request.headers.get('referer');
+    if (referer) {
+      try {
+        const refOrigin = new URL(referer).origin;
+        if (isOriginAllowed(refOrigin)) return { ok: true };
+      } catch {
+        /* ignore */
+      }
     }
     return { ok: false, status: 403, error: 'Forbidden: missing origin' };
   }

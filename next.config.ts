@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  output: "standalone",
+  // Set at Docker build time when served under a shared LB path, e.g. /stackforge
+  basePath: process.env.NEXT_BASE_PATH || "",
 };
 
 export default nextConfig;
