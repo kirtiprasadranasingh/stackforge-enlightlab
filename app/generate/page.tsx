@@ -16,6 +16,7 @@ import {
 } from '@/types';
 import { LeadCapture } from '@/components/LeadCapture';
 import { FileViewer } from '@/components/FileViewer';
+import { copyToClipboard } from '@/lib/clipboard';
 
 type SetupStep = 1 | 2 | 3 | 4;
 
@@ -488,7 +489,7 @@ export default function GeneratePage() {
                         <button
                           type="button"
                           title="Copy response text"
-                          onClick={() => navigator.clipboard.writeText(m.content)}
+                          onClick={() => void copyToClipboard(m.content)}
                           className="hover:text-gray-600 transition-colors p-0.5"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">

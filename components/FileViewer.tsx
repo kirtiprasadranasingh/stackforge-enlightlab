@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import JSZip from 'jszip';
 import { CodeBlock } from '@/components/CodeBlock';
+import { copyToClipboard } from '@/lib/clipboard';
 
 interface FileViewerProps {
   files: { path: string; language: string; content: string; description?: string }[];
@@ -46,7 +47,7 @@ export function FileViewer({ files, isGenerating }: FileViewerProps) {
   }, [files]);
 
   const copyFile = useCallback(async (content: string) => {
-    await navigator.clipboard.writeText(content);
+    await copyToClipboard(content);
     setCopied('file');
     setTimeout(() => setCopied(null), 1500);
   }, []);
@@ -55,7 +56,7 @@ export function FileViewer({ files, isGenerating }: FileViewerProps) {
     const blob = files
       .map((f) => `===== ${f.path} =====\n${f.content}`)
       .join('\n\n');
-    await navigator.clipboard.writeText(blob);
+    await copyToClipboard(blob);
     setCopied('all');
     setTimeout(() => setCopied(null), 1500);
   }, [files]);
