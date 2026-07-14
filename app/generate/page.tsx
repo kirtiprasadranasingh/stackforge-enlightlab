@@ -405,8 +405,11 @@ export default function GeneratePage() {
       <header className="border-b border-gray-100 sticky top-0 bg-white/95 backdrop-blur-sm z-50 shrink-0">
         <div className="px-6 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <Link href="/" className="flex items-center gap-2 shrink-0">
-              <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-10 w-auto object-contain" />
+            <Link href="/" className="flex items-center gap-2 shrink-0 no-underline">
+              <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-8 w-auto object-contain" />
+              <span className="text-lg font-bold tracking-tight text-indigo-600 font-sans">
+                Enlight Lab
+              </span>
             </Link>
             <span className="text-xs text-[var(--muted-text)] truncate hidden md:inline border-l border-gray-200 pl-3">
               Infrastructure Workspace
