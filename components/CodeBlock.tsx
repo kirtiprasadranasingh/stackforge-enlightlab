@@ -51,9 +51,16 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
   }, [code, language]);
 
   if (!html) {
+    const lines = code.split('\n');
     return (
       <pre className="p-4 m-0 overflow-x-auto text-sm leading-relaxed whitespace-pre font-mono">
-        <code className="block min-w-full">{code}</code>
+        <code className="block min-w-full">
+          {lines.map((line, idx) => (
+            <span key={idx} className="line block">
+              {line || ' '}
+            </span>
+          ))}
+        </code>
       </pre>
     );
   }
