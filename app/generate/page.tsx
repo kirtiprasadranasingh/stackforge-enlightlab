@@ -680,7 +680,7 @@ export default function GeneratePage() {
                   )}
                   <FileViewer files={files} isGenerating={isGenerating} />
                   {!isGenerating && files.length > 0 && (
-                    <div className="max-w-md">
+                    <div className="w-full">
                       <LeadCapture summary={summary} fileCount={files.length} />
                     </div>
                   )}

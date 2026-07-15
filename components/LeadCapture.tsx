@@ -53,22 +53,22 @@ export function LeadCapture({ summary, fileCount }: LeadCaptureProps) {
 
   if (submitted) {
     return (
-      <div className="card p-6 bg-gradient-to-br from-blue-50 to-teal-50">
+      <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white p-5 rounded-[20px] border border-slate-800 shadow-xl flex items-center justify-center min-h-[120px] w-full mt-6 select-none animate-fade-slide-up">
         <div className="text-center">
-          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <div className="w-10 h-10 rounded-full bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-3">
+            <svg className="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h3 className="font-bold text-[var(--navy-heading)] mb-2">Thanks — we got it</h3>
-          <p className="text-sm text-[var(--muted-text)] mb-4">
-            This is how Enlight Lab builds. Ready for a paid diagnostic on your real stack?
+          <h4 className="font-bold text-sm text-white mb-1">Thanks — stack reminder sent!</h4>
+          <p className="text-xs text-slate-400 mb-3">
+            Ready to deploy this for production? Schedule a diagnostic session with Enlight Labs.
           </p>
           <a
             href={DIAGNOSTIC_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex text-sm font-semibold px-6 py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white shadow-sm rounded-xl transition-all active:scale-95 no-underline"
+            className="inline-flex text-xs font-semibold px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-sm rounded-xl transition-all active:scale-95 no-underline"
           >
             Book a diagnostic
           </a>
@@ -78,53 +78,53 @@ export function LeadCapture({ summary, fileCount }: LeadCaptureProps) {
   }
 
   return (
-    <div className="card p-6">
-      <h3 className="font-bold text-[var(--navy-heading)] mb-2">Keep this stack</h3>
-      <p className="text-sm text-[var(--muted-text)] mb-4">
-        Soft CTA only — generation was free. Email yourself a reminder, or talk to the team that builds these for real.
-      </p>
-
-      <form onSubmit={handleEmailStack} className="space-y-3">
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="your@email.com"
-          className="input text-sm"
-          required
-        />
-        {error && <p className="text-xs text-[var(--error)]">{error}</p>}
-        <button type="submit" className="w-full text-sm font-semibold py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-sm rounded-xl transition-all active:scale-95" disabled={submitting}>
-          {submitting ? 'Sending…' : 'Email this stack'}
-        </button>
-      </form>
-
-      <div className="mt-4 pt-4 border-t border-[var(--border-color)]">
-        <p className="text-xs text-[var(--muted-text)] mb-3">
-          Want the team that builds stacks like this for production?
-        </p>
-        <button
-          type="button"
-          className="w-full text-sm font-semibold py-2.5 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-700 hover:to-fuchsia-700 text-white shadow-sm rounded-xl transition-all active:scale-95"
-          disabled={submitting}
-          onClick={() => {
-            if (email.trim()) {
-              void submitLead('talk-to-team');
-            } else {
-              window.open(DIAGNOSTIC_URL, '_blank', 'noopener,noreferrer');
-            }
-          }}
-        >
-          Talk to Enlight Labs
-        </button>
-        <p className="text-[10px] text-[var(--muted-text)] mt-2 text-center">
-          Routes to our paid diagnostic — proof of how we build, not free SaaS.
+    <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white p-5 rounded-[20px] border border-slate-800 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 mt-6 select-none animate-fade-slide-up">
+      <div className="flex-1 min-w-0">
+        <h3 className="text-sm font-bold text-white tracking-tight flex items-center gap-1.5">
+          <span className="text-blue-500">⚡</span> Save this Blueprint
+        </h3>
+        <p className="text-[11px] text-slate-300 mt-1 max-w-md leading-relaxed">
+          Email yourself a reminder of these configurations, or connect with the Enlight Labs engineering team to deploy them for production.
         </p>
       </div>
 
-      <p className="text-xs text-[var(--muted-text)] mt-4">
-        Reviewable scaffold only. Review before you apply anything to a real account.
-      </p>
+      <div className="shrink-0 flex flex-col gap-2 w-full md:w-auto">
+        <form onSubmit={handleEmailStack} className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="your@email.com"
+            className="bg-slate-950/80 hover:bg-slate-950 focus:bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition-all w-full sm:w-44"
+            required
+          />
+          <button
+            type="submit"
+            disabled={submitting}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-all active:scale-95 shrink-0 cursor-pointer disabled:opacity-50"
+          >
+            {submitting ? 'Sending…' : 'Email stack'}
+          </button>
+        </form>
+        {error && <p className="text-[10px] text-red-400">{error}</p>}
+        
+        <div className="flex items-center justify-between md:justify-end gap-3 text-[10px] text-slate-400 pt-0.5">
+          <span>Scaffold preview only</span>
+          <button
+            type="button"
+            onClick={() => {
+              if (email.trim()) {
+                void submitLead('talk-to-team');
+              } else {
+                window.open(DIAGNOSTIC_URL, '_blank', 'noopener,noreferrer');
+              }
+            }}
+            className="font-bold text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+          >
+            Talk to Enlight Labs →
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

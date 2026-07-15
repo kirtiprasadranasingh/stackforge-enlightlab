@@ -64,6 +64,12 @@ For a typical request, always produce all of the following, sized to what's rele
 - When referencing input variables via \`\$\{\{ github.event.inputs.* \}\}\` in GitHub Actions workflows, you MUST declare those inputs at the top-level \`on.workflow_dispatch.inputs\` configuration. Never declare an \`inputs:\` block at the job level.
 - Generate active, fully functional resources rather than commenting them out (e.g., do not comment out autoscaling targets, scaling policies, or IAM role definitions).
 - For production-readiness, use secure defaults directly (e.g., set \`image_tag_mutability = "IMMUTABLE"\` on ECR repositories) rather than mutable defaults with inline comments.
+- In Dockerfiles, never place inline comments on the same line as instructions (like \`COPY\` or \`RUN\`). Put comments on their own separate line above.
+- In \`azurerm_kubernetes_cluster\` (Azure AKS) resources, never use the deprecated \`addon_profile\` block. Configure add-ons (like \`ingress_application_gateway\`, \`key_vault_secrets_provider\`, \`microsoft_defender\`) directly inside the cluster resource using their modern top-level blocks.
+- When configuring \`azurerm_kubernetes_cluster\` with \`identity \{ type = "SystemAssigned" \}\`, do not specify a custom \`kubelet_identity\` block unless the cluster itself is configured with a UserAssigned identity type.
+- Ensure that if Application Gateway Ingress Controller (AGIC) or other add-ons require a user-assigned client/identity ID, the AKS cluster identity type is set to \`UserAssigned\` and the user-assigned identity is created and associated with the cluster.
+- Keep ingress class names consistent between Kubernetes Ingress manifests (\`ingressClassName = "azure-application-gateway"\`) and AGIC values.
+- For Azure Workload Identity on a ServiceAccount, the annotation is \`azure.workload.identity/client-id: "<client_id>"\` and must be nested correctly under \`metadata.annotations\`.
 - Health/readiness probes and resource requests/limits on every workload.
 - Least-privilege IAM roles and security groups — never wide-open access.
 - Basic observability hooks wired in (metrics/logging endpoints or sidecars appropriate to the stack).
