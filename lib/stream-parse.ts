@@ -92,9 +92,44 @@ export function appendAndParse(state: ParseState, chunk: string): ParseResult {
     state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
   }
 
+  // Extract complete Markdown FILE blocks
+  const mdRegex = /#\s+([a-zA-Z0-9_\-\.\/]+)\r?\n```(\w*)\r?\n([\s\S]*?)\r?\n```/g;
+  let mdMatch: RegExpExecArray | null;
+  const mdToRemove: Array<{ start: number; end: number }> = [];
+
+  while ((mdMatch = mdRegex.exec(state.buffer)) !== null) {
+    const startIdx = mdMatch.index;
+    const path = mdMatch[1].trim();
+    const language = mdMatch[2].trim() || getLanguageFromPath(path);
+    const content = mdMatch[3];
+
+    if (
+      validateFilePath(path) &&
+      validateFileSize(content) &&
+      !state.emittedPaths.has(path)
+    ) {
+      state.emittedPaths.add(path);
+      files.push({ path, language, content });
+    }
+
+    mdToRemove.push({ start: startIdx, end: mdMatch.index + mdMatch[0].length });
+  }
+
+  for (let i = mdToRemove.length - 1; i >= 0; i--) {
+    const { start, end } = mdToRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+
   const summaryMatch = state.buffer.match(SUMMARY_RE);
   if (summaryMatch) {
     summary = summaryMatch[1].trim();
+  } else {
+    if (!state.buffer.includes('<<<')) {
+      const clean = state.buffer.replace(/```[a-zA-Z]*\r?\n[\s\S]*?\r?\n```/g, '').trim();
+      if (clean) {
+        summary = clean;
+      }
+    }
   }
 
   const warningsMatch = state.buffer.match(WARNINGS_RE);

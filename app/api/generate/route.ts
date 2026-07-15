@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
           controller.enqueue(
             sse({
               type: 'summary',
-              summary: "I can't do that. I am a code generator, I can only generate the code and infrastructure blueprints for Oracle Cloud OKE, AWS EKS/ECS, GCP GKE/Cloud Run, Azure AKS, Dockerfiles, Helm, and CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins).",
+              summary: "I generate infrastructure code from a description of the stack you want — things like \"a Node API on EKS with autoscaling and a staging environment.\" I can't help with anything outside that.",
             })
           );
           controller.enqueue(
