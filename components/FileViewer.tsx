@@ -89,7 +89,6 @@ function RenderTreeNode({
   const isFolderOpen = isOpen || searchQuery.trim() !== '';
 
   const active = node.path === selectedPath;
-  const indent = level * 10;
 
   if (node.type === 'folder') {
     return (
@@ -97,11 +96,10 @@ function RenderTreeNode({
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          style={{ paddingLeft: `${indent + 8}px` }}
-          className="w-full flex items-center gap-1.5 py-1 text-xs font-semibold text-gray-600 hover:bg-slate-100/60 rounded-md text-left select-none cursor-pointer transition-all duration-150"
+          className="w-full flex items-center gap-1.5 py-1 px-1.5 text-xs font-semibold text-gray-600 hover:bg-slate-100/60 rounded-md text-left select-none cursor-pointer transition-all duration-150"
         >
           <svg
-            className={`w-3 h-3 text-gray-455 transition-transform shrink-0 ${isFolderOpen ? 'rotate-90' : ''}`}
+            className={`w-3 h-3 text-gray-450 transition-transform shrink-0 ${isFolderOpen ? 'rotate-90' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -115,7 +113,7 @@ function RenderTreeNode({
           <span className="truncate text-gray-700">{node.name}</span>
         </button>
         {isFolderOpen && (
-          <div className="space-y-0.5 mt-0.5">
+          <div className="space-y-0.5 mt-0.5 ml-[11px] pl-3.5 border-l border-slate-200/80">
             {node.children.map((child) => (
               <RenderTreeNode
                 key={child.path}
@@ -136,13 +134,13 @@ function RenderTreeNode({
     <button
       type="button"
       onClick={() => onSelect(node.path)}
-      style={{ paddingLeft: `${indent + 12}px` }}
-      className={`w-full flex items-center gap-2 py-1.5 text-xs font-mono rounded-md truncate transition-all cursor-pointer border border-transparent ${
+      className={`w-full flex items-center gap-2 py-1.5 px-1.5 text-xs font-mono rounded-md truncate transition-all cursor-pointer border border-transparent ${
         active
           ? 'bg-indigo-50/75 text-indigo-700 font-bold border-l-indigo-500'
           : 'text-gray-650 hover:bg-slate-150 hover:text-gray-900'
       }`}
     >
+      <span className="w-3 shrink-0" />
       {getFileIcon(node.path)}
       <span className="truncate">{node.name}</span>
     </button>
