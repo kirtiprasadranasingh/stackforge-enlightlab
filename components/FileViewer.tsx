@@ -142,7 +142,7 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
   if (files.length === 0) return null;
 
   return (
-    <div className="flex flex-col md:flex-row w-full min-h-[500px] max-h-[72vh] border border-gray-200 shadow-sm rounded-xl overflow-hidden bg-white select-none">
+    <div className="flex flex-col md:flex-row w-full flex-1 min-h-0 border border-gray-200 shadow-sm rounded-xl overflow-hidden bg-white select-none">
       {/* File Tree Explorer (Left Sidebar) */}
       <aside className="w-full md:w-60 md:shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-white flex flex-col justify-between max-h-[220px] md:max-h-none overflow-hidden">
         

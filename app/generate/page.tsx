@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import type {
   Presets,
@@ -56,6 +56,11 @@ export default function GeneratePage() {
   const [isDragging, setIsDragging] = useState(false);
   const [promptVal, setPromptVal] = useState('');
   const [showDeployModal, setShowDeployModal] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState('us-east-1');
+  const [selectedCidr, setSelectedCidr] = useState('10.0.0.0/16');
+  const [selectedSecrets, setSelectedSecrets] = useState('placeholders');
+  const [selectedProbes, setSelectedProbes] = useState('enabled');
+
 
   useEffect(() => {
     if (!isDragging) return;
@@ -105,6 +110,10 @@ export default function GeneratePage() {
   const pickCloud = (cloud: CloudProvider) => {
     const first = (ORCHESTRATOR_OPTIONS[cloud]?.[0]?.value || 'eks') as Orchestrator;
     setPresets((p) => ({ ...p, cloud, orchestrator: first }));
+    if (cloud === 'oracle') setSelectedRegion('ap-mumbai-1');
+    else if (cloud === 'gcp') setSelectedRegion('us-central1');
+    else if (cloud === 'azure') setSelectedRegion('eastus');
+    else setSelectedRegion('us-east-1');
     setStep(2);
   };
 
@@ -318,27 +327,7 @@ export default function GeneratePage() {
     setStatusMessage('');
     setIsGenerating(false);
   };
-  const mockAssumptions = useMemo(() => {
-    return [
-      presets.cloud === 'oracle'
-        ? 'OCI Region: ap-mumbai-1'
-        : presets.cloud === 'aws'
-        ? 'AWS Region: us-east-1'
-        : presets.cloud === 'gcp'
-        ? 'GCP Region: us-central1'
-        : 'Azure Region: eastus',
-      'VPC / VCN CIDR: 10.0.0.0/16',
-      presets.orchestrator === 'eks' ||
-      presets.orchestrator === 'gke' ||
-      presets.orchestrator === 'aks' ||
-      presets.orchestrator === 'oke'
-        ? 'K8s Cluster Node Pools: Active'
-        : 'Serverless Container Scaling',
-      'Secrets: Environment placeholders',
-      'Health Probes: Enabled',
-      'Resource Requests/Limits: Hard bounds applied',
-    ];
-  }, [presets]);
+
 
   const handleCopyAllText = useCallback(async () => {
     const blob = files
@@ -591,24 +580,81 @@ export default function GeneratePage() {
               />
             </div>
 
-            {/* Key Assumptions Card */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+            {/* Key Assumptions Card (Interactive Options) */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm select-none">
               <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-2.5">Key Assumptions</h4>
-              <div className="space-y-2">
-                {mockAssumptions.map((ass, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[11px] text-gray-600 leading-tight">
-                    <svg className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                    </svg>
-                    <span>{ass}</span>
-                  </div>
-                ))}
+              <div className="space-y-3">
+                {/* Region Option */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9px] font-bold text-gray-400 uppercase">Region</label>
+                  <select
+                    value={selectedRegion}
+                    onChange={(e) => setSelectedRegion(e.target.value)}
+                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                  >
+                    <option value="us-east-1">AWS: us-east-1 (N. Virginia)</option>
+                    <option value="us-west-2">AWS: us-west-2 (Oregon)</option>
+                    <option value="ap-mumbai-1">OCI: ap-mumbai-1 (Mumbai)</option>
+                    <option value="us-central1">GCP: us-central1 (Iowa)</option>
+                    <option value="eastus">Azure: eastus (East US)</option>
+                  </select>
+                </div>
+
+                {/* CIDR Option */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9px] font-bold text-gray-400 uppercase">VPC / VCN CIDR</label>
+                  <select
+                    value={selectedCidr}
+                    onChange={(e) => setSelectedCidr(e.target.value)}
+                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                  >
+                    <option value="10.0.0.0/16">10.0.0.0/16 (Default)</option>
+                    <option value="172.16.0.0/16">172.16.0.0/16</option>
+                    <option value="192.168.0.0/16">192.168.0.0/16</option>
+                  </select>
+                </div>
+
+                {/* Secrets Option */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9px] font-bold text-gray-400 uppercase">Secrets Handling</label>
+                  <select
+                    value={selectedSecrets}
+                    onChange={(e) => setSelectedSecrets(e.target.value)}
+                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                  >
+                    <option value="placeholders">Environment placeholders</option>
+                    <option value="vault">HashiCorp Vault</option>
+                    <option value="native">Native Secrets Manager</option>
+                  </select>
+                </div>
+
+                {/* Probes Option */}
+                <div className="flex flex-col gap-1">
+                  <label className="text-[9px] font-bold text-gray-400 uppercase">Health Probes</label>
+                  <select
+                    value={selectedProbes}
+                    onChange={(e) => setSelectedProbes(e.target.value)}
+                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                  >
+                    <option value="enabled">Enabled (liveness + readiness)</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </div>
               </div>
+
               <button
                 type="button"
-                className="text-[10px] text-blue-600 hover:text-blue-700 font-bold mt-2.5 transition-colors cursor-pointer"
+                onClick={() => {
+                  const targetPrompt = promptVal.trim();
+                  if (targetPrompt) {
+                    const extraInstructions = `\n\n[Assumptions configuration: Region=${selectedRegion}, CIDR=${selectedCidr}, Secrets=${selectedSecrets}, Probes=${selectedProbes}]`;
+                    void sendMessage(targetPrompt + extraInstructions);
+                  }
+                }}
+                disabled={isGenerating}
+                className="w-full mt-3.5 text-xs font-bold py-2.5 bg-slate-100 hover:bg-slate-200 text-gray-700 rounded-xl transition-all cursor-pointer active:scale-95 disabled:opacity-50"
               >
-                View all
+                Apply & Regenerate
               </button>
             </div>
 
