@@ -6,6 +6,7 @@ import { codeToHtml } from 'shiki';
 interface CodeBlockProps {
   code: string;
   language: string;
+  theme?: 'dark' | 'light';
 }
 
 const LANG_MAP: Record<string, string> = {
@@ -27,7 +28,7 @@ const LANG_MAP: Record<string, string> = {
   plaintext: 'text',
 };
 
-export function CodeBlock({ code, language }: CodeBlockProps) {
+export function CodeBlock({ code, language, theme = 'dark' }: CodeBlockProps) {
   const [html, setHtml] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +37,7 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
 
     codeToHtml(code, {
       lang,
-      theme: 'github-dark',
+      theme: theme === 'light' ? 'github-light' : 'github-dark',
     })
       .then((result) => {
         if (!cancelled) setHtml(result);
@@ -48,12 +49,12 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
     return () => {
       cancelled = true;
     };
-  }, [code, language]);
+  }, [code, language, theme]);
 
   if (!html) {
     const lines = code.split('\n');
     return (
-      <pre className="p-4 m-0 overflow-x-auto text-sm leading-relaxed whitespace-pre font-mono">
+      <pre className={`p-4 m-0 overflow-x-auto text-sm leading-relaxed whitespace-pre font-mono ${theme === 'light' ? 'bg-white text-gray-850' : 'bg-slate-950 text-slate-100'}`}>
         <code className="block min-w-full">
           {lines.map((line, idx) => (
             <span key={idx} className="line block">

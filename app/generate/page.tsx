@@ -64,6 +64,41 @@ export default function GeneratePage() {
   const [selectedSecrets, setSelectedSecrets] = useState('placeholders');
   const [selectedProbes, setSelectedProbes] = useState('enabled');
 
+  const getDeploymentCommands = () => {
+    const hasHelm = files.some(f => f.path.toLowerCase().includes('helm') || f.path.toLowerCase().endsWith('chart.yaml') || f.path.toLowerCase().endsWith('chart.yml'));
+    const hasTerraform = files.some(f => f.path.endsWith('.tf') || f.path.toLowerCase().includes('terraform'));
+
+    if (hasHelm && hasTerraform) {
+      return `# Step 1: Provision infrastructure with Terraform
+cd terraform/
+terraform init
+terraform apply -auto-approve
+
+# Step 2: Deploy Helm charts to cluster
+cd ../helm/
+helm dependency update
+helm upgrade --install stackforge-app ./ -n stackforge --create-namespace`;
+    }
+
+    if (hasHelm) {
+      return `# Deploy Helm chart blueprint
+cd helm/
+helm dependency update
+helm upgrade --install stackforge-app ./ -n stackforge --create-namespace`;
+    }
+
+    if (hasTerraform) {
+      return `# Provision Cloud Infrastructure
+cd terraform/
+terraform init
+terraform plan -out=tfplan
+terraform apply tfplan`;
+    }
+
+    return `# Deploy generated workspace files
+# Read the README.md or execution scripts inside the ZIP archive.`;
+  };
+
 
   useEffect(() => {
     if (!isDragging) return;
@@ -560,69 +595,104 @@ export default function GeneratePage() {
       {hasGeneratedFiles ? (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-[#f8fafc]">
           {/* LEFT — AI Assistant Sidebar */}
-          <aside className={`${isSidebarOpen ? 'w-80 opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300 shrink-0 flex flex-col gap-4 min-h-0 overflow-y-auto select-none no-scrollbar`}>
-            {/* AI Assistant Card */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-bold text-gray-900 tracking-tight uppercase">AI Assistant</h3>
-                <span className="text-[9px] font-extrabold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full uppercase tracking-wider border border-blue-100">
-                  BETA
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-500 mt-1">
-                Describe your infrastructure needs in natural language.
-              </p>
-              
-              <button
-                type="button"
-                onClick={() => {
-                  if (promptVal.trim()) {
-                    void sendMessage(promptVal);
-                  }
-                }}
-                disabled={isGenerating}
-                className="w-full mt-3 text-xs font-bold py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl shadow-sm transition-all duration-200 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
-              >
-                <span>⚡ Generate infrastructure</span>
-              </button>
-            </div>
-
-            {/* Your Prompt Card */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider">Your Prompt</h4>
+          <aside className={`${isSidebarOpen ? 'w-[360px] opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300 shrink-0 flex flex-col gap-3 min-h-0 select-none`}>
+            {/* Interactive Chat Log */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex-1 flex flex-col min-h-0">
+              <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-bold text-gray-900 tracking-tight uppercase">AI Assistant Chat</h3>
+                  <span className="text-[9px] font-extrabold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full uppercase tracking-wider border border-blue-100">
+                    BETA
+                  </span>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
+                    setMessages([
+                      {
+                        id: 'welcome',
+                        role: 'assistant',
+                        content: "Hey! Describe the cloud infrastructure or application setup you want to build (e.g., 'Deploy a Node.js API with PostgreSQL to AWS EKS'), and I will turn it into a production-ready cloud stack.",
+                      }
+                    ]);
                     setPromptVal('');
                     handleNew();
                   }}
                   className="text-[10px] text-blue-600 hover:text-blue-700 font-bold transition-colors cursor-pointer"
                 >
-                  Clear
+                  Reset Chat
                 </button>
               </div>
-              <textarea
-                value={promptVal}
-                onChange={(e) => setPromptVal(e.target.value)}
-                disabled={isGenerating}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
+
+              {/* Chat Messages Feed */}
+              <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1 text-xs select-text">
+                {messages.map((m, idx) => (
+                  <div
+                    key={m.id || idx}
+                    className={`flex gap-2 items-start ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
+                  >
+                    {m.role !== 'user' && (
+                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-sm border border-blue-500/10 select-none">
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
+                        </svg>
+                      </div>
+                    )}
+                    <div className="flex-1 flex flex-col max-w-[85%]">
+                      <div
+                        className={`rounded-xl px-3 py-2 border leading-relaxed shadow-sm ${
+                          m.role === 'user'
+                            ? 'bg-[#0066FF] border-[#0066FF] text-white rounded-tr-none'
+                            : m.role === 'system'
+                              ? 'bg-amber-50 text-[var(--muted-text)] border-amber-100 font-mono text-[10px]'
+                              : 'bg-slate-50 border-gray-150 text-gray-800 rounded-tl-none'
+                        }`}
+                      >
+                        <FormattedMessage content={m.content} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Input section at bottom of chat card */}
+              <div className="border-t border-gray-100 pt-3 flex flex-col gap-2 shrink-0">
+                <textarea
+                  value={promptVal}
+                  onChange={(e) => setPromptVal(e.target.value)}
+                  disabled={isGenerating}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (promptVal.trim()) {
+                        void sendMessage(promptVal);
+                        setPromptVal('');
+                      }
+                    }
+                  }}
+                  placeholder="Ask for changes (e.g. 'Add dev/prod folders', 'Secure network NSGs')..."
+                  className="w-full h-20 bg-slate-50 border border-gray-205 focus:border-indigo-500 focus:bg-white rounded-xl p-2.5 text-xs text-gray-800 focus:outline-none resize-none transition-all leading-relaxed focus:ring-1 focus:ring-indigo-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
                     if (promptVal.trim()) {
                       void sendMessage(promptVal);
+                      setPromptVal('');
                     }
-                  }
-                }}
-                placeholder="yaml / apiVersion: v2 / name: go-microservice / description: A Helm chart..."
-                className="w-full h-44 bg-slate-50 border border-gray-200 focus:border-indigo-500 focus:bg-white rounded-xl p-3 text-xs text-gray-800 focus:outline-none resize-none transition-all leading-relaxed font-mono focus:ring-1 focus:ring-indigo-100"
-              />
+                  }}
+                  disabled={isGenerating || !promptVal.trim()}
+                  className="w-full text-xs font-bold py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl shadow-sm transition-all duration-200 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <span>⚡ Send request</span>
+                </button>
+              </div>
             </div>
 
             {/* Actions Grid */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-              <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-2.5">Actions</h4>
-              <div className="grid grid-cols-2 gap-2">
+            <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm shrink-0">
+              <h4 className="text-[9px] font-bold text-gray-800 uppercase tracking-wider mb-2">Quick Actions</h4>
+              <div className="grid grid-cols-2 gap-1.5">
                 {[
                   { text: 'Add HPA autoscaling', icon: '📈' },
                   { text: 'Add dev/prod envs', icon: '📁' },
@@ -633,20 +703,19 @@ export default function GeneratePage() {
                     key={action.text}
                     type="button"
                     onClick={() => {
-                      setPromptVal(action.text);
                       void sendMessage(action.text);
                     }}
-                    className="text-[10px] bg-slate-50 hover:bg-indigo-50/60 hover:text-indigo-600 text-gray-600 hover:border-indigo-200 border border-gray-200 p-2.5 rounded-xl text-left transition-all duration-200 font-semibold shadow-sm cursor-pointer active:scale-95 leading-snug flex flex-col gap-1.5"
+                    className="text-[10px] bg-slate-50 hover:bg-indigo-50/60 hover:text-indigo-600 text-gray-600 hover:border-indigo-200 border border-gray-200 p-2 rounded-xl text-left transition-all duration-200 font-semibold shadow-xs cursor-pointer active:scale-95 leading-tight flex items-center gap-1.5"
                   >
                     <span>{action.icon}</span>
-                    <span>{action.text}</span>
+                    <span>{action.text.replace('Add ', '').replace('Setup ', '')}</span>
                   </button>
                 ))}
               </div>
             </div>
 
             {/* Powered by */}
-            <p className="text-[9px] text-gray-400 font-semibold tracking-wide text-center pt-1">
+            <p className="text-[9px] text-gray-400 font-semibold tracking-wide text-center py-1 shrink-0">
               🚀 Powered by Enlight Lab AI
             </p>
           </aside>
@@ -937,7 +1006,7 @@ export default function GeneratePage() {
           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-900 uppercase flex items-center gap-1.5">
-                <span>📋</span> Preview stackforge Deployment Plan
+                <span>📋</span> Preview StackForge Deployment Plan
               </h3>
               <button
                 onClick={() => setShowDeployModal(false)}
@@ -948,31 +1017,16 @@ export default function GeneratePage() {
             </div>
             
             <div className="text-xs text-gray-600 space-y-3 leading-relaxed">
-              <p>
-                StackForge is an infrastructure generator, not a hosting provider. You can deploy this scaffold by copying/downloading the workspace and running CLI commands.
+              <p className="font-semibold text-gray-850">
+                Execute these steps in your command-line interface to provision and deploy this generated blueprint in your cloud environment:
               </p>
               
-              <div className="bg-slate-950 text-slate-100 p-3 rounded-xl font-mono text-[11px] leading-relaxed relative">
-                <p className="text-slate-500 mb-1"># Setup commands</p>
-                {presets.orchestrator === 'eks' || presets.orchestrator === 'gke' || presets.orchestrator === 'aks' || presets.orchestrator === 'oke' ? (
-                  <>
-                    <p>cd k8s/</p>
-                    <p>kubectl apply -f .</p>
-                  </>
-                ) : (
-                  <>
-                    <p>cd terraform/</p>
-                    <p>terraform init</p>
-                    <p>terraform apply -auto-approve</p>
-                  </>
-                )}
+              <div className="bg-slate-950 text-slate-100 p-4 rounded-xl font-mono text-[11px] leading-relaxed relative overflow-x-auto max-h-[300px] border border-slate-800">
+                <pre className="whitespace-pre">{getDeploymentCommands()}</pre>
                 
                 <button
                   onClick={() => {
-                    const text = presets.orchestrator === 'eks' || presets.orchestrator === 'gke' || presets.orchestrator === 'aks' || presets.orchestrator === 'oke'
-                      ? 'cd k8s/\nkubectl apply -f .'
-                      : 'cd terraform/\nterraform init\nterraform apply -auto-approve';
-                    void copyToClipboard(text);
+                    void copyToClipboard(getDeploymentCommands());
                   }}
                   className="absolute top-2.5 right-2.5 text-[9px] font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded transition-all cursor-pointer"
                 >

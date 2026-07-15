@@ -200,7 +200,7 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80]" onClick={() => setIsFullscreen(false)} />
       )}
       <div className={`flex flex-col md:flex-row w-full flex-1 min-h-0 border border-gray-200 shadow-sm rounded-xl overflow-hidden bg-white select-none transition-all duration-300 ${isFullscreen ? 'fixed inset-10 z-[90] shadow-2xl border border-indigo-300' : ''}`}>
-      <aside className="w-full md:w-60 md:shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-[#f8fafc] flex flex-col justify-between max-h-[260px] md:max-h-none overflow-hidden select-none">
+      <aside className={`w-full md:w-60 md:shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-[#f8fafc] flex flex-col justify-between max-h-[260px] md:max-h-none overflow-hidden select-none ${isFullscreen ? 'hidden' : ''}`}>
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <div className="p-3 border-b border-gray-200/80 bg-[#f8fafc]">
             <div className="relative">
@@ -269,28 +269,34 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
               );
             })}
           </div>
-          <div className="flex items-center gap-2 px-4 text-gray-400 shrink-0">
+          <div className="flex items-center gap-2.5 px-4 shrink-0">
             <button
               type="button"
               onClick={() => setEditorTheme(editorTheme === 'dark' ? 'light' : 'dark')}
-              className={`hover:text-white cursor-pointer transition-colors p-1 rounded text-xs`}
+              className={`cursor-pointer transition-colors p-1 px-2.5 rounded text-[11px] font-bold flex items-center gap-1.5 ${
+                editorTheme === 'dark' ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-200'
+              }`}
               title="Toggle theme"
             >
-              {editorTheme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+              <span>{editorTheme === 'dark' ? '☀️' : '🌙'}</span>
+              <span>{editorTheme === 'dark' ? 'Light' : 'Dark'}</span>
             </button>
             <button
               type="button"
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className={`hover:text-white cursor-pointer transition-colors text-xs p-1 rounded`}
+              className={`cursor-pointer transition-colors p-1 px-2.5 rounded text-[11px] font-bold flex items-center gap-1.5 ${
+                editorTheme === 'dark' ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-200'
+              }`}
               title={isFullscreen ? "Collapse panel" : "Expand panel"}
             >
-              {isFullscreen ? '⛶ Collapse' : '⛶ Fullscreen'}
+              <span>⛶</span>
+              <span>{isFullscreen ? 'Collapse' : 'Fullscreen'}</span>
             </button>
           </div>
         </div>
         <div className={`flex-1 overflow-auto min-w-0 code-highlight relative transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-slate-950' : 'bg-white'}`}>
           {selected && (
-            <CodeBlock code={selected.content} language={selected.language} />
+            <CodeBlock code={selected.content} language={selected.language} theme={editorTheme} />
           )}
         </div>
         <div className={`h-7 border-t text-[10px] px-3.5 flex items-center justify-between shrink-0 select-none font-mono transition-colors duration-200 ${editorTheme === 'dark' ? 'border-gray-800 bg-gray-900 text-gray-400' : 'border-gray-200 bg-slate-100 text-gray-500'}`}>
