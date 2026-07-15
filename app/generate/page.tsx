@@ -52,6 +52,35 @@ export default function GeneratePage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const [leftWidth, setLeftWidth] = useState(420);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(320, Math.min(800, e.clientX - 24));
+      setLeftWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging]);
+
   const abortController = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const filesRef = useRef<GeneratedFile[]>([]);
@@ -387,9 +416,6 @@ export default function GeneratePage() {
                   </span>
                 </div>
               </Link>
-              <span className="text-xs text-[var(--muted-text)] truncate hidden md:inline border-l border-gray-200 pl-3">
-                Infrastructure Workspace
-              </span>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {isGenerating && (
@@ -433,7 +459,10 @@ export default function GeneratePage() {
       {hasGeneratedFiles ? (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-gray-50 bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_800px_at_50%_150px,#eeeffc,transparent)] before:pointer-events-none">
           {/* LEFT — Chat card */}
-          <section className="w-full lg:w-[420px] shrink-0 bg-white border border-gray-150 rounded-[28px] shadow-md flex flex-col min-h-0 max-h-[40vh] lg:max-h-none relative z-10 overflow-hidden">
+          <section
+            style={{ width: typeof window !== 'undefined' && window.innerWidth >= 1024 ? `${leftWidth}px` : undefined }}
+            className="w-full lg:w-auto shrink-0 bg-white border border-gray-150 rounded-[28px] shadow-md flex flex-col min-h-0 max-h-[40vh] lg:max-h-none relative z-10 overflow-hidden"
+          >
             <div className="px-4 py-3 border-b border-[var(--border-color)]">
               <p className="text-sm font-semibold text-[var(--navy-heading)]">Chat</p>
               <p className="text-xs text-[var(--muted-text)]">Ask for changes — files update on the right</p>
@@ -585,6 +614,23 @@ export default function GeneratePage() {
               </form>
             </div>
           </section>
+
+          {/* Draggable Divider Slider */}
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            className="hidden lg:flex w-2 hover:w-2.5 bg-transparent hover:bg-blue-500/20 active:bg-blue-600/30 transition-all cursor-col-resize h-full self-stretch z-30 select-none relative justify-center items-center group rounded-full shrink-0"
+            title="Drag to resize panels"
+          >
+            {/* Grab handle dot indicators */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-10 rounded-full bg-gray-200 group-hover:bg-blue-400 group-active:bg-blue-500 transition-colors flex flex-col justify-between py-1.5 shadow-sm border border-gray-300/40">
+              <span className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-white self-center"></span>
+              <span className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-white self-center"></span>
+              <span className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-white self-center"></span>
+            </div>
+          </div>
 
           {/* RIGHT — IDE / files card */}
           <section className="flex-1 min-w-0 bg-white border border-gray-150 rounded-[28px] shadow-md flex flex-col overflow-hidden relative z-10">
