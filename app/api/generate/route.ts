@@ -109,7 +109,8 @@ export async function POST(request: NextRequest) {
 
     const actionVerbs = ['deploy', 'provision', 'run', 'apply', 'execute', 'install', 'host', 'setup'];
     const isActionCommand = actionVerbs.some(verb => {
-      const regex = new RegExp(`(^|\\b)(please\\s+|can\\s+you\\s+)?${verb}\\b`, 'i');
+      // Only match if the sentence starts with the verb (optionally preceded by standard politeness/intent prefixes)
+      const regex = new RegExp(`^(please\\s+|can\\s+you\\s+|i\\s+want\\s+to\\s+|how\\s+to\\s+)?${verb}\\b`, 'i');
       return regex.test(lowerPrompt);
     });
 
@@ -126,20 +127,38 @@ export async function POST(request: NextRequest) {
       lowerPrompt.includes('scaffold') || 
       lowerPrompt.includes('code') ||
       lowerPrompt.includes('blueprint') ||
-      lowerPrompt.includes('helm chart') ||
-      lowerPrompt.includes('dockerfile');
+      lowerPrompt.includes('helm') ||
+      lowerPrompt.includes('dockerfile') ||
+      lowerPrompt.includes('api') ||
+      lowerPrompt.includes('service') ||
+      lowerPrompt.includes('app') ||
+      lowerPrompt.includes('application') ||
+      lowerPrompt.includes('microservice') ||
+      lowerPrompt.includes('workload') ||
+      lowerPrompt.includes('backend') ||
+      lowerPrompt.includes('frontend') ||
+      lowerPrompt.includes('database') ||
+      lowerPrompt.includes('postgres') ||
+      lowerPrompt.includes('redis') ||
+      lowerPrompt.includes('mysql');
 
     const hasCloudKeyword = 
       lowerPrompt.includes('aws') || 
       lowerPrompt.includes('gcp') || 
-      lowerPrompt.includes('google cloud') || 
+      lowerPrompt.includes('google') || 
       lowerPrompt.includes('azure') || 
       lowerPrompt.includes('oracle') || 
       lowerPrompt.includes('oci') ||
       lowerPrompt.includes('oke') ||
       lowerPrompt.includes('eks') ||
       lowerPrompt.includes('gke') ||
-      lowerPrompt.includes('aks');
+      lowerPrompt.includes('aks') ||
+      lowerPrompt.includes('cloud run') ||
+      lowerPrompt.includes('containerapp') ||
+      lowerPrompt.includes('container app') ||
+      lowerPrompt.includes('artifact registry') ||
+      lowerPrompt.includes('secret manager') ||
+      lowerPrompt.includes('ecs');
 
     const shouldRefuse = isExecutionCommand || (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword);
 
