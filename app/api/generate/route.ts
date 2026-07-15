@@ -57,6 +57,128 @@ export async function POST(request: NextRequest) {
     const { prompt: rawPrompt, presets = { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' }, history = [], existingFiles = [] } =
       validation.data;
     const prompt = sanitizeInput(rawPrompt);
+    const lowerPrompt = prompt.toLowerCase().trim();
+
+    // 1. Intercept Greetings
+    const greetings = ['hi', 'hello', 'hey', 'greetings', 'yo', 'good morning', 'good afternoon', 'good evening'];
+    const isGreeting = greetings.includes(lowerPrompt) || (greetings.some(g => lowerPrompt.includes(g)) && lowerPrompt.split(/\s+/).length <= 3);
+
+    if (isGreeting) {
+      const stream = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(
+            sse({
+              type: 'status',
+              message: 'Greeting user...',
+            })
+          );
+          await new Promise(r => setTimeout(r, 400));
+          controller.enqueue(
+            sse({
+              type: 'summary',
+              summary: "Hey! I am StackForge, your AI Cloud Blueprint Generator from Enlight Labs. I can help you design and generate Terraform configurations, Dockerfiles, Helm charts, and CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins) for OCI, AWS, GCP, and Azure.\n\nDescribe the cloud infrastructure or application deployment you want to generate code for, and I'll build it!",
+            })
+          );
+          controller.enqueue(
+            sse({
+              type: 'warnings',
+              warnings: [],
+            })
+          );
+          controller.enqueue(sse({ type: 'done' }));
+          controller.close();
+        }
+      });
+      return new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          ...cors,
+        },
+      });
+    }
+
+    // 2. Intercept Out-of-Scope Execution Commands
+    const executionCommands = [
+      'terraform apply', 'terraform destroy', 'terraform init', 'docker run', 'docker build',
+      'kubectl apply', 'kubectl create', 'kubectl delete', 'helm install', 'helm upgrade',
+      'git push', 'git commit', 'npm install', 'npm run'
+    ];
+    const isExecutionCommand = executionCommands.some(cmd => lowerPrompt.includes(cmd));
+
+    const actionVerbs = ['deploy', 'provision', 'run', 'apply', 'execute', 'install', 'host', 'setup'];
+    const isActionCommand = actionVerbs.some(verb => {
+      const regex = new RegExp(`(^|\\b)(please\\s+|can\\s+you\\s+)?${verb}\\b`, 'i');
+      return regex.test(lowerPrompt);
+    });
+
+    const isInformationalOrBlueprint = 
+      lowerPrompt.includes('pipeline') || 
+      lowerPrompt.includes('yaml') || 
+      lowerPrompt.includes('manifest') || 
+      lowerPrompt.includes('config') || 
+      lowerPrompt.includes('how to') || 
+      lowerPrompt.includes('how do i') || 
+      lowerPrompt.includes('write') || 
+      lowerPrompt.includes('generate') || 
+      lowerPrompt.includes('create') || 
+      lowerPrompt.includes('scaffold') || 
+      lowerPrompt.includes('code') ||
+      lowerPrompt.includes('blueprint') ||
+      lowerPrompt.includes('helm chart') ||
+      lowerPrompt.includes('dockerfile');
+
+    const hasCloudKeyword = 
+      lowerPrompt.includes('aws') || 
+      lowerPrompt.includes('gcp') || 
+      lowerPrompt.includes('google cloud') || 
+      lowerPrompt.includes('azure') || 
+      lowerPrompt.includes('oracle') || 
+      lowerPrompt.includes('oci') ||
+      lowerPrompt.includes('oke') ||
+      lowerPrompt.includes('eks') ||
+      lowerPrompt.includes('gke') ||
+      lowerPrompt.includes('aks');
+
+    const shouldRefuse = isExecutionCommand || (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword);
+
+    if (shouldRefuse) {
+      const stream = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(
+            sse({
+              type: 'status',
+              message: 'Checking scope...',
+            })
+          );
+          await new Promise(r => setTimeout(r, 450));
+          controller.enqueue(
+            sse({
+              type: 'summary',
+              summary: "I can't do that. I am a code generator, I can only generate the code and infrastructure blueprints for Oracle Cloud OKE, AWS EKS/ECS, GCP GKE/Cloud Run, Azure AKS, Dockerfiles, Helm, and CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins).",
+            })
+          );
+          controller.enqueue(
+            sse({
+              type: 'warnings',
+              warnings: [],
+            })
+          );
+          controller.enqueue(sse({ type: 'done' }));
+          controller.close();
+        }
+      });
+      return new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          ...cors,
+        },
+      });
+    }
+
     const isFollowUp = existingFiles.length > 0;
 
     const clientIP = getClientIP(request);
