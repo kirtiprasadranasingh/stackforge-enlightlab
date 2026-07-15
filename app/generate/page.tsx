@@ -55,7 +55,6 @@ export default function GeneratePage() {
   const [leftWidth, setLeftWidth] = useState(420);
   const [isDragging, setIsDragging] = useState(false);
   const [promptVal, setPromptVal] = useState('');
-  const [showDeployModal, setShowDeployModal] = useState(false);
   const [showAssumptionsModal, setShowAssumptionsModal] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState('Today, 10:42 AM');
@@ -63,41 +62,6 @@ export default function GeneratePage() {
   const [selectedCidr, setSelectedCidr] = useState('10.0.0.0/16');
   const [selectedSecrets, setSelectedSecrets] = useState('placeholders');
   const [selectedProbes, setSelectedProbes] = useState('enabled');
-
-  const getDeploymentCommands = () => {
-    const hasHelm = files.some(f => f.path.toLowerCase().includes('helm') || f.path.toLowerCase().endsWith('chart.yaml') || f.path.toLowerCase().endsWith('chart.yml'));
-    const hasTerraform = files.some(f => f.path.endsWith('.tf') || f.path.toLowerCase().includes('terraform'));
-
-    if (hasHelm && hasTerraform) {
-      return `# Step 1: Provision infrastructure with Terraform
-cd terraform/
-terraform init
-terraform apply -auto-approve
-
-# Step 2: Deploy Helm charts to cluster
-cd ../helm/
-helm dependency update
-helm upgrade --install stackforge-app ./ -n stackforge --create-namespace`;
-    }
-
-    if (hasHelm) {
-      return `# Deploy Helm chart blueprint
-cd helm/
-helm dependency update
-helm upgrade --install stackforge-app ./ -n stackforge --create-namespace`;
-    }
-
-    if (hasTerraform) {
-      return `# Provision Cloud Infrastructure
-cd terraform/
-terraform init
-terraform plan -out=tfplan
-terraform apply tfplan`;
-    }
-
-    return `# Deploy generated workspace files
-# Read the README.md or execution scripts inside the ZIP archive.`;
-  };
 
 
   useEffect(() => {
@@ -792,16 +756,6 @@ terraform apply tfplan`;
               <div className="flex gap-2.5 shrink-0 w-full lg:w-auto justify-end">
                 <button
                   type="button"
-                  onClick={() => setShowDeployModal(true)}
-                  className="text-xs font-bold px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-[#4F46E5] border border-indigo-150 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z" />
-                  </svg>
-                  Preview Plan
-                </button>
-                <button
-                  type="button"
                   onClick={handleDownloadZip}
                   className="text-xs font-bold px-4 py-2.5 bg-white hover:bg-slate-50 text-[#4F46E5] hover:text-[#4338CA] border border-gray-250 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
                 >
@@ -1002,55 +956,7 @@ terraform apply tfplan`;
           </div>
         </div>
       )}
-      {showDeployModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 select-none animate-fade-slide-up">
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-gray-900 uppercase flex items-center gap-1.5">
-                <span>📋</span> Preview StackForge Deployment Plan
-              </h3>
-              <button
-                onClick={() => setShowDeployModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors text-lg font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-            
-            <div className="text-xs text-gray-600 space-y-3 leading-relaxed">
-              <p className="font-semibold text-gray-850">
-                Execute these steps in your command-line interface to provision and deploy this generated blueprint in your cloud environment:
-              </p>
-              
-              <div className="bg-slate-950 text-slate-100 p-4 rounded-xl font-mono text-[11px] leading-relaxed relative overflow-x-auto max-h-[300px] border border-slate-800">
-                <pre className="whitespace-pre">{getDeploymentCommands()}</pre>
-                
-                <button
-                  onClick={() => {
-                    void copyToClipboard(getDeploymentCommands());
-                  }}
-                  className="absolute top-2.5 right-2.5 text-[9px] font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded transition-all cursor-pointer"
-                >
-                  Copy
-                </button>
-              </div>
-              
-              <p className="bg-amber-50 border border-amber-100 rounded-lg p-2.5 text-[10px] text-amber-800">
-                ⚠️ Ensure you have configured the appropriate credentials (e.g. AWS CLI, OCI configuration, Azure Login) in your shell environment before executing these commands.
-              </p>
-            </div>
-            
-            <div className="flex justify-end gap-2 mt-2">
-              <button
-                onClick={() => setShowDeployModal(false)}
-                className="text-xs font-bold px-4 py-2 bg-slate-100 hover:bg-slate-200 text-gray-700 rounded-xl transition-all active:scale-95 cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
       {showAssumptionsModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 select-none animate-fade-slide-up">
           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl max-w-md w-full flex flex-col gap-4">
