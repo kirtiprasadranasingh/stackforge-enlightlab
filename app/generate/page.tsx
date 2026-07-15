@@ -769,16 +769,11 @@ export default function GeneratePage() {
 
                   <div className="flex gap-2 w-full sm:w-auto justify-end shrink-0">
                     <button
-                      onClick={handleCopyAllText}
-                      className="text-xs font-bold px-4 py-2.5 text-[#4F46E5] hover:bg-indigo-50 border border-transparent rounded-xl transition-colors cursor-pointer"
-                    >
-                      Preview Plan
-                    </button>
-                    <button
+                      type="button"
                       onClick={() => setShowDeployModal(true)}
-                      className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all duration-200 active:scale-95 cursor-pointer flex items-center gap-1.5"
+                      className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-md shadow-indigo-200/50 transition-all duration-200 active:scale-95 cursor-pointer flex items-center gap-1.5"
                     >
-                      🚀 Deploy Infrastructure
+                      📋 Preview Plan
                     </button>
                   </div>
                 </div>
@@ -960,7 +955,7 @@ export default function GeneratePage() {
           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-gray-900 uppercase flex items-center gap-1.5">
-                <span>🚀</span> Deploying stackforge Blueprint
+                <span>📋</span> Preview stackforge Deployment Plan
               </h3>
               <button
                 onClick={() => setShowDeployModal(false)}
