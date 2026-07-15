@@ -678,7 +678,11 @@ export default function GeneratePage() {
                       ))}
                     </div>
                   )}
-                  <FileViewer files={files} isGenerating={isGenerating} />
+                  <FileViewer
+                    files={files}
+                    isGenerating={isGenerating}
+                    promptText={[...messages].reverse().find((m) => m.role === 'user')?.content || ''}
+                  />
                   {!isGenerating && files.length > 0 && (
                     <div className="w-full">
                       <LeadCapture summary={summary} fileCount={files.length} />

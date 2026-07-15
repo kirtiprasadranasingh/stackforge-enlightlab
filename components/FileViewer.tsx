@@ -8,6 +8,7 @@ import { copyToClipboard } from '@/lib/clipboard';
 interface FileViewerProps {
   files: { path: string; language: string; content: string; description?: string }[];
   isGenerating?: boolean;
+  promptText?: string;
 }
 
 function buildTree(paths: string[]): Map<string, string[]> {
@@ -87,7 +88,7 @@ function getFileIcon(path: string) {
   );
 }
 
-export function FileViewer({ files, isGenerating }: FileViewerProps) {
+export function FileViewer({ files, isGenerating, promptText }: FileViewerProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [copied, setCopied] = useState<'file' | 'all' | null>(null);
 
@@ -123,12 +124,25 @@ export function FileViewer({ files, isGenerating }: FileViewerProps) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'stackforge-scaffold.zip';
+    
+    // Generate dynamic filename from promptText
+    let filename = 'stackforge-scaffold';
+    if (promptText) {
+      const sanitized = promptText
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+      if (sanitized) {
+        filename = `stackforge-${sanitized.slice(0, 50)}`;
+      }
+    }
+    
+    a.download = `${filename}.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [files]);
+  }, [files, promptText]);
 
   if (files.length === 0) return null;
 

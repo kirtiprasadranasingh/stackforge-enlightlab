@@ -8,8 +8,15 @@ kind: Ingress
 metadata:
   name: stackforge
   namespace: stackforge
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - stackforge.144-24-100-85.nip.io
+      secretName: stackforge-tls
   rules:
     - host: stackforge.144-24-100-85.nip.io
       http:
