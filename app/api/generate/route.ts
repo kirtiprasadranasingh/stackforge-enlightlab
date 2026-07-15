@@ -222,7 +222,22 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const isFollowUp = existingFiles.length > 0;
+    const isNewRequest = (p: string): boolean => {
+      const lower = p.toLowerCase().trim();
+      if (lower.startsWith('a ') || lower.startsWith('an ') || lower.startsWith('new ') || lower.startsWith('create ') || lower.startsWith('generate ') || lower.startsWith('build ') || lower.startsWith('scaffold ')) {
+        return true;
+      }
+      if ((lower.includes('eks') || lower.includes('gke') || lower.includes('aks') || lower.includes('oke') || lower.includes('fargate') || lower.includes('ecs')) && 
+          (lower.includes('api') || lower.includes('service') || lower.includes('rest') || lower.includes('app') || lower.includes('application'))) {
+        if (lower.length > 35) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const isFreshGen = !existingFiles.length || isNewRequest(prompt);
+    const isFollowUp = existingFiles.length > 0 && !isFreshGen;
 
     const clientIP = getClientIP(request);
     const rateLimitResult = await checkRateLimit(clientIP);
@@ -254,6 +269,10 @@ export async function POST(request: NextRequest) {
         let anyOutput = false;
 
         try {
+          if (isFreshGen && existingFiles.length > 0) {
+            controller.enqueue(sse({ type: 'clear' }));
+          }
+
           controller.enqueue(
             sse({
               type: 'status',

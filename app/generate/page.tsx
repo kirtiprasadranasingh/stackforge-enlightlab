@@ -274,6 +274,9 @@ terraform apply tfplan`;
             }
 
             switch (event.type) {
+              case 'clear':
+                setFiles([]);
+                break;
               case 'status':
                 if (event.message) setStatusMessage(event.message);
                 break;
@@ -724,17 +727,16 @@ terraform apply tfplan`;
           <section className="flex-1 min-w-0 flex flex-col gap-4 overflow-hidden">
             {/* Stats Row */}
             <div className="bg-white border border-gray-200 rounded-xl px-5 py-3.5 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4 select-none shrink-0">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full max-w-4xl">
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-3.5 w-full lg:w-auto">
                 {/* Stat 1: Project */}
-                {/* Stat 1: Project */}
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-500 shrink-0 shadow-sm">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-500 shrink-0 shadow-xs">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Project</p>
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider leading-none">Project</p>
                     <p className="text-xs font-bold text-gray-800 mt-1 truncate max-w-[130px]" title={parsedProjName}>
                       {parsedProjName}
                     </p>
@@ -742,14 +744,14 @@ terraform apply tfplan`;
                 </div>
 
                 {/* Stat 2: Workspace Blueprint */}
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 shrink-0 shadow-sm">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 shrink-0 shadow-xs">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Workspace Blueprint</p>
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider leading-none">Workspace Blueprint</p>
                     <p className="text-xs font-bold text-gray-800 mt-1">
                       {files.length} files generated
                     </p>
@@ -757,14 +759,14 @@ terraform apply tfplan`;
                 </div>
 
                 {/* Stat 3: Provider */}
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500 shrink-0 shadow-sm">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500 shrink-0 shadow-xs">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a3 3 0 1 1 0-6h19.5a3 3 0 1 1 0 6" />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Provider</p>
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider leading-none">Provider</p>
                     <p className="text-xs font-bold text-gray-800 mt-1 uppercase truncate max-w-[140px]" title={parsedProvider}>
                       {parsedProvider}
                     </p>
@@ -772,14 +774,14 @@ terraform apply tfplan`;
                 </div>
 
                 {/* Stat 4: Last updated */}
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center text-green-600 shrink-0 shadow-sm">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-green-50 border border-green-100 flex items-center justify-center text-green-600 shrink-0 shadow-xs">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Last updated</p>
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider leading-none">Last updated</p>
                     <p className="text-xs font-bold text-gray-800 mt-1">
                       {lastUpdateTime}
                     </p>
