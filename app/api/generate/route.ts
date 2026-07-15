@@ -160,7 +160,31 @@ export async function POST(request: NextRequest) {
       lowerPrompt.includes('secret manager') ||
       lowerPrompt.includes('ecs');
 
-    const shouldRefuse = isExecutionCommand || (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword);
+    const isCapabilityQuestion = 
+      (lowerPrompt.startsWith('can you') || 
+       lowerPrompt.startsWith('do you') || 
+       lowerPrompt.startsWith('are you') ||
+       lowerPrompt.includes('can stackforge')) &&
+      (lowerPrompt.includes('deploy') || 
+       lowerPrompt.includes('run') || 
+       lowerPrompt.includes('execute') || 
+       lowerPrompt.includes('provision') ||
+       lowerPrompt.includes('manage') ||
+       lowerPrompt.includes('host') ||
+       lowerPrompt.includes('setup'));
+
+    const hasPrescribedConfigKeyword = 
+      lowerPrompt.includes('terraform') || 
+      lowerPrompt.includes('yaml') || 
+      lowerPrompt.includes('manifest') || 
+      lowerPrompt.includes('code') ||
+      lowerPrompt.includes('blueprint') ||
+      lowerPrompt.includes('helm') ||
+      lowerPrompt.includes('dockerfile');
+
+    const shouldRefuse = isExecutionCommand || 
+                         (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword) ||
+                         (isCapabilityQuestion && !hasPrescribedConfigKeyword && !hasCloudKeyword);
 
     if (shouldRefuse) {
       const stream = new ReadableStream({
