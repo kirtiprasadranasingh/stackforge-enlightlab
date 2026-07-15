@@ -17,6 +17,7 @@ import {
 import { LeadCapture } from '@/components/LeadCapture';
 import { FileViewer } from '@/components/FileViewer';
 import { copyToClipboard } from '@/lib/clipboard';
+import { FormattedMessage } from '@/components/FormattedMessage';
 
 type SetupStep = 1 | 2 | 3 | 4;
 
@@ -457,7 +458,7 @@ export default function GeneratePage() {
                             : 'bg-[#F5F8FF] border-[#E5EDFF] text-gray-800 rounded-tl-none'
                       }`}
                     >
-                      {m.content}
+                      <FormattedMessage content={m.content} />
                     </div>
                     {/* Utility icons for assistant replies */}
                     {m.role === 'assistant' && (
@@ -648,7 +649,7 @@ export default function GeneratePage() {
                             : 'bg-[#F5F8FF] border-[#E5EDFF] text-gray-800 rounded-tl-none'
                       }`}
                     >
-                      {m.content}
+                      <FormattedMessage content={m.content} />
                     </div>
                   </div>
                 </div>
