@@ -451,10 +451,10 @@ export default function GeneratePage() {
                     <div
                       className={`rounded-2xl px-4 py-2.5 shadow-sm border ${
                         m.role === 'user'
-                          ? 'bg-indigo-600 border-indigo-600 text-white rounded-tr-none'
+                          ? 'bg-[#0066FF] border-[#0066FF] text-white rounded-tr-none'
                           : m.role === 'system'
                             ? 'bg-amber-50 text-[var(--muted-text)] border-amber-100 font-mono text-xs'
-                            : 'bg-gray-50 border-gray-100 text-gray-800 rounded-tl-none'
+                            : 'bg-[#F5F8FF] border-[#E5EDFF] text-gray-800 rounded-tl-none'
                       }`}
                     >
                       {m.content}
@@ -645,7 +645,7 @@ export default function GeneratePage() {
                           ? 'bg-[#0066FF] border-[#0066FF] text-white rounded-tr-none'
                           : m.role === 'system'
                             ? 'bg-amber-50 text-[var(--muted-text)] border-amber-100 font-mono text-xs'
-                            : 'bg-white border border-gray-100 text-gray-700 rounded-tl-none'
+                            : 'bg-[#F5F8FF] border-[#E5EDFF] text-gray-800 rounded-tl-none'
                       }`}
                     >
                       {m.content}
@@ -770,13 +770,13 @@ export default function GeneratePage() {
 
             {/* Scroll Indicator */}
             <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2">
-              <button className="text-xs bg-white text-gray-500 border border-gray-150 px-4 py-2 rounded-full shadow-sm flex items-center gap-1.5 no-underline hover:text-gray-700 transition-colors font-medium cursor-pointer">
+              <Link href="/" className="text-xs bg-white text-gray-500 border border-gray-150 px-4 py-2.5 rounded-full shadow-sm flex items-center gap-1.5 no-underline hover:text-gray-700 hover:scale-[1.02] active:scale-95 transition-all font-medium cursor-pointer">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
                 <span>Scroll to learn more</span>
                 <svg className="w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                 </svg>
-              </button>
+              </Link>
             </div>
           </div>
         </div>
