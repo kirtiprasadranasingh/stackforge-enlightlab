@@ -2,9 +2,10 @@ import React from 'react';
 
 interface FormattedMessageProps {
   content: string;
+  className?: string;
 }
 
-export function FormattedMessage({ content }: FormattedMessageProps) {
+export function FormattedMessage({ content, className }: FormattedMessageProps) {
   if (!content) return null;
 
   // Split content by newlines
@@ -40,7 +41,7 @@ export function FormattedMessage({ content }: FormattedMessageProps) {
           return (
             <div key={idx} className="flex items-start gap-2 pl-3.5 mt-1 animate-fade-slide-up">
               <span className="text-[#0066FF] font-extrabold select-none">•</span>
-              <span className="flex-1 text-gray-700">{parsedContent}</span>
+              <span className={`flex-1 ${className || 'text-gray-700'}`}>{parsedContent}</span>
             </div>
           );
         }
@@ -50,7 +51,7 @@ export function FormattedMessage({ content }: FormattedMessageProps) {
         }
 
         return (
-          <p key={idx} className="text-gray-700">
+          <p key={idx} className={className || 'text-gray-700'}>
             {parsedContent}
           </p>
         );

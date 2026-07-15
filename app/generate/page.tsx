@@ -502,7 +502,10 @@ export default function GeneratePage() {
                             : 'bg-white border border-gray-150 text-gray-800 rounded-tl-none'
                       }`}
                     >
-                      <FormattedMessage content={m.content} />
+                      <FormattedMessage
+                        content={m.content}
+                        className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-[var(--muted-text)]' : 'text-gray-800'}
+                      />
                     </div>
                     {/* Utility icons for assistant replies */}
                     {m.role === 'assistant' && (
@@ -722,7 +725,10 @@ export default function GeneratePage() {
                             : 'bg-white border border-gray-150 text-gray-800 rounded-tl-none'
                       }`}
                     >
-                      <FormattedMessage content={m.content} />
+                      <FormattedMessage
+                        content={m.content}
+                        className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-[var(--muted-text)]' : 'text-gray-800'}
+                      />
                     </div>
                   </div>
                   {m.role === 'user' && (
