@@ -20,11 +20,11 @@ export function SiteHeader({ ctaHref = '/generate', ctaLabel = 'Generate your st
             className="h-7 w-auto object-contain"
           />
           <div className="flex flex-col select-none leading-none">
-            <span className="text-xl font-bold tracking-tight text-indigo-600 font-sans">
+            <span className="text-xl font-bold tracking-tight text-blue-600 font-sans">
               Enlight Lab
             </span>
-            <span className="text-[7px] font-extrabold text-gray-400 tracking-[0.16em] uppercase mt-0.5">
-              AI BLUEPRINT GENERATOR
+            <span className="text-[7px] font-extrabold text-blue-600 tracking-[0.16em] uppercase mt-0.5 opacity-80">
+              AI CLOUD BLUEPRINT GENERATOR
             </span>
           </div>
         </Link>
