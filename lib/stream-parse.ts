@@ -93,28 +93,95 @@ export function appendAndParse(state: ParseState, chunk: string): ParseResult {
   }
 
   // Extract complete Markdown FILE blocks
-  const mdRegex = /#\s+([a-zA-Z0-9_\-\.\/]+)\r?\n```(\w*)\r?\n([\s\S]*?)\r?\n```/g;
-  let mdMatch: RegExpExecArray | null;
+  const mdRegexA = /#\s+([a-zA-Z0-9_\-\.\/]+)\r?\n```(\w*)\r?\n([\s\S]*?)\r?\n```/g;
+  const mdRegexB = /```([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)\r?\n([\s\S]*?)\r?\n```/g;
+  const mdRegexC = /```(\w+)\s+([a-zA-Z0-9_\-\.\/]+)\r?\n([\s\S]*?)\r?\n```/g;
+  const mdRegexD = /```(\w+):([a-zA-Z0-9_\-\.\/]+)\r?\n([\s\S]*?)\r?\n```/g;
+
   const mdToRemove: Array<{ start: number; end: number }> = [];
 
-  while ((mdMatch = mdRegex.exec(state.buffer)) !== null) {
-    const startIdx = mdMatch.index;
-    const path = mdMatch[1].trim();
-    const language = mdMatch[2].trim() || getLanguageFromPath(path);
-    const content = mdMatch[3];
-
-    if (
-      validateFilePath(path) &&
-      validateFileSize(content) &&
-      !state.emittedPaths.has(path)
-    ) {
+  // Parse Format A (# path\n```language\ncontent\n```)
+  let mdMatchA: RegExpExecArray | null;
+  mdRegexA.lastIndex = 0;
+  while ((mdMatchA = mdRegexA.exec(state.buffer)) !== null) {
+    const startIdx = mdMatchA.index;
+    const path = mdMatchA[1].trim();
+    const language = mdMatchA[2].trim() || getLanguageFromPath(path);
+    const content = mdMatchA[3];
+    if (validateFilePath(path) && validateFileSize(content) && !state.emittedPaths.has(path)) {
       state.emittedPaths.add(path);
       files.push({ path, language, content });
     }
-
-    mdToRemove.push({ start: startIdx, end: mdMatch.index + mdMatch[0].length });
+    mdToRemove.push({ start: startIdx, end: mdMatchA.index + mdMatchA[0].length });
   }
 
+  // Clear format A
+  for (let i = mdToRemove.length - 1; i >= 0; i--) {
+    const { start, end } = mdToRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+  mdToRemove.length = 0;
+
+  // Parse Format B (```path.ext\ncontent\n```)
+  let mdMatchB: RegExpExecArray | null;
+  mdRegexB.lastIndex = 0;
+  while ((mdMatchB = mdRegexB.exec(state.buffer)) !== null) {
+    const startIdx = mdMatchB.index;
+    const path = mdMatchB[1].trim();
+    const language = getLanguageFromPath(path);
+    const content = mdMatchB[2];
+    if (validateFilePath(path) && validateFileSize(content) && !state.emittedPaths.has(path)) {
+      state.emittedPaths.add(path);
+      files.push({ path, language, content });
+    }
+    mdToRemove.push({ start: startIdx, end: mdMatchB.index + mdMatchB[0].length });
+  }
+
+  // Clear format B
+  for (let i = mdToRemove.length - 1; i >= 0; i--) {
+    const { start, end } = mdToRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+  mdToRemove.length = 0;
+
+  // Parse Format C (```language path\ncontent\n```)
+  let mdMatchC: RegExpExecArray | null;
+  mdRegexC.lastIndex = 0;
+  while ((mdMatchC = mdRegexC.exec(state.buffer)) !== null) {
+    const startIdx = mdMatchC.index;
+    const path = mdMatchC[2].trim();
+    const language = mdMatchC[1].trim();
+    const content = mdMatchC[3];
+    if (validateFilePath(path) && validateFileSize(content) && !state.emittedPaths.has(path)) {
+      state.emittedPaths.add(path);
+      files.push({ path, language, content });
+    }
+    mdToRemove.push({ start: startIdx, end: mdMatchC.index + mdMatchC[0].length });
+  }
+
+  // Clear format C
+  for (let i = mdToRemove.length - 1; i >= 0; i--) {
+    const { start, end } = mdToRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+  mdToRemove.length = 0;
+
+  // Parse Format D (```language:path\ncontent\n```)
+  let mdMatchD: RegExpExecArray | null;
+  mdRegexD.lastIndex = 0;
+  while ((mdMatchD = mdRegexD.exec(state.buffer)) !== null) {
+    const startIdx = mdMatchD.index;
+    const path = mdMatchD[2].trim();
+    const language = mdMatchD[1].trim();
+    const content = mdMatchD[3];
+    if (validateFilePath(path) && validateFileSize(content) && !state.emittedPaths.has(path)) {
+      state.emittedPaths.add(path);
+      files.push({ path, language, content });
+    }
+    mdToRemove.push({ start: startIdx, end: mdMatchD.index + mdMatchD[0].length });
+  }
+
+  // Clear format D
   for (let i = mdToRemove.length - 1; i >= 0; i--) {
     const { start, end } = mdToRemove[i];
     state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
