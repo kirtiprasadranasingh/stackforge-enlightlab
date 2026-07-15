@@ -186,6 +186,53 @@ export function appendAndParse(state: ParseState, chunk: string): ParseResult {
     const { start, end } = mdToRemove[i];
     state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
   }
+  mdToRemove.length = 0;
+
+  // Parse Format E (```language\n# path\ncontent\n```)
+  const mdRegexE = /```(\w+)\r?\n(?:\/\/#\s*|#\s*|\/\/\s*)([a-zA-Z0-9_\-\.\/]+)\r?\n([\s\S]*?)\r?\n```/g;
+  let mdMatchE: RegExpExecArray | null;
+  mdRegexE.lastIndex = 0;
+  while ((mdMatchE = mdRegexE.exec(state.buffer)) !== null) {
+    const startIdx = mdMatchE.index;
+    const path = mdMatchE[2].trim();
+    const language = mdMatchE[1].trim();
+    const content = mdMatchE[3];
+    if (validateFilePath(path) && validateFileSize(content) && !state.emittedPaths.has(path)) {
+      state.emittedPaths.add(path);
+      files.push({ path, language, content });
+    }
+    mdToRemove.push({ start: startIdx, end: mdMatchE.index + mdMatchE[0].length });
+  }
+
+  // Clear format E
+  for (let i = mdToRemove.length - 1; i >= 0; i--) {
+    const { start, end } = mdToRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+  mdToRemove.length = 0;
+
+  // Parse Format F (```\n# path\ncontent\n```)
+  const mdRegexF = /```\r?\n(?:\/\/#\s*|#\s*|\/\/\s*)([a-zA-Z0-9_\-\.\/]+)\r?\n([\s\S]*?)\r?\n```/g;
+  let mdMatchF: RegExpExecArray | null;
+  mdRegexF.lastIndex = 0;
+  while ((mdMatchF = mdRegexF.exec(state.buffer)) !== null) {
+    const startIdx = mdMatchF.index;
+    const path = mdMatchF[1].trim();
+    const language = getLanguageFromPath(path);
+    const content = mdMatchF[2];
+    if (validateFilePath(path) && validateFileSize(content) && !state.emittedPaths.has(path)) {
+      state.emittedPaths.add(path);
+      files.push({ path, language, content });
+    }
+    mdToRemove.push({ start: startIdx, end: mdMatchF.index + mdMatchF[0].length });
+  }
+
+  // Clear format F
+  for (let i = mdToRemove.length - 1; i >= 0; i--) {
+    const { start, end } = mdToRemove[i];
+    state.buffer = state.buffer.slice(0, start) + state.buffer.slice(end);
+  }
+  mdToRemove.length = 0;
 
   const summaryMatch = state.buffer.match(SUMMARY_RE);
   if (summaryMatch) {
