@@ -10,6 +10,15 @@ import {
   assertOriginAllowed,
 } from '@/lib/rate-limit';
 import { appendAndParse, createParseState, parseJsonFallback } from '@/lib/stream-parse';
+import fs from 'fs/promises';
+import path from 'path';
+import os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
+
+import type { GeneratedFile } from '@/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -265,7 +274,7 @@ export async function POST(request: NextRequest) {
         let lastStatus = '';
         let summarySent = false;
         let warningsSent = false;
-        const collectedFiles: { content: string }[] = [];
+        const collectedFiles: GeneratedFile[] = [];
         let anyOutput = false;
 
         try {
@@ -379,6 +388,127 @@ export async function POST(request: NextRequest) {
               })
             );
           } else {
+            if (collectedFiles.length > 0) {
+              const currentFiles = [...collectedFiles];
+              let attempts = 0;
+              let passed = false;
+              let reportText = "";
+
+              while (attempts < 3) {
+                attempts++;
+                let tempDir = "";
+                try {
+                  tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stackforge-val-'));
+                  for (const file of currentFiles) {
+                    const filePath = path.join(tempDir, file.path);
+                    await fs.mkdir(path.dirname(filePath), { recursive: true });
+                    await fs.writeFile(filePath, file.content, 'utf8');
+                  }
+
+                  const scriptPath = path.join(process.cwd(), 'scripts', 'validate-scaffold.sh');
+                  let code = 0;
+                  let output = "";
+                  try {
+                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`);
+                    code = 0;
+                    output = stdout + stderr;
+                  } catch (err: unknown) {
+                    const execError = err as { code?: number; stdout?: string; stderr?: string };
+                    code = execError.code || 1;
+                    output = (execError.stdout || '') + (execError.stderr || '');
+                  }
+
+                  reportText = output;
+
+                  if (code === 0) {
+                    passed = true;
+                    break;
+                  }
+
+                  const failLines = output
+                    .split('\n')
+                    .map((l: string) => l.trim())
+                    .filter((l: string) => l.startsWith('FAIL  -'));
+
+                  if (failLines.length === 0) {
+                    passed = false;
+                    break;
+                  }
+
+                  if (attempts === 3) {
+                    passed = false;
+                    break;
+                  }
+
+                  controller.enqueue(sse({ type: 'status', message: `Validator flagged issues. Auto-resolving (attempt ${attempts}/2)…` }));
+
+                  const fixPrompt = `The following files failed validation:\n${failLines.join('\n')}\n\nFix only these specific issues in the affected files and return the corrected versions — do not regenerate unaffected files.`;
+                  const fixPromptText = formatFollowUpPrompt({
+                    message: fixPrompt,
+                    presets,
+                    existingFiles: currentFiles,
+                    history: [],
+                  });
+
+                  const fixResult = await model.generateContent(fixPromptText);
+                  const fixText = fixResult.response.text();
+
+                  const parseStateFix = createParseState();
+                  const parsedFix = appendAndParse(parseStateFix, fixText);
+                  const finalParsedFix = appendAndParse(parseStateFix, '');
+                  const correctedFiles = [...parsedFix.files, ...finalParsedFix.files];
+
+                  if (correctedFiles.length > 0) {
+                    for (const file of correctedFiles) {
+                      const idx = currentFiles.findIndex(f => f.path === file.path);
+                      if (idx !== -1) {
+                        currentFiles[idx] = file;
+                      } else {
+                        currentFiles.push(file);
+                      }
+                      controller.enqueue(sse({ type: 'file', file }));
+                    }
+                  } else {
+                    passed = false;
+                    break;
+                  }
+                } catch (e) {
+                  console.error('Validation loop error:', e);
+                  break;
+                } finally {
+                  if (tempDir) {
+                    try {
+                      await fs.rm(tempDir, { recursive: true, force: true });
+                    } catch (e) {
+                      console.error('Failed to clean up tempDir:', e);
+                    }
+                  }
+                }
+              }
+
+              if (!passed) {
+                try {
+                  const readmeIdx = currentFiles.findIndex(f => f.path === 'README.md');
+                  const cleanReport = reportText.replace(/\u001b\[\d+m/g, '');
+                  const notice = `\n\n---\n\n### ⚠️ Automated Validation Warning\nAutomated validation found issues that could not be auto-resolved:\n\n\`\`\`\n${cleanReport}\n\`\`\`\n`;
+                  if (readmeIdx !== -1) {
+                    const updatedContent = currentFiles[readmeIdx].content + notice;
+                    currentFiles[readmeIdx] = { ...currentFiles[readmeIdx], content: updatedContent };
+                    controller.enqueue(sse({ type: 'file', file: currentFiles[readmeIdx] }));
+                  } else {
+                    const newReadme = {
+                      path: 'README.md',
+                      language: 'markdown',
+                      content: `# Workspace Blueprint\n\n${notice}`
+                    };
+                    currentFiles.push(newReadme);
+                    controller.enqueue(sse({ type: 'file', file: newReadme }));
+                  }
+                } catch (e) {
+                  console.error('README write error:', e);
+                }
+              }
+            }
             controller.enqueue(sse({ type: 'done' }));
           }
           controller.close();
