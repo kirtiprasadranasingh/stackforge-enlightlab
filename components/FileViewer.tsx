@@ -237,14 +237,6 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
             </div>
           </div>
         </div>
-        <div className="p-3 border-t border-gray-200/80 bg-[#f8fafc] shrink-0">
-          <button
-            onClick={downloadAll}
-            className="w-full text-xs font-bold py-2 bg-white hover:bg-slate-50 text-gray-600 border border-gray-200 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-          >
-            📥 Download Workspace
-          </button>
-        </div>
       </aside>
       <div className={`flex-1 min-w-0 flex flex-col overflow-hidden relative transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-slate-950 text-gray-100' : 'bg-slate-50 text-gray-800'}`}>
         <div className={`flex items-center justify-between shrink-0 select-none border-b transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-gray-900 border-gray-800/80' : 'bg-slate-100 border-gray-200'}`}>
@@ -269,28 +261,28 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
               );
             })}
           </div>
-          <div className="flex items-center gap-2.5 px-4 shrink-0">
+          <div className="flex items-center gap-1.5 px-3 shrink-0">
             <button
               type="button"
               onClick={() => setEditorTheme(editorTheme === 'dark' ? 'light' : 'dark')}
-              className={`cursor-pointer transition-colors p-1 px-2.5 rounded text-[11px] font-bold flex items-center gap-1.5 ${
+              className={`cursor-pointer transition-colors p-1 px-1.5 rounded text-[10px] font-bold flex items-center gap-1 ${
                 editorTheme === 'dark' ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-200'
               }`}
               title="Toggle theme"
             >
               <span>{editorTheme === 'dark' ? '☀️' : '🌙'}</span>
-              <span>{editorTheme === 'dark' ? 'Light' : 'Dark'}</span>
+              <span className="hidden sm:inline">{editorTheme === 'dark' ? 'Light' : 'Dark'}</span>
             </button>
             <button
               type="button"
               onClick={() => setIsFullscreen(!isFullscreen)}
-              className={`cursor-pointer transition-colors p-1 px-2.5 rounded text-[11px] font-bold flex items-center gap-1.5 ${
+              className={`cursor-pointer transition-colors p-1 px-1.5 rounded text-[10px] font-bold flex items-center gap-1 ${
                 editorTheme === 'dark' ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-200'
               }`}
               title={isFullscreen ? "Collapse panel" : "Expand panel"}
             >
               <span>⛶</span>
-              <span>{isFullscreen ? 'Collapse' : 'Fullscreen'}</span>
+              <span className="hidden sm:inline">{isFullscreen ? 'Collapse' : 'Fullscreen'}</span>
             </button>
           </div>
         </div>

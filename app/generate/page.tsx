@@ -563,16 +563,6 @@ terraform apply tfplan`;
               >
                 New Project
               </button>
-
-              <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer p-1" title="Notifications">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a9.04 9.04 0 01-2.857 0m-3 0a9.04 9.04 0 01-2.857 0M5 9a7 7 0 1114 0c0 3-1 3.5-3 5.5l-1 1H9l-1-1C5 12.5 5 12 5 9z" />
-                </svg>
-              </button>
-
-              <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer shadow-inner" title="Profile">
-                <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=80&q=80" alt="Profile" className="w-full h-full object-cover" />
-              </div>
             </div>
           </div>
         </header>
@@ -598,7 +588,10 @@ terraform apply tfplan`;
       {hasGeneratedFiles ? (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-[#f8fafc]">
           {/* LEFT — AI Assistant Sidebar */}
-          <aside className={`${isSidebarOpen ? 'w-[360px] opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300 shrink-0 flex flex-col gap-3 min-h-0 select-none`}>
+          <aside
+            style={{ width: isSidebarOpen ? `${leftWidth}px` : '0px' }}
+            className={`shrink-0 flex flex-col gap-3 min-h-0 select-none ${isSidebarOpen ? 'opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300`}
+          >
             {/* Interactive Chat Log */}
             <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex-1 flex flex-col min-h-0">
               <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2">
@@ -657,39 +650,36 @@ terraform apply tfplan`;
                   </div>
                 ))}
               </div>
-
               {/* Input section at bottom of chat card */}
-              <div className="border-t border-gray-100 pt-3 flex flex-col gap-2 shrink-0">
-                <textarea
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (promptVal.trim()) {
+                    void sendMessage(promptVal);
+                    setPromptVal('');
+                  }
+                }}
+                className="mt-3 pt-3 border-t border-gray-100 relative flex items-center gap-1.5 bg-slate-50 border border-gray-200 focus-within:border-indigo-400 focus-within:bg-white rounded-xl p-1.5 shrink-0 transition-all"
+              >
+                <input
+                  type="text"
                   value={promptVal}
                   onChange={(e) => setPromptVal(e.target.value)}
                   disabled={isGenerating}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      if (promptVal.trim()) {
-                        void sendMessage(promptVal);
-                        setPromptVal('');
-                      }
-                    }
-                  }}
-                  placeholder="Ask for changes (e.g. 'Add dev/prod folders', 'Secure network NSGs')..."
-                  className="w-full h-20 bg-slate-50 border border-gray-205 focus:border-indigo-500 focus:bg-white rounded-xl p-2.5 text-xs text-gray-800 focus:outline-none resize-none transition-all leading-relaxed focus:ring-1 focus:ring-indigo-100"
+                  placeholder="Ask for changes..."
+                  className="flex-1 bg-transparent text-xs text-gray-900 placeholder-gray-400 focus:outline-none pl-2 py-1 border-0 min-w-0 font-sans"
                 />
                 <button
-                  type="button"
-                  onClick={() => {
-                    if (promptVal.trim()) {
-                      void sendMessage(promptVal);
-                      setPromptVal('');
-                    }
-                  }}
+                  type="submit"
                   disabled={isGenerating || !promptVal.trim()}
-                  className="w-full text-xs font-bold py-2 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl shadow-sm transition-all duration-200 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-650 hover:bg-indigo-700 text-white transition-colors shrink-0 cursor-pointer disabled:opacity-40"
+                  title="Send message"
                 >
-                  <span>⚡ Send request</span>
+                  <svg className="w-3.5 h-3.5 transform rotate-45 -translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                  </svg>
                 </button>
-              </div>
+              </form>
             </div>
 
             {/* Actions Grid */}
@@ -722,6 +712,15 @@ terraform apply tfplan`;
               🚀 Powered by Enlight Lab AI
             </p>
           </aside>
+
+          {/* Resizable Divider separator handle */}
+          {isSidebarOpen && (
+            <div
+              onMouseDown={() => setIsDragging(true)}
+              className="w-1 cursor-col-resize hover:w-1.5 active:w-1.5 bg-gray-200 hover:bg-indigo-500 active:bg-indigo-650 self-stretch shrink-0 transition-all rounded shadow-inner"
+              title="Drag to resize sidebar"
+            />
+          )}
 
           {/* RIGHT — IDE / files area */}
           <section className="flex-1 min-w-0 flex flex-col gap-4 overflow-hidden">
