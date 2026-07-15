@@ -150,6 +150,8 @@ function RenderTreeNode({
 export function FileViewer({ files, isGenerating, promptText }: FileViewerProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [editorTheme, setEditorTheme] = useState<'dark' | 'light'>('dark');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const activePath = selectedPath && files.some((f) => f.path === selectedPath)
     ? selectedPath
@@ -193,7 +195,11 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
   if (files.length === 0) return null;
 
   return (
-    <div className="flex flex-col md:flex-row w-full flex-1 min-h-0 border border-gray-200 shadow-sm rounded-xl overflow-hidden bg-white select-none">
+    <>
+      {isFullscreen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80]" onClick={() => setIsFullscreen(false)} />
+      )}
+      <div className={`flex flex-col md:flex-row w-full flex-1 min-h-0 border border-gray-200 shadow-sm rounded-xl overflow-hidden bg-white select-none transition-all duration-300 ${isFullscreen ? 'fixed inset-10 z-[90] shadow-2xl border border-indigo-300' : ''}`}>
       <aside className="w-full md:w-60 md:shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-[#f8fafc] flex flex-col justify-between max-h-[260px] md:max-h-none overflow-hidden select-none">
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <div className="p-3 border-b border-gray-200/80 bg-[#f8fafc]">
@@ -240,8 +246,8 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
           </button>
         </div>
       </aside>
-      <div className="bg-gray-950 text-gray-100 flex-1 min-w-0 flex flex-col overflow-hidden relative">
-        <div className="flex items-center justify-between bg-gray-900 border-b border-gray-800/80 shrink-0 select-none">
+      <div className={`flex-1 min-w-0 flex flex-col overflow-hidden relative transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-slate-950 text-gray-100' : 'bg-slate-50 text-gray-800'}`}>
+        <div className={`flex items-center justify-between shrink-0 select-none border-b transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-gray-900 border-gray-800/80' : 'bg-slate-100 border-gray-200'}`}>
           <div className="flex overflow-x-auto no-scrollbar flex-1">
             {files.map((f) => {
               const name = f.path.split('/').pop() || f.path;
@@ -251,10 +257,10 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
                   key={f.path}
                   type="button"
                   onClick={() => setSelectedPath(f.path)}
-                  className={`flex items-center gap-2.5 px-4 py-3 text-[11px] font-mono border-r border-gray-850 transition-all shrink-0 cursor-pointer select-none ${
+                  className={`flex items-center gap-2.5 px-4 py-3 text-[11px] font-mono border-r transition-all shrink-0 cursor-pointer select-none ${editorTheme === 'dark' ? 'border-gray-850' : 'border-gray-200'} ${
                     active 
-                      ? 'bg-slate-950 text-white font-bold border-t-2 border-t-indigo-500' 
-                      : 'text-gray-400 hover:bg-slate-900 hover:text-gray-200'
+                      ? (editorTheme === 'dark' ? 'bg-slate-950 text-white font-bold border-t-2 border-t-indigo-500' : 'bg-white text-indigo-700 font-bold border-t-2 border-t-indigo-500') 
+                      : (editorTheme === 'dark' ? 'text-gray-400 hover:bg-slate-900 hover:text-gray-200' : 'text-gray-500 hover:bg-slate-200 hover:text-gray-850')
                   }`}
                 >
                   {getFileIcon(f.path)}
@@ -263,17 +269,31 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
               );
             })}
           </div>
-          <div className="flex items-center gap-3.5 px-4 text-gray-400">
-            <button type="button" className="hover:text-white cursor-pointer transition-colors" title="Toggle theme">☀️</button>
-            <button type="button" className="hover:text-white cursor-pointer transition-colors text-xs" title="Expand panel">⛶</button>
+          <div className="flex items-center gap-2 px-4 text-gray-400 shrink-0">
+            <button
+              type="button"
+              onClick={() => setEditorTheme(editorTheme === 'dark' ? 'light' : 'dark')}
+              className={`hover:text-white cursor-pointer transition-colors p-1 rounded text-xs`}
+              title="Toggle theme"
+            >
+              {editorTheme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              className={`hover:text-white cursor-pointer transition-colors text-xs p-1 rounded`}
+              title={isFullscreen ? "Collapse panel" : "Expand panel"}
+            >
+              {isFullscreen ? '⛶ Collapse' : '⛶ Fullscreen'}
+            </button>
           </div>
         </div>
-        <div className="flex-1 overflow-auto min-w-0 code-highlight relative bg-slate-950">
+        <div className={`flex-1 overflow-auto min-w-0 code-highlight relative transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-slate-950' : 'bg-white'}`}>
           {selected && (
             <CodeBlock code={selected.content} language={selected.language} />
           )}
         </div>
-        <div className="h-7 border-t border-gray-800 bg-gray-900 text-gray-400 text-[10px] px-3.5 flex items-center justify-between shrink-0 select-none font-mono">
+        <div className={`h-7 border-t text-[10px] px-3.5 flex items-center justify-between shrink-0 select-none font-mono transition-colors duration-200 ${editorTheme === 'dark' ? 'border-gray-800 bg-gray-900 text-gray-400' : 'border-gray-200 bg-slate-100 text-gray-500'}`}>
           <div className="flex items-center gap-3.5">
             <span>Ln 1, Col 1</span>
             <span>Spaces: 2</span>
@@ -302,5 +322,6 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
         </div>
       </div>
     </div>
+  </>
   );
 }

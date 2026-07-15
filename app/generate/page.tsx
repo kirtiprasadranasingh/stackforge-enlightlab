@@ -57,6 +57,8 @@ export default function GeneratePage() {
   const [promptVal, setPromptVal] = useState('');
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [showAssumptionsModal, setShowAssumptionsModal] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [lastUpdateTime, setLastUpdateTime] = useState('Today, 10:42 AM');
   const [selectedRegion, setSelectedRegion] = useState('us-east-1');
   const [selectedCidr, setSelectedCidr] = useState('10.0.0.0/16');
   const [selectedSecrets, setSelectedSecrets] = useState('placeholders');
@@ -262,6 +264,7 @@ export default function GeneratePage() {
                 break;
               case 'done':
                 setStatusMessage('');
+                setLastUpdateTime(`Today, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
                 break;
             }
           }
@@ -448,6 +451,35 @@ export default function GeneratePage() {
     );
   }
 
+  // Dynamic parsing of project & provider from code
+  const chartFile = files.find(f => f.path.toLowerCase().endsWith('chart.yaml') || f.path.toLowerCase().endsWith('chart.yml'));
+  let parsedProjName = "Go Microservice Infra";
+  if (chartFile) {
+    const match = chartFile.content.match(/^name:\s*(.+)$/m);
+    if (match && match[1]) {
+      parsedProjName = match[1].trim();
+    }
+  } else {
+    const pkgFile = files.find(f => f.path.toLowerCase().endsWith('package.json'));
+    if (pkgFile) {
+      try {
+        const parsed = JSON.parse(pkgFile.content);
+        if (parsed.name) parsedProjName = parsed.name;
+      } catch {}
+    }
+  }
+
+  let parsedProvider = `${presets.cloud === 'oracle' ? 'OCI' : presets.cloud.toUpperCase()}, Kubernetes, Helm`;
+  if (files.some(f => f.path.includes('oracle') || f.path.includes('oci') || f.content.includes('oci_'))) {
+    parsedProvider = "OCI, Kubernetes, Helm";
+  } else if (files.some(f => f.path.includes('aws') || f.content.includes('aws_'))) {
+    parsedProvider = "AWS, Kubernetes, Helm";
+  } else if (files.some(f => f.path.includes('gcp') || f.content.includes('google_'))) {
+    parsedProvider = "GCP, Kubernetes, Helm";
+  } else if (files.some(f => f.path.includes('azure') || f.content.includes('azurerm_'))) {
+    parsedProvider = "Azure, Kubernetes, Helm";
+  }
+
   // ——— Lovable-style workspace ———
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-[#f8fafc]">
@@ -455,22 +487,22 @@ export default function GeneratePage() {
         <header className="border-b border-gray-200 sticky top-0 bg-white z-50 shrink-0 select-none">
           <div className="px-6 h-14 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors mr-1 cursor-pointer">
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="text-gray-400 hover:text-gray-600 transition-colors mr-1 cursor-pointer"
+                title="Toggle Sidebar"
+              >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
               
               <Link href="/" className="flex items-center gap-2.5 shrink-0 no-underline">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-150 flex items-center justify-center text-indigo-650 shrink-0 font-extrabold text-sm shadow-sm">
-                  ⚡
-                </div>
-                <div className="flex flex-col select-none leading-tight">
-                  <span className="text-sm font-bold text-gray-900 font-sans">
-                    StackForge Copilot
-                  </span>
-                  <span className="text-[10px] text-gray-500 font-medium">
-                    by Enlight Lab
+                <img src="/enlight-labs-logo.png" alt="StackForge" className="w-8 h-8 object-contain rounded-lg shadow-sm" />
+                <div className="flex flex-col select-none leading-none">
+                  <span className="text-base font-bold text-gray-900 font-sans tracking-tight">
+                    StackForge
                   </span>
                 </div>
               </Link>
@@ -528,7 +560,7 @@ export default function GeneratePage() {
       {hasGeneratedFiles ? (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-[#f8fafc]">
           {/* LEFT — AI Assistant Sidebar */}
-          <aside className="w-80 shrink-0 flex flex-col gap-4 min-h-0 overflow-y-auto select-none no-scrollbar">
+          <aside className={`${isSidebarOpen ? 'w-80 opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300 shrink-0 flex flex-col gap-4 min-h-0 overflow-y-auto select-none no-scrollbar`}>
             {/* AI Assistant Card */}
             <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
               <div className="flex items-center gap-2">
@@ -556,7 +588,7 @@ export default function GeneratePage() {
             </div>
 
             {/* Your Prompt Card */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex-1 flex flex-col min-h-0">
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider">Your Prompt</h4>
                 <button
@@ -583,42 +615,8 @@ export default function GeneratePage() {
                   }
                 }}
                 placeholder="yaml / apiVersion: v2 / name: go-microservice / description: A Helm chart..."
-                className="flex-1 bg-slate-50 border border-gray-200 focus:border-indigo-500 focus:bg-white rounded-xl p-3 text-xs text-gray-800 focus:outline-none resize-none transition-all leading-relaxed font-mono w-full min-h-[140px] focus:ring-1 focus:ring-indigo-100"
+                className="w-full h-44 bg-slate-50 border border-gray-200 focus:border-indigo-500 focus:bg-white rounded-xl p-3 text-xs text-gray-800 focus:outline-none resize-none transition-all leading-relaxed font-mono focus:ring-1 focus:ring-indigo-100"
               />
-            </div>
-
-            {/* Key Assumptions Card */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm select-none">
-              <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-2.5">Key Assumptions</h4>
-              <div className="space-y-2">
-                {[
-                  { label: 'AWS Region', value: selectedRegion },
-                  { label: 'VPC / VCN CIDR', value: selectedCidr },
-                  { label: 'EKS Node Type', value: presets.cloud === 'oracle' ? 'VM.Standard.E4.Flex' : 't3.medium' },
-                  { label: 'ALB Ingress Controller', value: 'Active' },
-                  { label: 'RDS PostgreSQL', value: presets.cloud === 'oracle' ? 'OCI Autonomous' : 'db.t3.medium' },
-                  { label: '3 AZ deployment for high availability', value: 'Enabled' }
-                ].map((item, i) => (
-                  <div
-                    key={i}
-                    onClick={() => setShowAssumptionsModal(true)}
-                    className="flex items-start gap-2 text-[11px] text-gray-600 leading-tight hover:bg-slate-50 p-1 -m-1 rounded-md transition-colors cursor-pointer"
-                    title="Click to configure assumptions"
-                  >
-                    <svg className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                    </svg>
-                    <span>{item.label}: <span className="font-semibold text-gray-900">{item.value}</span></span>
-                  </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAssumptionsModal(true)}
-                className="text-[10px] text-blue-600 hover:text-blue-700 font-bold mt-3 transition-colors cursor-pointer select-none"
-              >
-                View all
-              </button>
             </div>
 
             {/* Actions Grid */}
@@ -659,6 +657,7 @@ export default function GeneratePage() {
             <div className="bg-white border border-gray-200 rounded-xl px-5 py-3.5 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4 select-none shrink-0">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full max-w-4xl">
                 {/* Stat 1: Project */}
+                {/* Stat 1: Project */}
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-500 shrink-0 shadow-sm">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -667,8 +666,8 @@ export default function GeneratePage() {
                   </div>
                   <div>
                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Project</p>
-                    <p className="text-xs font-bold text-gray-800 mt-1 truncate max-w-[130px]" title="Go Microservice Infra">
-                      Go Microservice Infra
+                    <p className="text-xs font-bold text-gray-800 mt-1 truncate max-w-[130px]" title={parsedProjName}>
+                      {parsedProjName}
                     </p>
                   </div>
                 </div>
@@ -697,8 +696,8 @@ export default function GeneratePage() {
                   </div>
                   <div>
                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Provider</p>
-                    <p className="text-xs font-bold text-gray-800 mt-1 uppercase truncate max-w-[140px]" title={`${presets.cloud.toUpperCase()}, Kubernetes, Helm`}>
-                      {presets.cloud === 'oracle' ? 'OCI' : presets.cloud.toUpperCase()}, Kubernetes, Helm
+                    <p className="text-xs font-bold text-gray-800 mt-1 uppercase truncate max-w-[140px]" title={parsedProvider}>
+                      {parsedProvider}
                     </p>
                   </div>
                 </div>
@@ -713,7 +712,7 @@ export default function GeneratePage() {
                   <div>
                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Last updated</p>
                     <p className="text-xs font-bold text-gray-800 mt-1">
-                      Today, 10:42 AM
+                      {lastUpdateTime}
                     </p>
                   </div>
                 </div>
@@ -721,6 +720,16 @@ export default function GeneratePage() {
 
               {/* Action Buttons */}
               <div className="flex gap-2.5 shrink-0 w-full lg:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowDeployModal(true)}
+                  className="text-xs font-bold px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-[#4F46E5] border border-indigo-150 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z" />
+                  </svg>
+                  Preview Plan
+                </button>
                 <button
                   type="button"
                   onClick={handleDownloadZip}
@@ -751,33 +760,6 @@ export default function GeneratePage() {
                 isGenerating={isGenerating}
                 promptText={promptVal}
               />
-
-              {/* Bottom Alert Banner */}
-              {!isGenerating && files.length > 0 && (
-                <div className="bg-[#EEF2FF] border border-[#C7D2FE] text-[#3730A3] p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm select-none shrink-0 animate-fade-slide-up">
-                  <div className="flex items-center gap-3">
-                    <span className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center text-[#4F46E5] text-sm shrink-0">
-                      ℹ️
-                    </span>
-                    <div>
-                      <p className="text-xs font-bold">Your infrastructure is ready!</p>
-                      <p className="text-[11px] text-[#4F46E5]/90 mt-0.5">
-                        {files.length} files generated successfully. You can review, download, or deploy this infrastructure.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2 w-full sm:w-auto justify-end shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setShowDeployModal(true)}
-                      className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-md shadow-indigo-200/50 transition-all duration-200 active:scale-95 cursor-pointer flex items-center gap-1.5"
-                    >
-                      📋 Preview Plan
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </section>
         </div>
