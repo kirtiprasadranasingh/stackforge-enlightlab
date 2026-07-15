@@ -56,6 +56,7 @@ export default function GeneratePage() {
   const [isDragging, setIsDragging] = useState(false);
   const [promptVal, setPromptVal] = useState('');
   const [showDeployModal, setShowDeployModal] = useState(false);
+  const [showAssumptionsModal, setShowAssumptionsModal] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState('us-east-1');
   const [selectedCidr, setSelectedCidr] = useState('10.0.0.0/16');
   const [selectedSecrets, setSelectedSecrets] = useState('placeholders');
@@ -454,6 +455,12 @@ export default function GeneratePage() {
         <header className="border-b border-gray-200 sticky top-0 bg-white z-50 shrink-0 select-none">
           <div className="px-6 h-14 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
+              <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors mr-1 cursor-pointer">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+              
               <Link href="/" className="flex items-center gap-2.5 shrink-0 no-underline">
                 <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-150 flex items-center justify-center text-indigo-650 shrink-0 font-extrabold text-sm shadow-sm">
                   ⚡
@@ -493,8 +500,8 @@ export default function GeneratePage() {
                 </svg>
               </button>
 
-              <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs text-slate-700 font-bold select-none shrink-0 cursor-pointer" title="Profile">
-                SF
+              <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer shadow-inner" title="Profile">
+                <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=80&q=80" alt="Profile" className="w-full h-full object-cover" />
               </div>
             </div>
           </div>
@@ -580,81 +587,37 @@ export default function GeneratePage() {
               />
             </div>
 
-            {/* Key Assumptions Card (Interactive Options) */}
+            {/* Key Assumptions Card */}
             <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm select-none">
               <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-2.5">Key Assumptions</h4>
-              <div className="space-y-3">
-                {/* Region Option */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase">Region</label>
-                  <select
-                    value={selectedRegion}
-                    onChange={(e) => setSelectedRegion(e.target.value)}
-                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+              <div className="space-y-2">
+                {[
+                  { label: 'AWS Region', value: selectedRegion },
+                  { label: 'VPC / VCN CIDR', value: selectedCidr },
+                  { label: 'EKS Node Type', value: presets.cloud === 'oracle' ? 'VM.Standard.E4.Flex' : 't3.medium' },
+                  { label: 'ALB Ingress Controller', value: 'Active' },
+                  { label: 'RDS PostgreSQL', value: presets.cloud === 'oracle' ? 'OCI Autonomous' : 'db.t3.medium' },
+                  { label: '3 AZ deployment for high availability', value: 'Enabled' }
+                ].map((item, i) => (
+                  <div
+                    key={i}
+                    onClick={() => setShowAssumptionsModal(true)}
+                    className="flex items-start gap-2 text-[11px] text-gray-600 leading-tight hover:bg-slate-50 p-1 -m-1 rounded-md transition-colors cursor-pointer"
+                    title="Click to configure assumptions"
                   >
-                    <option value="us-east-1">AWS: us-east-1 (N. Virginia)</option>
-                    <option value="us-west-2">AWS: us-west-2 (Oregon)</option>
-                    <option value="ap-mumbai-1">OCI: ap-mumbai-1 (Mumbai)</option>
-                    <option value="us-central1">GCP: us-central1 (Iowa)</option>
-                    <option value="eastus">Azure: eastus (East US)</option>
-                  </select>
-                </div>
-
-                {/* CIDR Option */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase">VPC / VCN CIDR</label>
-                  <select
-                    value={selectedCidr}
-                    onChange={(e) => setSelectedCidr(e.target.value)}
-                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
-                  >
-                    <option value="10.0.0.0/16">10.0.0.0/16 (Default)</option>
-                    <option value="172.16.0.0/16">172.16.0.0/16</option>
-                    <option value="192.168.0.0/16">192.168.0.0/16</option>
-                  </select>
-                </div>
-
-                {/* Secrets Option */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase">Secrets Handling</label>
-                  <select
-                    value={selectedSecrets}
-                    onChange={(e) => setSelectedSecrets(e.target.value)}
-                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
-                  >
-                    <option value="placeholders">Environment placeholders</option>
-                    <option value="vault">HashiCorp Vault</option>
-                    <option value="native">Native Secrets Manager</option>
-                  </select>
-                </div>
-
-                {/* Probes Option */}
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-bold text-gray-400 uppercase">Health Probes</label>
-                  <select
-                    value={selectedProbes}
-                    onChange={(e) => setSelectedProbes(e.target.value)}
-                    className="w-full bg-slate-50 hover:bg-slate-100/85 border border-gray-200 rounded-lg px-2 py-1 text-[11px] text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
-                  >
-                    <option value="enabled">Enabled (liveness + readiness)</option>
-                    <option value="disabled">Disabled</option>
-                  </select>
-                </div>
+                    <svg className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                    </svg>
+                    <span>{item.label}: <span className="font-semibold text-gray-900">{item.value}</span></span>
+                  </div>
+                ))}
               </div>
-
               <button
                 type="button"
-                onClick={() => {
-                  const targetPrompt = promptVal.trim();
-                  if (targetPrompt) {
-                    const extraInstructions = `\n\n[Assumptions configuration: Region=${selectedRegion}, CIDR=${selectedCidr}, Secrets=${selectedSecrets}, Probes=${selectedProbes}]`;
-                    void sendMessage(targetPrompt + extraInstructions);
-                  }
-                }}
-                disabled={isGenerating}
-                className="w-full mt-3.5 text-xs font-bold py-2.5 bg-slate-100 hover:bg-slate-200 text-gray-700 rounded-xl transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                onClick={() => setShowAssumptionsModal(true)}
+                className="text-[10px] text-blue-600 hover:text-blue-700 font-bold mt-3 transition-colors cursor-pointer select-none"
               >
-                Apply & Regenerate
+                View all
               </button>
             </div>
 
@@ -693,69 +656,90 @@ export default function GeneratePage() {
           {/* RIGHT — IDE / files area */}
           <section className="flex-1 min-w-0 flex flex-col gap-4 overflow-hidden">
             {/* Stats Row */}
-            <div className="bg-white border border-gray-200 rounded-xl px-5 py-3 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 select-none shrink-0">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full max-w-3xl">
+            <div className="bg-white border border-gray-200 rounded-xl px-5 py-3.5 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4 select-none shrink-0">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full max-w-4xl">
+                {/* Stat 1: Project */}
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 font-bold shrink-0">
-                    📂
+                  <div className="w-9 h-9 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center text-orange-500 shrink-0 shadow-sm">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z" />
+                    </svg>
                   </div>
                   <div>
-                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Project</p>
-                    <p className="text-xs font-bold text-gray-800 mt-1 truncate max-w-[130px]">
-                      {presets.cloud === 'oracle' ? 'OCI' : presets.cloud.toUpperCase()} Microservice Infra
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Project</p>
+                    <p className="text-xs font-bold text-gray-800 mt-1 truncate max-w-[130px]" title="Go Microservice Infra">
+                      Go Microservice Infra
                     </p>
                   </div>
                 </div>
 
+                {/* Stat 2: Workspace Blueprint */}
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600 font-bold shrink-0">
-                    📄
+                  <div className="w-9 h-9 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 shrink-0 shadow-sm">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                    </svg>
                   </div>
                   <div>
-                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Workspace Blueprint</p>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Workspace Blueprint</p>
                     <p className="text-xs font-bold text-gray-800 mt-1">
                       {files.length} files generated
                     </p>
                   </div>
                 </div>
 
+                {/* Stat 3: Provider */}
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-650 font-bold shrink-0">
-                    ☁️
+                  <div className="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-500 shrink-0 shadow-sm">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-16.5-3a3 3 0 0 1 3-3h13.5a3 3 0 0 1 3 3m-19.5 0a3 3 0 1 1 0-6h19.5a3 3 0 1 1 0 6" />
+                    </svg>
                   </div>
                   <div>
-                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Provider</p>
-                    <p className="text-xs font-bold text-gray-800 mt-1 uppercase truncate max-w-[110px]">
-                      {presets.cloud}, {presets.orchestrator}, {presets.ci}
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Provider</p>
+                    <p className="text-xs font-bold text-gray-800 mt-1 uppercase truncate max-w-[140px]" title={`${presets.cloud.toUpperCase()}, Kubernetes, Helm`}>
+                      {presets.cloud === 'oracle' ? 'OCI' : presets.cloud.toUpperCase()}, Kubernetes, Helm
                     </p>
                   </div>
                 </div>
 
+                {/* Stat 4: Last updated */}
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center text-green-600 font-bold shrink-0">
-                    🕒
+                  <div className="w-9 h-9 rounded-xl bg-green-50 border border-green-100 flex items-center justify-center text-green-600 shrink-0 shadow-sm">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
                   </div>
                   <div>
-                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Last updated</p>
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Last updated</p>
                     <p className="text-xs font-bold text-gray-800 mt-1">
-                      Just now
+                      Today, 10:42 AM
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="flex gap-2.5 shrink-0 w-full sm:w-auto justify-end">
+              {/* Action Buttons */}
+              <div className="flex gap-2.5 shrink-0 w-full lg:w-auto justify-end">
                 <button
+                  type="button"
                   onClick={handleDownloadZip}
-                  className="text-xs font-bold px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  className="text-xs font-bold px-4 py-2.5 bg-white hover:bg-slate-50 text-[#4F46E5] hover:text-[#4338CA] border border-gray-250 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
                 >
-                  📥 Download ZIP
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                  Download ZIP
                 </button>
                 <button
+                  type="button"
                   onClick={handleCopyAllText}
-                  className="text-xs font-bold px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm rounded-xl transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  className="text-xs font-bold px-4 py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white shadow-md shadow-indigo-200/50 rounded-xl transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
                 >
-                  📋 Copy all
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5A3.375 3.375 0 0 0 6.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0 0 15 2.25h-1.5a2.251 2.251 0 0 0-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v12c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5" />
+                  </svg>
+                  Copy all
                 </button>
               </div>
             </div>
@@ -1030,6 +1014,106 @@ export default function GeneratePage() {
                 className="text-xs font-bold px-4 py-2 bg-slate-100 hover:bg-slate-200 text-gray-700 rounded-xl transition-all active:scale-95 cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showAssumptionsModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 select-none animate-fade-slide-up">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl max-w-md w-full flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-gray-900 uppercase flex items-center gap-1.5">
+                <span>⚙️</span> Configure Assumptions
+              </h3>
+              <button
+                onClick={() => setShowAssumptionsModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors text-lg font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="space-y-4 py-2">
+              {/* Region Option */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Region</label>
+                <select
+                  value={selectedRegion}
+                  onChange={(e) => setSelectedRegion(e.target.value)}
+                  className="w-full bg-slate-50 hover:bg-slate-100/80 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                >
+                  <option value="us-east-1">AWS: us-east-1 (N. Virginia)</option>
+                  <option value="us-west-2">AWS: us-west-2 (Oregon)</option>
+                  <option value="ap-mumbai-1">OCI: ap-mumbai-1 (Mumbai)</option>
+                  <option value="us-central1">GCP: us-central1 (Iowa)</option>
+                  <option value="eastus">Azure: eastus (East US)</option>
+                </select>
+              </div>
+
+              {/* CIDR Option */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">VPC / VCN CIDR</label>
+                <select
+                  value={selectedCidr}
+                  onChange={(e) => setSelectedCidr(e.target.value)}
+                  className="w-full bg-slate-50 hover:bg-slate-100/80 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                >
+                  <option value="10.0.0.0/16">10.0.0.0/16 (Default)</option>
+                  <option value="172.16.0.0/16">172.16.0.0/16</option>
+                  <option value="192.168.0.0/16">192.168.0.0/16</option>
+                </select>
+              </div>
+
+              {/* Secrets Option */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Secrets Handling</label>
+                <select
+                  value={selectedSecrets}
+                  onChange={(e) => setSelectedSecrets(e.target.value)}
+                  className="w-full bg-slate-50 hover:bg-slate-100/80 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                >
+                  <option value="placeholders">Environment placeholders</option>
+                  <option value="vault">HashiCorp Vault</option>
+                  <option value="native">Native Secrets Manager</option>
+                </select>
+              </div>
+
+              {/* Probes Option */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Health Probes</label>
+                <select
+                  value={selectedProbes}
+                  onChange={(e) => setSelectedProbes(e.target.value)}
+                  className="w-full bg-slate-50 hover:bg-slate-100/80 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-700 focus:outline-none transition-all cursor-pointer font-medium"
+                >
+                  <option value="enabled">Enabled (liveness + readiness)</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 mt-2">
+              <button
+                type="button"
+                onClick={() => setShowAssumptionsModal(false)}
+                className="text-xs font-bold px-4 py-2 bg-slate-100 hover:bg-slate-200 text-gray-700 rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAssumptionsModal(false);
+                  const targetPrompt = promptVal.trim();
+                  if (targetPrompt) {
+                    const extraInstructions = `\n\n[Assumptions configuration: Region=${selectedRegion}, CIDR=${selectedCidr}, Secrets=${selectedSecrets}, Probes=${selectedProbes}]`;
+                    void sendMessage(targetPrompt + extraInstructions);
+                  }
+                }}
+                className="bg-indigo-600 hover:bg-indigo-750 text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer active:scale-95"
+              >
+                Apply & Regenerate
               </button>
             </div>
           </div>
