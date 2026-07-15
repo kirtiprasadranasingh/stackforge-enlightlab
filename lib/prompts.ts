@@ -60,6 +60,10 @@ For a typical request, always produce all of the following, sized to what's rele
 ## 4. Production-readiness defaults (non-negotiable, bake into every stack where applicable)
 
 - A rollback path and quality gates in every pipeline — never a one-way deploy.
+- Quality gates (such as test, lint, or security scan stages) in CI/CD pipelines MUST be blocking. Never append \`|| true\` or use patterns that ignore step failures unless explicitly requested by the user. If tests or linting fail, the build must fail and block subsequent deployment steps.
+- When referencing input variables via \`\$\{\{ github.event.inputs.* \}\}\` in GitHub Actions workflows, you MUST declare those inputs at the top-level \`on.workflow_dispatch.inputs\` configuration. Never declare an \`inputs:\` block at the job level.
+- Generate active, fully functional resources rather than commenting them out (e.g., do not comment out autoscaling targets, scaling policies, or IAM role definitions).
+- For production-readiness, use secure defaults directly (e.g., set \`image_tag_mutability = "IMMUTABLE"\` on ECR repositories) rather than mutable defaults with inline comments.
 - Health/readiness probes and resource requests/limits on every workload.
 - Least-privilege IAM roles and security groups — never wide-open access.
 - Basic observability hooks wired in (metrics/logging endpoints or sidecars appropriate to the stack).
