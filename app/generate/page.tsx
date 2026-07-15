@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import type {
   Presets,
@@ -54,6 +54,8 @@ export default function GeneratePage() {
 
   const [leftWidth, setLeftWidth] = useState(420);
   const [isDragging, setIsDragging] = useState(false);
+  const [promptVal, setPromptVal] = useState('');
+  const [showDeployModal, setShowDeployModal] = useState(false);
 
   useEffect(() => {
     if (!isDragging) return;
@@ -316,6 +318,64 @@ export default function GeneratePage() {
     setStatusMessage('');
     setIsGenerating(false);
   };
+  const mockAssumptions = useMemo(() => {
+    return [
+      presets.cloud === 'oracle'
+        ? 'OCI Region: ap-mumbai-1'
+        : presets.cloud === 'aws'
+        ? 'AWS Region: us-east-1'
+        : presets.cloud === 'gcp'
+        ? 'GCP Region: us-central1'
+        : 'Azure Region: eastus',
+      'VPC / VCN CIDR: 10.0.0.0/16',
+      presets.orchestrator === 'eks' ||
+      presets.orchestrator === 'gke' ||
+      presets.orchestrator === 'aks' ||
+      presets.orchestrator === 'oke'
+        ? 'K8s Cluster Node Pools: Active'
+        : 'Serverless Container Scaling',
+      'Secrets: Environment placeholders',
+      'Health Probes: Enabled',
+      'Resource Requests/Limits: Hard bounds applied',
+    ];
+  }, [presets]);
+
+  const handleCopyAllText = useCallback(async () => {
+    const blob = files
+      .map((f) => `===== ${f.path} =====\n${f.content}`)
+      .join('\n\n');
+    await copyToClipboard(blob);
+  }, [files]);
+
+  const handleDownloadZip = useCallback(async () => {
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    files.forEach((file) => {
+      zip.file(file.path, file.content);
+    });
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    
+    let filename = 'stackforge-scaffold';
+    const lastUser = [...messages].reverse().find(m => m.role === 'user')?.content;
+    if (lastUser) {
+      const sanitized = lastUser
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+      if (sanitized) {
+        filename = `stackforge-${sanitized.slice(0, 50)}`;
+      }
+    }
+    
+    a.download = `${filename}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [files, messages]);
 
   // ——— Setup (assessment-style) ———
   if (!setupDone) {
@@ -400,29 +460,32 @@ export default function GeneratePage() {
 
   // ——— Lovable-style workspace ———
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-white">
+    <div className="h-screen flex flex-col overflow-hidden bg-[#f8fafc]">
       {hasGeneratedFiles && (
-        <header className="border-b border-gray-100 sticky top-0 bg-white/95 backdrop-blur-sm z-50 shrink-0">
+        <header className="border-b border-gray-200 sticky top-0 bg-white z-50 shrink-0 select-none">
           <div className="px-6 h-14 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <Link href="/" className="flex items-center gap-2.5 shrink-0 no-underline">
-                <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-7 w-auto object-contain" />
-                <div className="flex flex-col select-none leading-none">
-                  <span className="text-lg font-bold tracking-tight text-blue-600 font-sans">
-                    Enlight Lab
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-150 flex items-center justify-center text-indigo-650 shrink-0 font-extrabold text-sm shadow-sm">
+                  ⚡
+                </div>
+                <div className="flex flex-col select-none leading-tight">
+                  <span className="text-sm font-bold text-gray-900 font-sans">
+                    StackForge Copilot
                   </span>
-                  <span className="text-[6.5px] font-extrabold text-blue-600 tracking-[0.15em] uppercase mt-0.5">
-                    AI CLOUD BLUEPRINT GENERATOR
+                  <span className="text-[10px] text-gray-500 font-medium">
+                    by Enlight Lab
                   </span>
                 </div>
               </Link>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            
+            <div className="flex items-center gap-4 shrink-0">
               {isGenerating && (
                 <button
                   type="button"
                   onClick={handleStop}
-                  className="text-xs font-semibold px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-sm rounded-xl transition-all duration-200 active:scale-95"
+                  className="text-xs font-semibold px-4 py-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-sm rounded-xl transition-all duration-200 active:scale-95 cursor-pointer"
                 >
                   Stop
                 </button>
@@ -430,10 +493,20 @@ export default function GeneratePage() {
               <button
                 type="button"
                 onClick={handleNew}
-                className="text-xs font-semibold px-4 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-sm rounded-xl transition-all duration-200 active:scale-95"
+                className="text-xs font-semibold px-4 py-2.5 bg-indigo-600 hover:bg-indigo-750 text-white shadow-sm rounded-xl transition-all duration-200 active:scale-95 cursor-pointer"
               >
                 New Project
               </button>
+
+              <button type="button" className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer p-1" title="Notifications">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a9.04 9.04 0 01-2.857 0m-3 0a9.04 9.04 0 01-2.857 0M5 9a7 7 0 1114 0c0 3-1 3.5-3 5.5l-1 1H9l-1-1C5 12.5 5 12 5 9z" />
+                </svg>
+              </button>
+
+              <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-xs text-slate-700 font-bold select-none shrink-0 cursor-pointer" title="Profile">
+                SF
+              </div>
             </div>
           </div>
         </header>
@@ -457,245 +530,227 @@ export default function GeneratePage() {
 
       {/* Dynamic Workspace: Split vs. Full-Width Chat */}
       {hasGeneratedFiles ? (
-        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-gray-50 bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_800px_at_50%_150px,#eeeffc,transparent)] before:pointer-events-none">
-          {/* LEFT — Chat card */}
-          <section
-            style={{ width: typeof window !== 'undefined' && window.innerWidth >= 1024 ? `${leftWidth}px` : undefined }}
-            className="w-full lg:w-auto shrink-0 bg-white border border-gray-150 rounded-[28px] shadow-md flex flex-col min-h-0 max-h-[40vh] lg:max-h-none relative z-10 overflow-hidden"
-          >
-            <div className="px-4 py-3.5 border-b border-gray-150 bg-gradient-to-r from-gray-50/50 to-white flex items-center justify-between">
-              <div>
-                <p className="text-sm font-bold text-gray-950 tracking-tight flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-                  StackForge Copilot
-                </p>
-                <p className="text-[10px] text-gray-400 font-medium">Ask for modifications or explain files</p>
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-[#f8fafc]">
+          {/* LEFT — AI Assistant Sidebar */}
+          <aside className="w-80 shrink-0 flex flex-col gap-4 min-h-0 overflow-y-auto select-none no-scrollbar">
+            {/* AI Assistant Card */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-bold text-gray-900 tracking-tight uppercase">AI Assistant</h3>
+                <span className="text-[9px] font-extrabold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full uppercase tracking-wider border border-blue-100">
+                  BETA
+                </span>
               </div>
-              <span className="text-[9px] font-bold text-blue-600 bg-blue-50/80 px-2 py-0.5 rounded-full uppercase tracking-wider select-none shrink-0 border border-blue-100/50">
-                Active
-              </span>
+              <p className="text-[11px] text-gray-500 mt-1">
+                Describe your infrastructure needs in natural language.
+              </p>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  if (promptVal.trim()) {
+                    void sendMessage(promptVal);
+                  }
+                }}
+                disabled={isGenerating}
+                className="w-full mt-3 text-xs font-bold py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white rounded-xl shadow-sm transition-all duration-200 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <span>⚡ Generate infrastructure</span>
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 flex flex-col min-h-0">
-              {messages.map((m, idx) => (
-                <div
-                  key={m.id}
-                  className={`w-full flex gap-2.5 ${m.role === 'user' ? 'justify-end' : 'justify-start'} items-start animate-fade-slide-up`}
-                  style={{ animationDelay: `${idx * 40}ms` }}
+            {/* Your Prompt Card */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex-1 flex flex-col min-h-0">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider">Your Prompt</h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPromptVal('');
+                    handleNew();
+                  }}
+                  className="text-[10px] text-blue-600 hover:text-blue-700 font-bold transition-colors cursor-pointer"
                 >
-                  {m.role !== 'user' && (
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-sm border border-blue-500/10 select-none">
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
-                      </svg>
-                    </div>
-                  )}
-                  <div
-                    className="max-w-[80%] text-sm leading-relaxed flex flex-col"
-                  >
-                    <div
-                      className={`rounded-2xl px-4 py-2.5 shadow-sm border ${
-                        m.role === 'user'
-                          ? 'bg-[#0066FF] border-[#0066FF] text-white rounded-tr-none shadow-md shadow-blue-500/5'
-                          : m.role === 'system'
-                            ? 'bg-amber-50 text-[var(--muted-text)] border-amber-100 font-mono text-xs'
-                            : 'bg-white border border-gray-150 text-gray-800 rounded-tl-none'
-                      }`}
-                    >
-                      <FormattedMessage
-                        content={m.content}
-                        className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-[var(--muted-text)]' : 'text-gray-800'}
-                      />
-                    </div>
-                    {/* Utility icons for assistant replies */}
-                    {m.role === 'assistant' && (
-                      <div className="flex items-center gap-2 mt-1.5 ml-1 text-gray-400">
-                        <button type="button" title="Revert to this version" className="hover:text-gray-600 transition-colors p-0.5">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
-                          </svg>
-                        </button>
-                        <button type="button" title="Like response" className="hover:text-gray-600 transition-colors p-0.5">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6.633 10.25c.896 0 1.7-.33 2.312-.87.412-.363.953-.518 1.488-.409l1.404.288c.832.17 1.3.75 1.3 1.601V15c0 .887-.76 1.6-1.7 1.6H9.167A8.3 8.3 0 0 1 6 15V10.25ZM18 16.6h.17c.887 0 1.6-.76 1.6-1.7v-3.75c0-.887-.76-1.6-1.6-1.6H18" />
-                          </svg>
-                        </button>
-                        <button type="button" title="Dislike response" className="hover:text-gray-600 transition-colors p-0.5">
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 15h9.75M7.5 15a2.25 2.25 0 0 0-2.25-2.25m2.25 2.25v3a2.25 2.25 0 0 0 2.25 2.25h3.75a2.25 2.25 0 0 0 2.25-2.25v-3m-6 0h6m-6 0a2.25 2.25 0 0 1-2.25-2.25M17.25 15a2.25 2.25 0 0 0 2.25-2.25V9.75A2.25 2.25 0 0 0 17.25 7.5h-3.75a2.25 2.25 0 0 0-2.25 2.25v3" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          title="Copy response text"
-                          onClick={() => void copyToClipboard(m.content)}
-                          className="hover:text-gray-600 transition-colors p-0.5"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3a2.25 2.25 0 0 0-2.25 2.25v.008c0 .125-.08.235-.2.244A2.251 2.251 0 0 0 4.5 7.05v11.5c0 1.242 1.008 2.25 2.25 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25V7.05a2.25 2.25 0 0 0-3.55-1.908c-.12-.09-.2-.2-.2-.325v-.008Z" />
-                          </svg>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {m.role === 'user' && (
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-sm text-[10px] font-extrabold font-sans tracking-wide select-none">
-                      US
-                    </div>
-                  )}
-                </div>
-              ))}
-              {isGenerating && (
-                <div className="rounded-2xl bg-indigo-50 border border-indigo-100 px-4 py-2.5 text-sm text-indigo-600 self-start rounded-tl-none font-medium animate-pulse">
-                  {statusMessage || 'StackForge is generating...'}
-                </div>
-              )}
-              {error && !isGenerating && (
-                <div className="rounded-2xl bg-red-50 border border-red-100 px-4 py-2.5 text-xs text-red-600 self-start rounded-tl-none">
-                  {error}
-                </div>
-              )}
-              <div ref={chatEndRef} />
+                  Clear
+                </button>
+              </div>
+              <textarea
+                value={promptVal}
+                onChange={(e) => setPromptVal(e.target.value)}
+                disabled={isGenerating}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (promptVal.trim()) {
+                      void sendMessage(promptVal);
+                    }
+                  }
+                }}
+                placeholder="yaml / apiVersion: v2 / name: go-microservice / description: A Helm chart..."
+                className="flex-1 bg-slate-50 border border-gray-200 focus:border-indigo-500 focus:bg-white rounded-xl p-3 text-xs text-gray-800 focus:outline-none resize-none transition-all leading-relaxed font-mono w-full min-h-[140px] focus:ring-1 focus:ring-indigo-100"
+              />
             </div>
 
-            {/* Suggested Prompts / Actions */}
-            {files.length > 0 && !isGenerating && (
-              <div className="flex flex-wrap gap-2 px-4 pb-2.5 pt-1.5 border-t border-gray-100 bg-white select-none">
-                {['Add HPA autoscaling', 'Add dev/prod envs', 'Setup PostgreSQL DB', 'Secure network NSGs'].map((suggestion, i) => (
+            {/* Key Assumptions Card */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+              <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-2.5">Key Assumptions</h4>
+              <div className="space-y-2">
+                {mockAssumptions.map((ass, i) => (
+                  <div key={i} className="flex items-start gap-2 text-[11px] text-gray-600 leading-tight">
+                    <svg className="w-3.5 h-3.5 text-indigo-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                    </svg>
+                    <span>{ass}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="text-[10px] text-blue-600 hover:text-blue-700 font-bold mt-2.5 transition-colors cursor-pointer"
+              >
+                View all
+              </button>
+            </div>
+
+            {/* Actions Grid */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+              <h4 className="text-[10px] font-bold text-gray-800 uppercase tracking-wider mb-2.5">Actions</h4>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { text: 'Add HPA autoscaling', icon: '📈' },
+                  { text: 'Add dev/prod envs', icon: '📁' },
+                  { text: 'Setup PostgreSQL DB', icon: '💾' },
+                  { text: 'Secure network NSGs', icon: '🛡️' }
+                ].map((action) => (
                   <button
-                    key={suggestion}
+                    key={action.text}
                     type="button"
                     onClick={() => {
-                      setInput(suggestion);
-                      void sendMessage(suggestion);
+                      setPromptVal(action.text);
+                      void sendMessage(action.text);
                     }}
-                    className="text-xs bg-white hover:bg-blue-50/60 hover:text-blue-600 text-gray-600 border border-gray-200 hover:border-blue-200 px-3.5 py-1.5 rounded-full transition-all duration-200 font-semibold shadow-sm cursor-pointer active:scale-95 animate-pop-item"
-                    style={{ animationDelay: `${i * 75}ms` }}
+                    className="text-[10px] bg-slate-50 hover:bg-indigo-50/60 hover:text-indigo-600 text-gray-600 hover:border-indigo-200 border border-gray-200 p-2.5 rounded-xl text-left transition-all duration-200 font-semibold shadow-sm cursor-pointer active:scale-95 leading-snug flex flex-col gap-1.5"
                   >
-                    {suggestion}
+                    <span>{action.icon}</span>
+                    <span>{action.text}</span>
                   </button>
                 ))}
               </div>
-            )}
+            </div>
 
-            {/* Chat Input Container */}
-            <div className="p-3 border-t border-[var(--border-color)] bg-white">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (input.trim().length >= 1) {
-                    void sendMessage(input);
-                  }
-                }}
-                className="relative border border-gray-200 focus-glow focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 rounded-2xl p-2 bg-gray-50 flex items-center gap-2 transition-all"
-              >
-                <button
-                  type="button"
-                  className="w-8 h-8 flex items-center justify-center rounded-xl bg-gray-150 hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors shrink-0"
-                  title="Add context (files, text)"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                  </svg>
-                </button>
-                <input
-                  className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 focus:outline-none py-1 border-0 min-w-0"
-                  placeholder={files.length ? "Ask StackForge..." : "Describe what you want to build..."}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  disabled={isGenerating}
-                />
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    className="hidden sm:flex items-center gap-0.5 px-2 py-1 rounded-lg hover:bg-gray-200 text-[11px] font-semibold text-gray-400 hover:text-gray-600 transition-colors"
-                  >
-                    <span>Build</span>
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    className="w-8 h-8 flex items-center justify-center rounded-xl hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
-                    title="Voice input"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
-                    </svg>
-                  </button>
-                  <button
-                    type="submit"
-                    className="w-8 h-8 flex items-center justify-center rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white transition-colors shrink-0"
-                    disabled={isGenerating || input.trim().length < 1}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18" />
-                    </svg>
-                  </button>
+            {/* Powered by */}
+            <p className="text-[9px] text-gray-400 font-semibold tracking-wide text-center pt-1">
+              🚀 Powered by Enlight Lab AI
+            </p>
+          </aside>
+
+          {/* RIGHT — IDE / files area */}
+          <section className="flex-1 min-w-0 flex flex-col gap-4 overflow-hidden">
+            {/* Stats Row */}
+            <div className="bg-white border border-gray-200 rounded-xl px-5 py-3 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 select-none shrink-0">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full max-w-3xl">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 font-bold shrink-0">
+                    📂
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Project</p>
+                    <p className="text-xs font-bold text-gray-800 mt-1 truncate max-w-[130px]">
+                      {presets.cloud === 'oracle' ? 'OCI' : presets.cloud.toUpperCase()} Microservice Infra
+                    </p>
+                  </div>
                 </div>
-              </form>
-            </div>
-          </section>
 
-          {/* Draggable Divider Slider */}
-          <div
-            onMouseDown={(e) => {
-              e.preventDefault();
-              setIsDragging(true);
-            }}
-            className="hidden lg:flex w-2 hover:w-2.5 bg-transparent hover:bg-blue-500/20 active:bg-blue-600/30 transition-all cursor-col-resize h-full self-stretch z-30 select-none relative justify-center items-center group rounded-full shrink-0"
-            title="Drag to resize panels"
-          >
-            {/* Grab handle dot indicators */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-10 rounded-full bg-gray-200 group-hover:bg-blue-400 group-active:bg-blue-500 transition-colors flex flex-col justify-between py-1.5 shadow-sm border border-gray-300/40">
-              <span className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-white self-center"></span>
-              <span className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-white self-center"></span>
-              <span className="w-1 h-1 rounded-full bg-gray-400 group-hover:bg-white self-center"></span>
-            </div>
-          </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center text-purple-600 font-bold shrink-0">
+                    📄
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Workspace Blueprint</p>
+                    <p className="text-xs font-bold text-gray-800 mt-1">
+                      {files.length} files generated
+                    </p>
+                  </div>
+                </div>
 
-          {/* RIGHT — IDE / files card */}
-          <section className="flex-1 min-w-0 bg-white border border-gray-150 rounded-[28px] shadow-md flex flex-col overflow-hidden relative z-10">
-            <div className="px-4 py-2 border-b border-[var(--border-color)] bg-white flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[var(--navy-heading)]">Project</p>
-                <p className="text-xs text-[var(--muted-text)] truncate">
-                  {files.length
-                    ? `${files.length} files · reviewable scaffold`
-                    : 'Files appear here as they generate'}
-                </p>
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-650 font-bold shrink-0">
+                    ☁️
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Provider</p>
+                    <p className="text-xs font-bold text-gray-800 mt-1 uppercase truncate max-w-[110px]">
+                      {presets.cloud}, {presets.orchestrator}, {presets.ci}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center text-green-600 font-bold shrink-0">
+                    🕒
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider leading-none">Last updated</p>
+                    <p className="text-xs font-bold text-gray-800 mt-1">
+                      Just now
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 shrink-0 w-full sm:w-auto justify-end">
+                <button
+                  onClick={handleDownloadZip}
+                  className="text-xs font-bold px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                >
+                  📥 Download ZIP
+                </button>
+                <button
+                  onClick={handleCopyAllText}
+                  className="text-xs font-bold px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm rounded-xl transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                >
+                  📋 Copy all
+                </button>
               </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-hidden p-3 sm:p-4 bg-gray-50">
-              {files.length > 0 ? (
-                <div className="h-full overflow-auto space-y-4">
-                  {warnings.length > 0 && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-[var(--muted-text)]">
-                      {warnings.slice(0, 3).map((w, i) => (
-                        <div key={i}>• {w}</div>
-                      ))}
+            {/* Split View Editor Workspace */}
+            <div className="flex-1 min-h-0 overflow-hidden bg-gray-50 flex flex-col justify-between gap-4">
+              <FileViewer
+                files={files}
+                isGenerating={isGenerating}
+                promptText={promptVal}
+              />
+
+              {/* Bottom Alert Banner */}
+              {!isGenerating && files.length > 0 && (
+                <div className="bg-[#EEF2FF] border border-[#C7D2FE] text-[#3730A3] p-4 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm select-none shrink-0 animate-fade-slide-up">
+                  <div className="flex items-center gap-3">
+                    <span className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center text-[#4F46E5] text-sm shrink-0">
+                      ℹ️
+                    </span>
+                    <div>
+                      <p className="text-xs font-bold">Your infrastructure is ready!</p>
+                      <p className="text-[11px] text-[#4F46E5]/90 mt-0.5">
+                        {files.length} files generated successfully. You can review, download, or deploy this infrastructure.
+                      </p>
                     </div>
-                  )}
-                  <FileViewer
-                    files={files}
-                    isGenerating={isGenerating}
-                    promptText={[...messages].reverse().find((m) => m.role === 'user')?.content || ''}
-                  />
-                  {!isGenerating && files.length > 0 && (
-                    <div className="w-full">
-                      <LeadCapture summary={summary} fileCount={files.length} />
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="h-full flex items-center justify-center rounded-xl border border-dashed border-[var(--border-color)] bg-white/50">
-                  <p className="text-sm text-[var(--muted-text)] text-center px-6">
-                    {isGenerating
-                      ? 'Creating files…'
-                      : 'Send a message to start generating your stack'}
-                  </p>
+                  </div>
+
+                  <div className="flex gap-2 w-full sm:w-auto justify-end shrink-0">
+                    <button
+                      onClick={handleCopyAllText}
+                      className="text-xs font-bold px-4 py-2.5 text-[#4F46E5] hover:bg-indigo-50 border border-transparent rounded-xl transition-colors cursor-pointer"
+                    >
+                      Preview Plan
+                    </button>
+                    <button
+                      onClick={() => setShowDeployModal(true)}
+                      className="bg-[#4F46E5] hover:bg-[#4338CA] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all duration-200 active:scale-95 cursor-pointer flex items-center gap-1.5"
+                    >
+                      🚀 Deploy Infrastructure
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -866,6 +921,70 @@ export default function GeneratePage() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                 </svg>
               </Link>
+            </div>
+          </div>
+        </div>
+      )}
+      {showDeployModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 select-none animate-fade-slide-up">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-gray-900 uppercase flex items-center gap-1.5">
+                <span>🚀</span> Deploying stackforge Blueprint
+              </h3>
+              <button
+                onClick={() => setShowDeployModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors text-lg font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="text-xs text-gray-600 space-y-3 leading-relaxed">
+              <p>
+                StackForge is an infrastructure generator, not a hosting provider. You can deploy this scaffold by copying/downloading the workspace and running CLI commands.
+              </p>
+              
+              <div className="bg-slate-950 text-slate-100 p-3 rounded-xl font-mono text-[11px] leading-relaxed relative">
+                <p className="text-slate-500 mb-1"># Setup commands</p>
+                {presets.orchestrator === 'eks' || presets.orchestrator === 'gke' || presets.orchestrator === 'aks' || presets.orchestrator === 'oke' ? (
+                  <>
+                    <p>cd k8s/</p>
+                    <p>kubectl apply -f .</p>
+                  </>
+                ) : (
+                  <>
+                    <p>cd terraform/</p>
+                    <p>terraform init</p>
+                    <p>terraform apply -auto-approve</p>
+                  </>
+                )}
+                
+                <button
+                  onClick={() => {
+                    const text = presets.orchestrator === 'eks' || presets.orchestrator === 'gke' || presets.orchestrator === 'aks' || presets.orchestrator === 'oke'
+                      ? 'cd k8s/\nkubectl apply -f .'
+                      : 'cd terraform/\nterraform init\nterraform apply -auto-approve';
+                    void copyToClipboard(text);
+                  }}
+                  className="absolute top-2.5 right-2.5 text-[9px] font-bold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded transition-all cursor-pointer"
+                >
+                  Copy
+                </button>
+              </div>
+              
+              <p className="bg-amber-50 border border-amber-100 rounded-lg p-2.5 text-[10px] text-amber-800">
+                ⚠️ Ensure you have configured the appropriate credentials (e.g. AWS CLI, OCI configuration, Azure Login) in your shell environment before executing these commands.
+              </p>
+            </div>
+            
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                onClick={() => setShowDeployModal(false)}
+                className="text-xs font-bold px-4 py-2 bg-slate-100 hover:bg-slate-200 text-gray-700 rounded-xl transition-all active:scale-95 cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
