@@ -42,7 +42,7 @@ RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/1
 ENV TF_PLUGIN_CACHE_DIR=/usr/share/terraform/plugin-cache
 RUN mkdir -p /usr/share/terraform/plugin-cache \
   && cd /tmp \
-  && echo 'terraform { required_providers { aws = { source = "hashicorp/aws"; version = "~> 5.84.0" }; google = { source = "hashicorp/google"; version = "~> 6.0" }; azurerm = { source = "hashicorp/azurerm"; version = "~> 4.0" }; kubernetes = { source = "hashicorp/kubernetes"; version = "~> 2.30" }; helm = { source = "hashicorp/helm"; version = "~> 2.15" } } }' > prep.tf \
+  && printf 'terraform {\n  required_providers {\n    aws = {\n      source = "hashicorp/aws"\n      version = "~> 5.84.0"\n    }\n    google = {\n      source = "hashicorp/google"\n      version = "~> 6.0"\n    }\n    azurerm = {\n      source = "hashicorp/azurerm"\n      version = "~> 4.0"\n    }\n    kubernetes = {\n      source = "hashicorp/kubernetes"\n      version = "~> 2.30"\n    }\n    helm = {\n      source = "hashicorp/helm"\n      version = "~> 2.15"\n    }\n  }\n}\n' > prep.tf \
   && terraform init \
   && rm -f prep.tf \
   && chmod -R 777 /usr/share/terraform/plugin-cache
