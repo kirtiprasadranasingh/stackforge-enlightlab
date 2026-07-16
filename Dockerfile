@@ -38,6 +38,15 @@ RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/1
   && unzip /tmp/terraform.zip -d /usr/local/bin/ \
   && rm /tmp/terraform.zip
 
+# Pre-cache common Terraform providers to speed up runtime validate checks and prevent network downloads
+ENV TF_PLUGIN_CACHE_DIR=/usr/share/terraform/plugin-cache
+RUN mkdir -p /usr/share/terraform/plugin-cache \
+  && cd /tmp \
+  && echo 'terraform { required_providers { aws = { source = "hashicorp/aws"; version = "~> 5.84.0" }; google = { source = "hashicorp/google"; version = "~> 6.0" }; azurerm = { source = "hashicorp/azurerm"; version = "~> 4.0" }; kubernetes = { source = "hashicorp/kubernetes"; version = "~> 2.30" }; helm = { source = "hashicorp/helm"; version = "~> 2.15" } } }' > prep.tf \
+  && terraform init \
+  && rm -f prep.tf \
+  && chmod -R 777 /usr/share/terraform/plugin-cache
+
 # Install Helm (official script)
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
