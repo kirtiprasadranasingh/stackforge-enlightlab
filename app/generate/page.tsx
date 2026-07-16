@@ -57,11 +57,22 @@ export default function GeneratePage() {
   const [promptVal, setPromptVal] = useState('');
   const [showAssumptionsModal, setShowAssumptionsModal] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [lastUpdateTime, setLastUpdateTime] = useState('Today, 10:42 AM');
+  const [lastUpdateTime, setLastUpdateTime] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('us-east-1');
   const [selectedCidr, setSelectedCidr] = useState('10.0.0.0/16');
   const [selectedSecrets, setSelectedSecrets] = useState('placeholders');
   const [selectedProbes, setSelectedProbes] = useState('enabled');
+
+  useEffect(() => {
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLastUpdateTime(`Today, ${timeString}`);
+  }, []);
 
 
   useEffect(() => {
@@ -300,6 +311,13 @@ export default function GeneratePage() {
         setIsGenerating(false);
         setStatusMessage('');
         abortController.current = null;
+        const now = new Date();
+        const timeString = now.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+        setLastUpdateTime(`Today, ${timeString}`);
       }
     },
     [isGenerating, presets, mergeFile]
