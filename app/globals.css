@@ -216,6 +216,24 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--muted-text);
 }
 
+/* VS Code–style editor gutter */
+.vscode-gutter {
+  padding: 12px 0;
+  min-width: 3.25rem;
+  border-right: 1px solid #2b2b2b;
+}
+
+.vscode-ln {
+  padding: 0 12px 0 8px;
+  line-height: 1.55;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vscode-shell .code-highlight pre {
+  padding-left: 0 !important;
+}
+
 /* Shiki code blocks — keep readable full-width layout */
 .code-highlight {
   width: 100%;

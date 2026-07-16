@@ -10,6 +10,11 @@ import {
   assertOriginAllowed,
 } from '@/lib/rate-limit';
 import { appendAndParse, createParseState, parseJsonFallback, parseMarkdownFallback } from '@/lib/stream-parse';
+import {
+  buildValidationReadmeNotice,
+  parseValidationReport,
+  shouldAppendValidationWarning,
+} from '@/lib/validation-report';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -35,13 +40,13 @@ export async function OPTIONS(request: NextRequest) {
   }
   return new NextResponse(null, {
     status: 204,
-    headers: getCORSHeaders(origin),
+    headers: getCORSHeaders(origin, request),
   });
 }
 
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin');
-  const cors = getCORSHeaders(origin);
+  const cors = getCORSHeaders(origin, request);
 
   try {
     const gate = assertOriginAllowed(request);
@@ -431,19 +436,20 @@ export async function POST(request: NextRequest) {
                   }
 
                   reportText = output;
+                  const parsedReport = parseValidationReport(output);
 
-                  if (code === 0) {
+                  if (!parsedReport.failed) {
                     passed = true;
                     break;
                   }
 
-                  const failLines = output
-                    .split('\n')
-                    .map((l: string) => l.trim())
-                    .filter((l: string) => l.startsWith('FAIL  -'));
+                  const failLines = parsedReport.checkLines.filter((l) =>
+                    l.startsWith('FAIL')
+                  );
 
                   if (failLines.length === 0) {
-                    passed = false;
+                    // Script exited non-zero but produced no actionable FAIL lines — skip auto-fix
+                    passed = !shouldAppendValidationWarning(output, parsedReport);
                     break;
                   }
 
@@ -498,11 +504,11 @@ export async function POST(request: NextRequest) {
                 }
               }
 
-              if (!passed) {
+              const finalParsedReport = parseValidationReport(reportText);
+              if (shouldAppendValidationWarning(reportText, finalParsedReport)) {
                 try {
                   const readmeIdx = currentFiles.findIndex(f => f.path === 'README.md');
-                  const cleanReport = reportText.replace(/\u001b\[\d+m/g, '');
-                  const notice = `\n\n---\n\n### ⚠️ Automated Validation Warning\nAutomated validation found issues that could not be auto-resolved:\n\n\`\`\`\n${cleanReport}\n\`\`\`\n`;
+                  const notice = buildValidationReadmeNotice(finalParsedReport);
                   if (readmeIdx !== -1) {
                     const updatedContent = currentFiles[readmeIdx].content + notice;
                     currentFiles[readmeIdx] = { ...currentFiles[readmeIdx], content: updatedContent };

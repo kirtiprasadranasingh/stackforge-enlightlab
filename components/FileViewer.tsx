@@ -54,40 +54,52 @@ function buildFileTree(files: { path: string }[]): TreeNode[] {
   return root;
 }
 
-function getFileIcon(path: string) {
+function fileTypeLabel(path: string): string {
   const ext = path.split('.').pop()?.toLowerCase();
   const name = path.split('/').pop()?.toLowerCase();
-  
-  if (name === 'dockerfile') return <span className="w-4 h-4 flex items-center justify-center text-[10px] select-none shrink-0 font-bold border border-blue-500/20 bg-blue-500/5 rounded">🐳</span>;
-  if (ext === 'json') return <span className="w-4 h-4 flex items-center justify-center text-[10px] text-amber-500 select-none shrink-0 font-bold border border-amber-500/20 bg-amber-500/5 rounded">{"{}"}</span>;
-  if (ext === 'tf' || ext === 'tfvars') return <span className="w-4 h-4 flex items-center justify-center text-[8px] text-purple-500 select-none shrink-0 font-extrabold border border-purple-500/20 bg-purple-500/5 rounded">TF</span>;
-  if (ext === 'js' || ext === 'jsx' || ext === 'ts' || ext === 'tsx') return <span className="w-4 h-4 flex items-center justify-center text-[8px] text-amber-600 select-none shrink-0 font-bold border border-amber-500/20 bg-amber-500/5 rounded">JS</span>;
-  if (ext === 'yml' || ext === 'yaml') return <span className="w-4 h-4 flex items-center justify-center text-[8px] text-indigo-500 select-none shrink-0 font-extrabold border border-indigo-500/20 bg-indigo-500/5 rounded">YML</span>;
-  if (ext === 'md') return <span className="w-4 h-4 flex items-center justify-center text-[8px] text-blue-500 select-none shrink-0 font-extrabold border border-blue-500/20 bg-blue-500/5 rounded">MD</span>;
-  
+  if (name === 'dockerfile') return 'Docker';
+  if (ext === 'ts') return 'TS';
+  if (ext === 'tsx') return 'TSX';
+  if (ext === 'js') return 'JS';
+  if (ext === 'tf' || ext === 'hcl') return 'HCL';
+  if (ext === 'yml' || ext === 'yaml') return 'YAML';
+  if (ext === 'md') return 'MD';
+  if (ext === 'json') return 'JSON';
+  return (ext || 'file').toUpperCase();
+}
+
+function FileGlyph({ path, dimmed }: { path: string; dimmed?: boolean }) {
+  const ext = path.split('.').pop()?.toLowerCase();
+  const name = path.split('/').pop()?.toLowerCase();
+  let color = 'bg-[#519aba]';
+  if (name === 'dockerfile') color = 'bg-[#0db7ed]';
+  else if (ext === 'tf' || ext === 'hcl') color = 'bg-[#844fbb]';
+  else if (ext === 'yml' || ext === 'yaml') color = 'bg-[#cb171e]';
+  else if (ext === 'md') color = 'bg-[#519aba]';
+  else if (ext === 'json') color = 'bg-[#cbcb41]';
+  else if (ext === 'ts' || ext === 'tsx' || ext === 'js') color = 'bg-[#519aba]';
+
   return (
-    <span className="w-4 h-4 flex items-center justify-center text-[10px] select-none shrink-0 font-bold border border-gray-500/20 bg-gray-500/5 rounded">
-      📄
-    </span>
+    <span
+      className={`w-4 h-4 rounded-[2px] shrink-0 ${color} ${dimmed ? 'opacity-70' : ''}`}
+      aria-hidden
+    />
   );
 }
 
 function RenderTreeNode({
   node,
-  level,
   selectedPath,
   onSelect,
   searchQuery,
 }: {
   node: TreeNode;
-  level: number;
   selectedPath: string | null;
   onSelect: (path: string) => void;
   searchQuery: string;
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const isFolderOpen = isOpen || searchQuery.trim() !== '';
-
   const active = node.path === selectedPath;
 
   if (node.type === 'folder') {
@@ -96,29 +108,26 @@ function RenderTreeNode({
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className="w-full flex items-center gap-1.5 py-1 px-1.5 text-xs font-semibold text-gray-600 hover:bg-slate-100/60 rounded-md text-left select-none cursor-pointer transition-all duration-150"
+          className="w-full flex items-center gap-1 py-[3px] pr-2 pl-1 text-[13px] text-[#cccccc] hover:bg-[#2a2d2e] rounded-sm text-left cursor-pointer"
         >
           <svg
-            className={`w-3 h-3 text-gray-450 transition-transform shrink-0 ${isFolderOpen ? 'rotate-90' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth="3"
+            className={`w-3 h-3 text-[#858585] transition-transform shrink-0 ${isFolderOpen ? 'rotate-90' : ''}`}
+            fill="currentColor"
+            viewBox="0 0 20 20"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+            <path d="M6 4l8 6-8 6V4z" />
           </svg>
-          <svg className="w-3.5 h-3.5 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" />
+          <svg className="w-4 h-4 text-[#dcb67a] shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
           </svg>
-          <span className="truncate text-gray-700">{node.name}</span>
+          <span className="truncate">{node.name}</span>
         </button>
         {isFolderOpen && (
-          <div className="space-y-0.5 mt-0.5 ml-[11px] pl-3.5 border-l border-slate-200/80">
+          <div className="ml-3">
             {node.children.map((child) => (
               <RenderTreeNode
                 key={child.path}
                 node={child}
-                level={level + 1}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
                 searchQuery={searchQuery}
@@ -134,16 +143,46 @@ function RenderTreeNode({
     <button
       type="button"
       onClick={() => onSelect(node.path)}
-      className={`w-full flex items-center gap-2 py-1.5 px-1.5 text-xs font-mono rounded-md truncate transition-all cursor-pointer border border-transparent ${
+      className={`w-full flex items-center gap-1.5 py-[3px] pr-2 pl-5 text-[13px] rounded-sm truncate cursor-pointer ${
         active
-          ? 'bg-indigo-50/75 text-indigo-700 font-bold border-l-indigo-500'
-          : 'text-gray-650 hover:bg-slate-150 hover:text-gray-900'
+          ? 'bg-[#37373d] text-white'
+          : 'text-[#cccccc] hover:bg-[#2a2d2e]'
       }`}
     >
-      <span className="w-3 shrink-0" />
-      {getFileIcon(node.path)}
+      <FileGlyph path={node.path} dimmed={!active} />
       <span className="truncate">{node.name}</span>
     </button>
+  );
+}
+
+function Breadcrumb({ path }: { path: string }) {
+  const parts = path.split('/');
+  return (
+    <div className="flex items-center gap-1 text-[12px] text-[#cccccc] min-w-0 overflow-hidden">
+      {parts.map((part, idx) => {
+        const isLast = idx === parts.length - 1;
+        return (
+          <span key={`${part}-${idx}`} className="flex items-center gap-1 min-w-0">
+            {idx > 0 && <span className="text-[#858585] shrink-0">›</span>}
+            <span
+              className={`truncate ${isLast ? 'text-white' : 'text-[#cccccc]'}`}
+              title={part}
+            >
+              {isLast ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-[#3794ff] px-1 py-0.5 bg-[#3794ff]/10 rounded">
+                    {fileTypeLabel(path)}
+                  </span>
+                  {part}
+                </span>
+              ) : (
+                part
+              )}
+            </span>
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -153,9 +192,10 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
   const [editorTheme, setEditorTheme] = useState<'dark' | 'light'>('dark');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const activePath = selectedPath && files.some((f) => f.path === selectedPath)
-    ? selectedPath
-    : (files[0]?.path || null);
+  const activePath =
+    selectedPath && files.some((f) => f.path === selectedPath)
+      ? selectedPath
+      : files[0]?.path || null;
 
   const selected = useMemo(
     () => files.find((f) => f.path === activePath) || files[0],
@@ -164,12 +204,14 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
 
   const filteredFiles = useMemo(() => {
     if (!searchQuery.trim()) return files;
-    return files.filter(f => f.path.toLowerCase().includes(searchQuery.toLowerCase()));
+    return files.filter((f) =>
+      f.path.toLowerCase().includes(searchQuery.toLowerCase())
+    );
   }, [files, searchQuery]);
 
-  const fileTree = useMemo(() => {
-    return buildFileTree(filteredFiles);
-  }, [filteredFiles]);
+  const fileTree = useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
+
+  const lineCount = selected?.content.split('\n').length ?? 0;
 
   const downloadAll = useCallback(async () => {
     const zip = new JSZip();
@@ -182,7 +224,10 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
     a.href = url;
     let filename = 'stackforge-scaffold';
     if (promptText) {
-      const sanitized = promptText.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const sanitized = promptText
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
       if (sanitized) filename = `stackforge-${sanitized.slice(0, 50)}`;
     }
     a.download = `${filename}.zip`;
@@ -194,41 +239,80 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
 
   if (files.length === 0) return null;
 
+  const isDark = editorTheme === 'dark';
+
   return (
     <>
       {isFullscreen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80]" onClick={() => setIsFullscreen(false)} />
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[80]"
+          onClick={() => setIsFullscreen(false)}
+        />
       )}
-      <div className={`flex flex-col md:flex-row w-full flex-1 min-h-0 border border-gray-200 shadow-sm rounded-xl overflow-hidden bg-white select-none transition-all duration-300 ${isFullscreen ? 'fixed inset-10 z-[90] shadow-2xl border border-indigo-300' : ''}`}>
-      <aside className={`w-full md:w-60 md:shrink-0 border-b md:border-b-0 md:border-r border-gray-200 bg-[#f8fafc] flex flex-col justify-between max-h-[260px] md:max-h-none overflow-hidden select-none ${isFullscreen ? 'hidden' : ''}`}>
-        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          <div className="p-3 border-b border-gray-200/80 bg-[#f8fafc]">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search files..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white border border-gray-200 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-700 focus:outline-none transition-all placeholder-gray-400 shadow-sm"
-              />
-              <svg className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-              </svg>
-            </div>
+      <div
+        className={`vscode-shell flex flex-col md:flex-row w-full flex-1 min-h-0 border overflow-hidden select-none transition-all duration-200 ${
+          isFullscreen
+            ? 'fixed inset-6 z-[90] shadow-2xl border-[#3c3c3c] rounded-lg'
+            : 'border-[#3c3c3c] rounded-lg shadow-lg'
+        } ${isDark ? 'bg-[#1e1e1e]' : 'bg-[#f3f3f3]'}`}
+      >
+        {/* Activity bar */}
+        <div
+          className={`hidden md:flex w-12 shrink-0 flex-col items-center py-3 gap-3 border-r ${
+            isDark ? 'bg-[#333333] border-[#252526]' : 'bg-[#ececec] border-[#d4d4d4]'
+          } ${isFullscreen ? '' : ''}`}
+        >
+          <div
+            className={`w-8 h-8 rounded flex items-center justify-center ${
+              isDark ? 'bg-[#252526] text-[#75beff]' : 'bg-white text-[#007acc]'
+            }`}
+            title="Explorer"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h18M3 17h18" />
+            </svg>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-1 bg-[#f8fafc] min-h-0">
-            <div className="px-2 pb-2 text-[10px] font-bold text-gray-400 select-none tracking-wider flex items-center gap-1.5 uppercase">
-              <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-              </svg>
-              ROOT
+        </div>
+
+        {/* Sidebar explorer */}
+        <aside
+          className={`w-full md:w-56 md:shrink-0 flex flex-col max-h-[220px] md:max-h-none overflow-hidden border-b md:border-b-0 md:border-r ${
+            isDark ? 'bg-[#252526] border-[#3c3c3c]' : 'bg-[#f3f3f3] border-[#d4d4d4]'
+          }`}
+        >
+          <div
+            className={`px-3 py-2 text-[11px] font-semibold uppercase tracking-wider ${
+              isDark ? 'text-[#bbbbbb]' : 'text-[#616161]'
+            }`}
+          >
+            Explorer
+          </div>
+          <div className="px-2 pb-2">
+            <input
+              type="text"
+              placeholder="Search files"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={`w-full rounded border px-2 py-1 text-[12px] focus:outline-none focus:ring-1 ${
+                isDark
+                  ? 'bg-[#3c3c3c] border-[#3c3c3c] text-[#cccccc] placeholder-[#858585] focus:ring-[#007acc]'
+                  : 'bg-white border-[#d4d4d4] text-[#333] placeholder-[#999] focus:ring-[#007acc]'
+              }`}
+            />
+          </div>
+          <div className="flex-1 overflow-y-auto px-1 pb-2 min-h-0">
+            <div
+              className={`px-2 py-1 text-[11px] font-bold uppercase tracking-wide ${
+                isDark ? 'text-[#bbbbbb]' : 'text-[#616161]'
+              }`}
+            >
+              STACKFORGE
             </div>
             <div className="space-y-0.5">
               {fileTree.map((node) => (
                 <RenderTreeNode
                   key={node.path}
                   node={node}
-                  level={0}
                   selectedPath={activePath}
                   onSelect={setSelectedPath}
                   searchQuery={searchQuery}
@@ -236,90 +320,133 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
               ))}
             </div>
           </div>
-        </div>
-      </aside>
-      <div className={`flex-1 min-w-0 flex flex-col overflow-hidden relative transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-slate-950 text-gray-100' : 'bg-slate-50 text-gray-800'}`}>
-        <div className={`flex items-center justify-between shrink-0 select-none border-b transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-gray-900 border-gray-800/80' : 'bg-slate-100 border-gray-200'}`}>
-          <div className="flex overflow-x-auto no-scrollbar flex-1">
-            {files.map((f) => {
-              const name = f.path.split('/').pop() || f.path;
-              const active = f.path === selected?.path;
-              return (
-                <button
-                  key={f.path}
-                  type="button"
-                  onClick={() => setSelectedPath(f.path)}
-                  className={`flex items-center gap-2.5 px-4 py-3 text-[11px] font-mono border-r transition-all shrink-0 cursor-pointer select-none ${editorTheme === 'dark' ? 'border-gray-850' : 'border-gray-200'} ${
-                    active 
-                      ? (editorTheme === 'dark' ? 'bg-slate-950 text-white font-bold border-t-2 border-t-indigo-500' : 'bg-white text-indigo-700 font-bold border-t-2 border-t-indigo-500') 
-                      : (editorTheme === 'dark' ? 'text-gray-400 hover:bg-slate-900 hover:text-gray-200' : 'text-gray-500 hover:bg-slate-200 hover:text-gray-850')
-                  }`}
-                >
-                  {getFileIcon(f.path)}
-                  <span>{name}</span>
-                </button>
-              );
-            })}
+        </aside>
+
+        {/* Editor pane */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {/* Tab bar */}
+          <div
+            className={`flex items-center shrink-0 border-b overflow-hidden ${
+              isDark ? 'bg-[#2d2d2d] border-[#252526]' : 'bg-[#ececec] border-[#d4d4d4]'
+            }`}
+          >
+            <div className="flex overflow-x-auto no-scrollbar flex-1 min-w-0">
+              {files.map((f) => {
+                const name = f.path.split('/').pop() || f.path;
+                const active = f.path === selected?.path;
+                return (
+                  <button
+                    key={f.path}
+                    type="button"
+                    onClick={() => setSelectedPath(f.path)}
+                    className={`flex items-center gap-2 px-3 py-2 text-[12px] border-r shrink-0 cursor-pointer min-w-0 max-w-[180px] ${
+                      isDark ? 'border-[#252526]' : 'border-[#d4d4d4]'
+                    } ${
+                      active
+                        ? isDark
+                          ? 'bg-[#1e1e1e] text-white'
+                          : 'bg-white text-[#333]'
+                        : isDark
+                          ? 'bg-[#2d2d2d] text-[#969696] hover:bg-[#1e1e1e] hover:text-[#cccccc]'
+                          : 'bg-[#ececec] text-[#616161] hover:bg-[#f3f3f3]'
+                    }`}
+                  >
+                    <FileGlyph path={f.path} />
+                    <span className="truncate">{name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-1 px-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setEditorTheme(isDark ? 'light' : 'dark')}
+                className={`p-1.5 rounded text-[11px] cursor-pointer ${
+                  isDark
+                    ? 'text-[#cccccc] hover:bg-[#3c3c3c]'
+                    : 'text-[#616161] hover:bg-[#d4d4d4]'
+                }`}
+                title="Toggle theme"
+              >
+                {isDark ? 'Light' : 'Dark'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(!isFullscreen)}
+                className={`p-1.5 rounded text-[11px] cursor-pointer ${
+                  isDark
+                    ? 'text-[#cccccc] hover:bg-[#3c3c3c]'
+                    : 'text-[#616161] hover:bg-[#d4d4d4]'
+                }`}
+                title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              >
+                {isFullscreen ? 'Exit' : 'Full'}
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 px-3 shrink-0">
-            <button
-              type="button"
-              onClick={() => setEditorTheme(editorTheme === 'dark' ? 'light' : 'dark')}
-              className={`cursor-pointer transition-colors p-1 px-1.5 rounded text-[10px] font-bold flex items-center gap-1 ${
-                editorTheme === 'dark' ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-200'
-              }`}
-              title="Toggle theme"
-            >
-              <span>{editorTheme === 'dark' ? '☀️' : '🌙'}</span>
-              <span className="hidden sm:inline">{editorTheme === 'dark' ? 'Light' : 'Dark'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsFullscreen(!isFullscreen)}
-              className={`cursor-pointer transition-colors p-1 px-1.5 rounded text-[10px] font-bold flex items-center gap-1 ${
-                editorTheme === 'dark' ? 'text-gray-400 hover:text-white hover:bg-gray-800' : 'text-gray-600 hover:text-gray-900 hover:bg-slate-200'
-              }`}
-              title={isFullscreen ? "Collapse panel" : "Expand panel"}
-            >
-              <span>⛶</span>
-              <span className="hidden sm:inline">{isFullscreen ? 'Collapse' : 'Fullscreen'}</span>
-            </button>
-          </div>
-        </div>
-        <div className={`flex-1 overflow-auto min-w-0 code-highlight relative transition-colors duration-200 ${editorTheme === 'dark' ? 'bg-slate-950' : 'bg-white'}`}>
+
+          {/* Breadcrumb */}
           {selected && (
-            <CodeBlock code={selected.content} language={selected.language} theme={editorTheme} />
+            <div
+              className={`px-3 py-1.5 border-b shrink-0 ${
+                isDark ? 'bg-[#1e1e1e] border-[#252526]' : 'bg-white border-[#d4d4d4]'
+              }`}
+            >
+              <Breadcrumb path={selected.path} />
+            </div>
           )}
-        </div>
-        <div className={`h-7 border-t text-[10px] px-3.5 flex items-center justify-between shrink-0 select-none font-mono transition-colors duration-200 ${editorTheme === 'dark' ? 'border-gray-800 bg-gray-900 text-gray-400' : 'border-gray-200 bg-slate-100 text-gray-500'}`}>
-          <div className="flex items-center gap-3.5">
-            <span>Ln 1, Col 1</span>
-            <span>Spaces: 2</span>
-            <span>UTF-8</span>
-            <span>LF</span>
-            <span className="capitalize">{selected?.language || 'plain'}</span>
+
+          {/* Code area */}
+          <div
+            className={`flex-1 overflow-auto min-w-0 relative ${
+              isDark ? 'bg-[#1e1e1e]' : 'bg-white'
+            }`}
+          >
+            {selected && (
+              <CodeBlock
+                code={selected.content}
+                language={selected.language}
+                theme={editorTheme}
+              />
+            )}
+            {isGenerating && (
+              <div className="absolute bottom-3 right-3 text-[11px] px-2 py-1 rounded bg-[#007acc] text-white shadow">
+                Generating…
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-3.5">
-            <span className="flex items-center gap-1.5 text-green-500 font-sans">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span> No errors
-            </span>
-            <button
-              onClick={() => selected && void copyToClipboard(selected.content)}
-              className="hover:text-white transition-colors cursor-pointer"
-            >
-              Format
-            </button>
-            <button
-              onClick={() => selected && void copyToClipboard(selected.content)}
-              className="hover:text-white transition-colors cursor-pointer text-xs"
-              title="Copy current file content"
-            >
-              📋
-            </button>
+
+          {/* Status bar */}
+          <div
+            className={`h-[22px] text-[12px] px-3 flex items-center justify-between shrink-0 ${
+              isDark ? 'bg-[#007acc] text-white' : 'bg-[#007acc] text-white'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <span>{selected?.path || ''}</span>
+              <span>Ln {lineCount}, Col 1</span>
+              <span>UTF-8</span>
+              <span className="capitalize">{selected?.language || 'plain'}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void downloadAll()}
+                className="hover:underline cursor-pointer"
+              >
+                ZIP
+              </button>
+              <button
+                type="button"
+                onClick={() => selected && void copyToClipboard(selected.content)}
+                className="hover:underline cursor-pointer"
+              >
+                Copy
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  </>
+    </>
   );
 }

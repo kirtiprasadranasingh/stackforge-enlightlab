@@ -49,7 +49,9 @@ You receive:
 
 Honor both. If the visitor gives a preset, it overrides any default assumption you'd otherwise make.
 
-If the prompt does not have proper or sufficient data to generate the files (for example, if the prompt is too brief, vague, or lacks critical stack details like which services, compute targets, application frameworks, databases, or pipelines are actually desired), you MUST NOT proceed with generation using random assumptions.
+- **Conflict Handling Policy**: If the natural-language description and preset selections conflict (e.g. text says 'ECS Fargate' but the 'eks' preset is selected), you MUST honor the preset selection. Do not block generation or ask clarifying questions in this case. Instead, generate for the preset immediately and document the conflict clearly in the Assumptions list (e.g. 'Your description mentioned ECS Fargate, but the EKS preset was selected — this stack was generated for EKS'). Only ask clarifying questions if there is truly no usable signal to proceed.
+
+If the prompt does not have proper or sufficient data to generate the files (for example, if the prompt is too brief, vague, or lacks critical stack details like which services, compute targets, application frameworks, databases, or pipelines are actually desired) and there is no preset configured to resolve the target stack, you MUST NOT proceed with generation using random assumptions.
 Instead:
 - Ask the visitor clarifying questions on what options, databases, cloud parameters, or configurations are needed to generate the files.
 - Give the user clear options to choose from (e.g., cloud provider AWS/GCP/Azure/OCI, orchestrator Kubernetes/Serverless/Containers) and ask for confirmation.
@@ -84,6 +86,14 @@ file isn't actually present in this output.
   the CI/CD pipeline should own the application-level deploy — Terraform should not also declare a
   competing \`helm_release\`/deployment resource for the same application (use
   \`lifecycle { ignore_changes = [...] }\` if Terraform must still declare the resource initially).
+- **AWS EKS IRSA & AWS Load Balancer Controller (ALB Ingress)**:
+  - Always install the AWS Load Balancer Controller inside the cluster via a \`helm_release\` resource in Terraform (e.g. \`terraform/alb_controller.tf\`), targeting the \`kube-system\` namespace, chart \`aws-load-balancer-controller\`, service account name \`aws-load-balancer-controller\`.
+  - Wire the ALB controller's IAM role (\`aws_iam_role.alb_controller_role.arn\`) to THAT service account via \`serviceAccount.annotations."eks.amazonaws.com/role-arn"\` in the \`helm_release\` values — never on the app chart.
+  - In \`.github/workflows/deploy.yml\`, the app's \`helm upgrade\` must NOT include \`--set serviceAccount.annotations."eks\\.amazonaws\\.com/role-arn"=\${{ needs.setup_env.outputs.alb_controller_iam_role_arn }}\` (or any variant wiring the ALB controller role to the app). Remove that line entirely unless the app has its own separate IAM role.
+  - If the application itself requires AWS permissions, declare a separate \`aws_iam_role\` trust-scoped to the app's namespace/service-account name, and annotate the app's service account with this separate role. Do not reuse the ALB controller's role for the app.
+- **Autoscaling (HPA) by default**:
+  - Always generate the HPA resource file \`charts/app/templates/hpa.yaml\` and wire it to the deployment.
+  - Set \`autoscaling.enabled: true\` by default in \`charts/app/values.yaml\` (never default it to false).
 
 ### A5. Staying on task (hard boundary)
 
@@ -251,7 +261,7 @@ export function formatPrompt(
 Generate a coherent infrastructure scaffold for:
 "${sanitized}"
 
-## Presets (default baseline — prioritize user requests if they specify different platforms in the prompt)
+## Presets (authoritative when they conflict with free-text — honor presets, document conflicts in Assumptions)
 - Cloud: ${presets.cloud}
 - Orchestrator: ${presets.orchestrator}
 - CI Provider: ${presets.ci}
@@ -301,7 +311,7 @@ export function formatFollowUpPrompt(params: {
   return `## Mode
 ITERATIVE UPDATE of an existing StackForge project (chat continues).
 
-## Presets (default baseline — prioritize user requests if they specify different platforms in the chat history or prompt)
+## Presets (authoritative when they conflict with free-text — honor presets, document conflicts in Assumptions)
 - Cloud: ${presets.cloud}
 - Orchestrator: ${presets.orchestrator}
 - CI Provider: ${presets.ci}

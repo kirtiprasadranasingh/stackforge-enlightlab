@@ -121,6 +121,40 @@ if command -v yamllint > /dev/null 2>&1; then
   done < <(find "$SCAFFOLD_DIR" -type f \( -name "*.yaml" -o -name "*.yml" \) -print0)
 fi
 
+# 6. EKS IRSA: app deploy must not reuse the ALB controller role ARN.
+if [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ]; then
+  if grep -qE 'alb_controller_iam_role_arn|aws-load-balancer-controller' "$SCAFFOLD_DIR/.github/workflows/deploy.yml" \
+     && grep -qE 'serviceAccount\.annotations.*role-arn' "$SCAFFOLD_DIR/.github/workflows/deploy.yml"; then
+    log_fail "deploy.yml wires ALB controller IAM role to app serviceAccount — use Terraform helm_release in kube-system instead"
+  else
+    log_pass "deploy.yml does not attach ALB controller role to app serviceAccount"
+  fi
+fi
+
+# 7. EKS: ALB controller should be installed via Terraform helm_release when ingress uses ALB.
+if [ -d "$SCAFFOLD_DIR/terraform" ]; then
+  if grep -rq 'aws-load-balancer-controller\|alb\.ingress\.kubernetes\.io' "$SCAFFOLD_DIR" 2>/dev/null; then
+    if grep -rq 'helm_release' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+       && grep -rq 'aws-load-balancer-controller' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      log_pass "terraform installs aws-load-balancer-controller via helm_release"
+    else
+      log_fail "EKS ingress references ALB controller but terraform/ has no helm_release for aws-load-balancer-controller"
+    fi
+  fi
+fi
+
+# 8. Helm HPA must exist when autoscaling is enabled in values.
+if [ -f "$SCAFFOLD_DIR/charts/app/values.yaml" ]; then
+  if grep -qE 'autoscaling:[\s\S]*enabled:\s*true' "$SCAFFOLD_DIR/charts/app/values.yaml" 2>/dev/null \
+     || grep -A3 'autoscaling:' "$SCAFFOLD_DIR/charts/app/values.yaml" 2>/dev/null | grep -q 'enabled: true'; then
+    if [ -f "$SCAFFOLD_DIR/charts/app/templates/hpa.yaml" ]; then
+      log_pass "charts/app/templates/hpa.yaml present with autoscaling enabled"
+    else
+      log_fail "autoscaling.enabled is true but charts/app/templates/hpa.yaml is missing"
+    fi
+  fi
+fi
+
 echo
 echo "===== VALIDATION REPORT ====="
 printf '%s\n' "${REPORT[@]}"

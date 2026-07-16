@@ -124,6 +124,36 @@ export function isOriginAllowed(origin: string | null): boolean {
   return false;
 }
 
+function getRequestHostOrigin(request: Request): string | null {
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`.replace(/\/$/, '');
+  }
+
+  const host = request.headers.get('host');
+  if (host) {
+    const proto = forwardedProto || (host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
+    return `${proto}://${host}`.replace(/\/$/, '');
+  }
+
+  try {
+    return new URL(request.url).origin.replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+export function isOriginAllowedForRequest(origin: string | null, request: Request): boolean {
+  if (!origin) return false;
+  const normalized = origin.replace(/\/$/, '');
+
+  if (isOriginAllowed(normalized)) return true;
+
+  const requestOrigin = getRequestHostOrigin(request);
+  return Boolean(requestOrigin && requestOrigin === normalized);
+}
+
 /**
  * Origin lock for the generate API.
  * Missing Origin allowed in development, or same-origin style calls without Origin
@@ -145,7 +175,7 @@ export function assertOriginAllowed(
     if (referer) {
       try {
         const refOrigin = new URL(referer).origin;
-        if (isOriginAllowed(refOrigin)) return { ok: true };
+        if (isOriginAllowedForRequest(refOrigin, request)) return { ok: true };
       } catch {
         /* ignore */
       }
@@ -153,14 +183,14 @@ export function assertOriginAllowed(
     return { ok: false, status: 403, error: 'Forbidden: missing origin' };
   }
 
-  if (!isOriginAllowed(origin)) {
+  if (!isOriginAllowedForRequest(origin, request)) {
     return { ok: false, status: 403, error: 'Forbidden: origin not allowed' };
   }
 
   return { ok: true };
 }
 
-export function getCORSHeaders(origin?: string | null): HeadersInit {
+export function getCORSHeaders(origin?: string | null, request?: Request): HeadersInit {
   const headers: HeadersInit = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -168,7 +198,7 @@ export function getCORSHeaders(origin?: string | null): HeadersInit {
     Vary: 'Origin',
   };
 
-  if (origin && isOriginAllowed(origin)) {
+  if (origin && (request ? isOriginAllowedForRequest(origin, request) : isOriginAllowed(origin))) {
     headers['Access-Control-Allow-Origin'] = origin;
   }
 

@@ -16,7 +16,7 @@ export async function OPTIONS(request: NextRequest) {
   if (!gate.ok) return new NextResponse(null, { status: gate.status });
   return new NextResponse(null, {
     status: 204,
-    headers: getCORSHeaders(request.headers.get('origin')),
+    headers: getCORSHeaders(request.headers.get('origin'), request),
   });
 }
 
@@ -26,7 +26,7 @@ export async function OPTIONS(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin');
-  const cors = getCORSHeaders(origin);
+  const cors = getCORSHeaders(origin, request);
 
   const gate = assertOriginAllowed(request);
   if (!gate.ok) {

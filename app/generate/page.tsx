@@ -297,7 +297,11 @@ export default function GeneratePage() {
         ]);
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') return;
-        const msg = e instanceof Error ? e.message : 'Something went wrong';
+        const rawMsg = e instanceof Error ? e.message : 'Something went wrong';
+        const msg =
+          /failed to fetch|network\s?error/i.test(rawMsg)
+            ? 'Request failed before the API could respond. This is usually a blocked origin/CORS issue or an unreachable backend.'
+            : rawMsg;
         setError(msg);
         setMessages((prev) => [
           ...prev,
@@ -566,20 +570,19 @@ export default function GeneratePage() {
         </div>
       )}
 
-      {/* Dynamic Workspace: Split vs. Full-Width Chat */}
       {hasGeneratedFiles ? (
-        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-[#f8fafc]">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-slate-50 relative overflow-hidden before:absolute before:w-[600px] before:h-[600px] before:rounded-full before:bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.04),transparent_60%)] before:-top-40 before:-left-40 before:pointer-events-none">
           {/* LEFT — AI Assistant Sidebar */}
           <aside
             style={{ width: isSidebarOpen ? `${leftWidth}px` : '0px' }}
-            className={`shrink-0 flex flex-col gap-3 min-h-0 select-none ${isSidebarOpen ? 'opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300`}
+            className={`shrink-0 flex flex-col gap-3.5 min-h-0 select-none ${isSidebarOpen ? 'opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300`}
           >
             {/* Interactive Chat Log */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex-1 flex flex-col min-h-0">
-              <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2">
+            <div className="bg-white/80 backdrop-blur-md border border-slate-200/70 rounded-2xl p-4.5 shadow-sm shadow-slate-100/40 flex-1 flex flex-col min-h-0 relative">
+              <div className="flex items-center justify-between mb-3.5 border-b border-slate-100/80 pb-2.5">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-bold text-gray-900 tracking-tight uppercase">AI Assistant Chat</h3>
-                  <span className="text-[9px] font-extrabold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full uppercase tracking-wider border border-blue-100">
+                  <h3 className="text-xs font-bold text-slate-800 tracking-wider uppercase font-sans">AI Assistant Chat</h3>
+                  <span className="text-[9px] font-bold text-indigo-650 bg-indigo-50 px-2 py-0.5 rounded-full uppercase tracking-wider border border-indigo-100/80">
                     BETA
                   </span>
                 </div>
@@ -596,34 +599,36 @@ export default function GeneratePage() {
                     setPromptVal('');
                     handleNew();
                   }}
-                  className="text-[10px] text-blue-600 hover:text-blue-700 font-bold transition-colors cursor-pointer"
+                  className="text-[10px] text-indigo-600 hover:text-indigo-700 font-bold transition-colors cursor-pointer"
                 >
                   Reset Chat
                 </button>
               </div>
 
               {/* Chat Messages Feed */}
-              <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1 text-xs select-text">
+              <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1 text-xs select-text scrollbar-thin">
                 {messages.map((m, idx) => (
                   <div
                     key={m.id || idx}
-                    className={`flex gap-2 items-start ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
+                    className={`flex gap-2.5 items-start ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
                   >
                     {m.role !== 'user' && (
-                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-sm border border-blue-500/10 select-none">
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center text-white shrink-0 shadow-sm border border-indigo-200/20 select-none ring-2 ring-indigo-50">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
                         </svg>
                       </div>
                     )}
                     <div className="flex-1 flex flex-col max-w-[85%]">
                       <div
-                        className={`rounded-xl px-3 py-2 border leading-relaxed shadow-sm ${
+                        className={`rounded-2xl px-3.5 py-2 leading-relaxed shadow-xs ${
                           m.role === 'user'
-                            ? 'bg-[#0066FF] border-[#0066FF] text-white rounded-tr-none'
+                            ? 'bg-gradient-to-tr from-indigo-600 to-violet-600 border-0 text-white rounded-tr-xs shadow-indigo-100/40 font-medium'
                             : m.role === 'system'
-                              ? 'bg-amber-50 text-[var(--muted-text)] border-amber-100 font-mono text-[10px]'
-                              : 'bg-slate-50 border-gray-150 text-gray-800 rounded-tl-none'
+                              ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
+                                ? 'bg-rose-50 border border-rose-100/80 text-rose-700 font-medium rounded-xl p-3 shadow-xs'
+                                : 'bg-amber-50 text-amber-800 border border-amber-100/80 font-mono text-[10px] rounded-xl p-3'
+                              : 'bg-white border border-slate-100 text-slate-800 rounded-tl-xs'
                         }`}
                       >
                         <FormattedMessage content={m.content} />
@@ -641,7 +646,7 @@ export default function GeneratePage() {
                     setPromptVal('');
                   }
                 }}
-                className="mt-3 pt-3 border-t border-gray-100 relative flex items-center gap-1.5 bg-slate-50 border border-gray-200 focus-within:border-indigo-400 focus-within:bg-white rounded-xl p-1.5 shrink-0 transition-all"
+                className="mt-3.5 pt-3.5 border-t border-slate-100 relative flex items-center gap-2 bg-slate-50/60 border border-slate-200/80 focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-100/40 rounded-xl p-2 shrink-0 transition-all duration-200 shadow-inner"
               >
                 <input
                   type="text"
@@ -649,12 +654,12 @@ export default function GeneratePage() {
                   onChange={(e) => setPromptVal(e.target.value)}
                   disabled={isGenerating}
                   placeholder="Ask for changes..."
-                  className="flex-1 bg-transparent text-xs text-gray-900 placeholder-gray-400 focus:outline-none pl-2 py-1 border-0 min-w-0 font-sans"
+                  className="flex-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none pl-2.5 py-1.5 border-0 min-w-0 font-sans"
                 />
                 <button
                   type="submit"
                   disabled={isGenerating || !promptVal.trim()}
-                  className="w-7 h-7 flex items-center justify-center rounded-lg bg-indigo-650 hover:bg-indigo-700 text-white transition-colors shrink-0 cursor-pointer disabled:opacity-40"
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white transition-all shrink-0 cursor-pointer shadow-xs disabled:opacity-40 disabled:pointer-events-none active:scale-95"
                   title="Send message"
                 >
                   <svg className="w-3.5 h-3.5 transform rotate-45 -translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
@@ -665,9 +670,9 @@ export default function GeneratePage() {
             </div>
 
             {/* Actions Grid */}
-            <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm shrink-0">
-              <h4 className="text-[9px] font-bold text-gray-800 uppercase tracking-wider mb-2">Quick Actions</h4>
-              <div className="grid grid-cols-2 gap-1.5">
+            <div className="bg-white/80 backdrop-blur-md border border-slate-200/60 rounded-xl p-3.5 shadow-sm shadow-slate-100/30 shrink-0">
+              <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 select-none">Quick Actions</h4>
+              <div className="grid grid-cols-2 gap-2">
                 {[
                   { text: 'Add HPA autoscaling', icon: '📈' },
                   { text: 'Add dev/prod envs', icon: '📁' },
@@ -680,7 +685,7 @@ export default function GeneratePage() {
                     onClick={() => {
                       void sendMessage(action.text);
                     }}
-                    className="text-[10px] bg-slate-50 hover:bg-indigo-50/60 hover:text-indigo-600 text-gray-600 hover:border-indigo-200 border border-gray-200 p-2 rounded-xl text-left transition-all duration-200 font-semibold shadow-xs cursor-pointer active:scale-95 leading-tight flex items-center gap-1.5"
+                    className="text-[10px] bg-white hover:bg-indigo-50/50 hover:text-indigo-600 text-slate-650 hover:border-indigo-200/60 border border-slate-200/80 p-2.5 rounded-xl text-left transition-all duration-200 font-semibold shadow-xs cursor-pointer active:scale-95 leading-tight flex items-center gap-1.5"
                   >
                     <span>{action.icon}</span>
                     <span>{action.text.replace('Add ', '').replace('Setup ', '')}</span>
@@ -690,7 +695,7 @@ export default function GeneratePage() {
             </div>
 
             {/* Powered by */}
-            <p className="text-[9px] text-gray-400 font-semibold tracking-wide text-center py-1 shrink-0">
+            <p className="text-[9px] text-slate-400 font-semibold tracking-wider text-center py-1.5 shrink-0 uppercase select-none opacity-80">
               🚀 Powered by Enlight Lab AI
             </p>
           </aside>
