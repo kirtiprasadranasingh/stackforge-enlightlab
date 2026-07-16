@@ -396,7 +396,20 @@ export async function POST(request: NextRequest) {
               controller.enqueue(sse({ type: 'file', file }));
             }
           }
-
+          // If no summary was sent and no files were generated, try to extract a clean text summary from the full text
+          if (!anyOutput && collectedFiles.length === 0 && !summarySent) {
+            const cleanText = fullText
+              .replace(/<<<FILE[\s\S]*?>>>[\s\S]*?<<<END_FILE>>>/g, '')
+              .replace(/<<<[\s\S]*?>>>/g, '')
+              .replace(/```[a-zA-Z]*\r?\n[\s\S]*?\r?\n```/g, '')
+              .replace(/```[\s\S]*?$/g, '')
+              .trim();
+            if (cleanText) {
+              summarySent = true;
+              anyOutput = true;
+              controller.enqueue(sse({ type: 'summary', summary: cleanText }));
+            }
+          }
           if (!anyOutput && collectedFiles.length === 0 && !summarySent) {
             controller.enqueue(
               sse({
@@ -413,7 +426,7 @@ export async function POST(request: NextRequest) {
               let passed = false;
               let reportText = "";
 
-              while (attempts < 2) {
+              while (attempts < 1) {
                 attempts++;
                 let tempDir = "";
                 try {
@@ -455,7 +468,7 @@ export async function POST(request: NextRequest) {
                     break;
                   }
 
-                  if (attempts === 2) {
+                  if (attempts === 1) {
                     passed = false;
                     break;
                   }
