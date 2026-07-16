@@ -331,23 +331,6 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
             : 'border-[#3c3c3c] rounded-lg shadow-lg'
         } ${isDark ? 'bg-[#1e1e1e]' : 'bg-[#f3f3f3]'}`}
       >
-        {/* Activity bar */}
-        <div
-          className={`hidden md:flex w-12 shrink-0 flex-col items-center py-3 gap-3 border-r ${
-            isDark ? 'bg-[#333333] border-[#252526]' : 'bg-[#ececec] border-[#d4d4d4]'
-          } ${isFullscreen ? '' : ''}`}
-        >
-          <div
-            className={`w-8 h-8 rounded flex items-center justify-center ${
-              isDark ? 'bg-[#252526] text-[#75beff]' : 'bg-white text-[#007acc]'
-            }`}
-            title="Explorer"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h18M3 17h18" />
-            </svg>
-          </div>
-        </div>
 
         {/* Sidebar explorer */}
         <aside

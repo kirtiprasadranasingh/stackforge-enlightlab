@@ -631,7 +631,10 @@ export default function GeneratePage() {
                               : 'bg-white border border-slate-100 text-slate-800 rounded-tl-xs'
                         }`}
                       >
-                        <FormattedMessage content={m.content} />
+                        <FormattedMessage
+                          content={m.content}
+                          className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-slate-700' : 'text-slate-800'}
+                        />
                       </div>
                     </div>
                   </div>
@@ -662,8 +665,8 @@ export default function GeneratePage() {
                   className="w-8 h-8 flex items-center justify-center rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white transition-all shrink-0 cursor-pointer shadow-xs disabled:opacity-40 disabled:pointer-events-none active:scale-95"
                   title="Send message"
                 >
-                  <svg className="w-3.5 h-3.5 transform rotate-45 -translate-x-0.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
                   </svg>
                 </button>
               </form>

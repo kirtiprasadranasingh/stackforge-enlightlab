@@ -27,8 +27,16 @@ export function FormattedMessage({ content, className }: FormattedMessageProps) 
         const parts = trimmed.split(/(\*\*[^*]+\*\*)/g);
         const parsedContent = parts.map((part, pIdx) => {
           if (part.startsWith('**') && part.endsWith('**')) {
+            const isWhiteText = className?.includes('text-white');
             return (
-              <strong key={pIdx} className="font-extrabold text-[#0066FF] bg-blue-50/50 px-1 rounded">
+              <strong
+                key={pIdx}
+                className={`font-extrabold rounded px-1 ${
+                  isWhiteText
+                    ? 'text-white bg-white/20'
+                    : 'text-[#0066FF] bg-blue-50/50'
+                }`}
+              >
                 {part.slice(2, -2)}
               </strong>
             );

@@ -10,8 +10,8 @@ interface CodeBlockProps {
 }
 
 const LANG_MAP: Record<string, string> = {
-  hcl: 'hcl',
-  tf: 'hcl',
+  hcl: 'terraform',
+  tf: 'terraform',
   yaml: 'yaml',
   yml: 'yaml',
   dockerfile: 'dockerfile',
