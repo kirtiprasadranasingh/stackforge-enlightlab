@@ -9,13 +9,6 @@ set -uo pipefail
 #
 # Usage:
 #   ./validate-scaffold.sh /path/to/generated/scaffold
-#
-# Requires (install in whatever container/image runs your generation backend):
-#   - terraform   (https://developer.hashicorp.com/terraform/install)
-#   - helm        (https://helm.sh/docs/intro/install/)
-#   - hadolint    (https://github.com/hadolint/hadolint)
-#   - actionlint  (https://github.com/rhysd/actionlint)
-#   - yamllint    (pip install yamllint)   [optional, non-blocking]
 
 SCAFFOLD_DIR="${1:?Usage: $0 <path-to-scaffold-dir>}"
 FAIL=0
@@ -29,90 +22,170 @@ log_warn() { REPORT+=("WARN  - $1"); }
 echo "Validating scaffold at: $SCAFFOLD_DIR"
 echo "----------------------------------------"
 
-# 1. Terraform: init (no backend) + validate catches syntax errors, duplicate
-#    arguments, undeclared references, and unknown resource/module attributes.
-if [ -d "$SCAFFOLD_DIR/terraform" ]; then
-  (
+# Create a unique temporary directory for this validation run's parallel logs
+JOB_DIR=$(mktemp -d /tmp/scaffold-jobs-XXXXXX)
+
+# Job 1: Terraform init + validate
+check_tf() {
+  if [ -d "$SCAFFOLD_DIR/terraform" ]; then
     cd "$SCAFFOLD_DIR/terraform" || exit 1
-    if terraform init -backend=false -input=false > /tmp/tf_init.log 2>&1; then
-      if terraform validate -json > /tmp/tf_validate.json 2>/tmp/tf_validate.log; then
-        echo "terraform_ok"
+    if terraform init -backend=false -input=false > "$JOB_DIR/tf_init.log" 2>&1; then
+      if terraform validate -json > "$JOB_DIR/tf_validate.json" 2>"$JOB_DIR/tf_validate.log"; then
+        echo "PASS" > "$JOB_DIR/tf_status"
       else
-        echo "terraform_validate_fail"
+        echo "FAIL_VALIDATE" > "$JOB_DIR/tf_status"
       fi
     else
-      echo "terraform_init_fail"
+      echo "FAIL_INIT" > "$JOB_DIR/tf_status"
     fi
-  ) > /tmp/tf_result.txt
-  RESULT=$(cat /tmp/tf_result.txt)
-  case "$RESULT" in
-    terraform_ok) log_pass "terraform validate" ;;
-    terraform_validate_fail) log_fail "terraform validate -- $(tail -c 1500 /tmp/tf_validate.log /tmp/tf_validate.json 2>/dev/null | tr '\n' ' ')" ;;
-    terraform_init_fail) log_fail "terraform init -- $(tail -c 1500 /tmp/tf_init.log | tr '\n' ' ')" ;;
+  else
+    echo "SKIP" > "$JOB_DIR/tf_status"
+  fi
+}
+check_tf &
+PID_TF=$!
+
+# Job 2: Hadolint (Dockerfile)
+check_hado() {
+  if [ -f "$SCAFFOLD_DIR/Dockerfile" ]; then
+    if command -v hadolint > /dev/null 2>&1; then
+      if hadolint "$SCAFFOLD_DIR/Dockerfile" > "$JOB_DIR/hado.log" 2>&1; then
+        echo "PASS" > "$JOB_DIR/hado_status"
+      else
+        echo "FAIL" > "$JOB_DIR/hado_status"
+      fi
+    else
+      echo "WARN" > "$JOB_DIR/hado_status"
+    fi
+  else
+    echo "SKIP" > "$JOB_DIR/hado_status"
+  fi
+}
+check_hado &
+PID_HADO=$!
+
+# Job 3: Helm (lint + template)
+check_helm() {
+  if [ -d "$SCAFFOLD_DIR/charts" ]; then
+    local chart_fail=0
+    local chart_found=0
+    for chart in "$SCAFFOLD_DIR"/charts/*/; do
+      [ -d "$chart" ] || continue
+      chart_found=1
+      local chart_name
+      chart_name=$(basename "$chart")
+      if command -v helm > /dev/null 2>&1; then
+        if ! helm lint "$chart" > "$JOB_DIR/helm_lint_${chart_name}.log" 2>&1; then
+          chart_fail=1
+        fi
+        if ! helm template "$chart_name" "$chart" > "$JOB_DIR/helm_template_${chart_name}.log" 2>&1; then
+          chart_fail=1
+        fi
+      else
+        chart_fail=2 # Helm missing
+      fi
+    done
+    if [ "$chart_found" -eq 0 ]; then
+      echo "SKIP" > "$JOB_DIR/helm_status"
+    elif [ "$chart_fail" -eq 1 ]; then
+      echo "FAIL" > "$JOB_DIR/helm_status"
+    elif [ "$chart_fail" -eq 2 ]; then
+      echo "WARN" > "$JOB_DIR/helm_status"
+    else
+      echo "PASS" > "$JOB_DIR/helm_status"
+    fi
+  else
+    echo "SKIP" > "$JOB_DIR/helm_status"
+  fi
+}
+check_helm &
+PID_HELM=$!
+
+# Job 4: Actionlint (workflows)
+check_action() {
+  if [ -d "$SCAFFOLD_DIR/.github/workflows" ]; then
+    if command -v actionlint > /dev/null 2>&1; then
+      # Make sure we don't glob fail if directory is empty
+      local files
+      files=$(find "$SCAFFOLD_DIR/.github/workflows" -name "*.yml" -o -name "*.yaml")
+      if [ -n "$files" ]; then
+        if actionlint $files > "$JOB_DIR/action.log" 2>&1; then
+          echo "PASS" > "$JOB_DIR/action_status"
+        else
+          echo "FAIL" > "$JOB_DIR/action_status"
+        fi
+      else
+        echo "SKIP" > "$JOB_DIR/action_status"
+      fi
+    else
+      echo "WARN" > "$JOB_DIR/action_status"
+    fi
+  else
+    echo "SKIP" > "$JOB_DIR/action_status"
+  fi
+}
+check_action &
+PID_ACTION=$!
+
+# Wait for all background verification tasks to complete
+wait $PID_TF $PID_HADO $PID_HELM $PID_ACTION
+
+# 1. Process Terraform Result
+if [ -f "$JOB_DIR/tf_status" ]; then
+  TF_RES=$(cat "$JOB_DIR/tf_status")
+  case "$TF_RES" in
+    PASS) log_pass "terraform validate" ;;
+    FAIL_VALIDATE) log_fail "terraform validate -- $(tail -c 1500 "$JOB_DIR/tf_validate.log" "$JOB_DIR/tf_validate.json" 2>/dev/null | tr '\n' ' ')" ;;
+    FAIL_INIT) log_fail "terraform init -- $(tail -c 1500 "$JOB_DIR/tf_init.log" | tr '\n' ' ')" ;;
+    SKIP) log_info "no terraform/ directory found, skipping" ;;
   esac
-else
-  log_info "no terraform/ directory found, skipping"
 fi
 
-# 2. Dockerfile: hadolint catches invalid instruction syntax (including the
-#    trailing-comment bug), bad base images, and common anti-patterns.
-if [ -f "$SCAFFOLD_DIR/Dockerfile" ]; then
-  if command -v hadolint > /dev/null 2>&1; then
-    if hadolint "$SCAFFOLD_DIR/Dockerfile" > /tmp/hadolint.log 2>&1; then
-      log_pass "hadolint (Dockerfile)"
-    else
-      log_fail "hadolint (Dockerfile) -- $(tail -c 1500 /tmp/hadolint.log | tr '\n' ' ')"
-    fi
-  else
-    log_warn "hadolint not installed, skipping Dockerfile lint"
-  fi
-else
-  log_info "no Dockerfile found, skipping"
+# 2. Process Hadolint Result
+if [ -f "$JOB_DIR/hado_status" ]; then
+  HADO_RES=$(cat "$JOB_DIR/hado_status")
+  case "$HADO_RES" in
+    PASS) log_pass "hadolint (Dockerfile)" ;;
+    FAIL) log_fail "hadolint (Dockerfile) -- $(tail -c 1500 "$JOB_DIR/hado.log" | tr '\n' ' ')" ;;
+    WARN) log_warn "hadolint not installed, skipping Dockerfile lint" ;;
+    SKIP) log_info "no Dockerfile found, skipping" ;;
+  esac
 fi
 
-# 3. Helm charts: `lint` catches schema issues; `template` actually renders
-#    every template, which catches duplicate YAML keys, bad Go-template
-#    references, and conditionals that produce invalid output.
-if [ -d "$SCAFFOLD_DIR/charts" ]; then
-  for chart in "$SCAFFOLD_DIR"/charts/*/; do
-    [ -d "$chart" ] || continue
-    chart_name=$(basename "$chart")
-    if command -v helm > /dev/null 2>&1; then
-      if helm lint "$chart" > "/tmp/helm_lint_${chart_name}.log" 2>&1; then
-        log_pass "helm lint ($chart_name)"
-      else
-        log_fail "helm lint ($chart_name) -- $(tail -c 1500 "/tmp/helm_lint_${chart_name}.log" | tr '\n' ' ')"
-      fi
-      if helm template "$chart_name" "$chart" > "/tmp/helm_template_${chart_name}.log" 2>&1; then
-        log_pass "helm template ($chart_name)"
-      else
-        log_fail "helm template ($chart_name) -- $(tail -c 1500 "/tmp/helm_template_${chart_name}.log" | tr '\n' ' ')"
-      fi
-    else
-      log_warn "helm not installed, skipping chart checks for $chart_name"
-    fi
-  done
-else
-  log_info "no charts/ directory found, skipping"
+# 3. Process Helm Result
+if [ -f "$JOB_DIR/helm_status" ]; then
+  HELM_RES=$(cat "$JOB_DIR/helm_status")
+  case "$HELM_RES" in
+    PASS) log_pass "helm checks passed" ;;
+    FAIL)
+      for f in "$JOB_DIR"/helm_lint_*.log; do
+        [ -f "$f" ] || continue
+        chart_name=$(basename "$f" | sed -e 's/helm_lint_//' -e 's/\.log//')
+        log_fail "helm lint ($chart_name) -- $(tail -c 1500 "$f" | tr '\n' ' ')"
+      done
+      for f in "$JOB_DIR"/helm_template_*.log; do
+        [ -f "$f" ] || continue
+        chart_name=$(basename "$f" | sed -e 's/helm_template_//' -e 's/\.log//')
+        log_fail "helm template ($chart_name) -- $(tail -c 1500 "$f" | tr '\n' ' ')"
+      done
+      ;;
+    WARN) log_warn "helm not installed, skipping chart checks" ;;
+    SKIP) log_info "no charts/ directory found, skipping" ;;
+  esac
 fi
 
-# 4. GitHub Actions workflows: actionlint catches invalid expressions,
-#    undefined `github.event.inputs.*` on the wrong trigger, and bad job refs.
-if [ -d "$SCAFFOLD_DIR/.github/workflows" ]; then
-  if command -v actionlint > /dev/null 2>&1; then
-    if actionlint "$SCAFFOLD_DIR"/.github/workflows/*.yml > /tmp/actionlint.log 2>&1; then
-      log_pass "actionlint"
-    else
-      log_fail "actionlint -- $(tail -c 1500 /tmp/actionlint.log | tr '\n' ' ')"
-    fi
-  else
-    log_warn "actionlint not installed, skipping workflow lint"
-  fi
-else
-  log_info "no .github/workflows/ directory found, skipping"
+# 4. Process Actionlint Result
+if [ -f "$JOB_DIR/action_status" ]; then
+  ACTION_RES=$(cat "$JOB_DIR/action_status")
+  case "$ACTION_RES" in
+    PASS) log_pass "actionlint" ;;
+    FAIL) log_fail "actionlint -- $(tail -c 1500 "$JOB_DIR/action.log" | tr '\n' ' ')" ;;
+    WARN) log_warn "actionlint not installed, skipping workflow lint" ;;
+    SKIP) log_info "no .github/workflows/ directory found, skipping" ;;
+  esac
 fi
 
-# 5. Generic YAML sanity check (non-blocking) for anything not covered above.
+# 5. Generic YAML sanity check (non-blocking)
 if command -v yamllint > /dev/null 2>&1; then
   while IFS= read -r -d '' f; do
     if ! yamllint -d relaxed "$f" > /tmp/yamllint_last.log 2>&1; then
@@ -121,7 +194,7 @@ if command -v yamllint > /dev/null 2>&1; then
   done < <(find "$SCAFFOLD_DIR" -type f \( -name "*.yaml" -o -name "*.yml" \) -print0)
 fi
 
-# 6. EKS IRSA: app deploy must not reuse the ALB controller role ARN.
+# 6. EKS IRSA: app deploy check
 if [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ]; then
   if grep -qE 'alb_controller_iam_role_arn|aws-load-balancer-controller' "$SCAFFOLD_DIR/.github/workflows/deploy.yml" \
      && grep -qE 'serviceAccount\.annotations.*role-arn' "$SCAFFOLD_DIR/.github/workflows/deploy.yml"; then
@@ -131,7 +204,7 @@ if [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ]; then
   fi
 fi
 
-# 7. EKS: ALB controller should be installed via Terraform helm_release when ingress uses ALB.
+# 7. EKS ALB Controller setup check
 if [ -d "$SCAFFOLD_DIR/terraform" ]; then
   if grep -rq 'aws-load-balancer-controller\|alb\.ingress\.kubernetes\.io' "$SCAFFOLD_DIR" 2>/dev/null; then
     if grep -rq 'helm_release' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
@@ -143,7 +216,7 @@ if [ -d "$SCAFFOLD_DIR/terraform" ]; then
   fi
 fi
 
-# 8. Helm HPA must exist when autoscaling is enabled in values.
+# 8. Helm HPA existence check
 if [ -f "$SCAFFOLD_DIR/charts/app/values.yaml" ]; then
   if grep -qE 'autoscaling:[\s\S]*enabled:\s*true' "$SCAFFOLD_DIR/charts/app/values.yaml" 2>/dev/null \
      || grep -A3 'autoscaling:' "$SCAFFOLD_DIR/charts/app/values.yaml" 2>/dev/null | grep -q 'enabled: true'; then
@@ -154,6 +227,9 @@ if [ -f "$SCAFFOLD_DIR/charts/app/values.yaml" ]; then
     fi
   fi
 fi
+
+# Clean up parallel log outputs
+rm -rf "$JOB_DIR"
 
 echo
 echo "===== VALIDATION REPORT ====="
