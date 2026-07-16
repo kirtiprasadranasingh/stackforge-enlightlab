@@ -5,11 +5,29 @@ interface FormattedMessageProps {
   className?: string;
 }
 
+function cleanMessageContent(content: string): string {
+  if (!content) return '';
+  let cleaned = content;
+  // 1. Remove <<<FILE ...>>> ... <<<END_FILE>>> blocks
+  cleaned = cleaned.replace(/<<<FILE[\s\S]*?>>>[\s\S]*?<<<END_FILE>>>/g, '');
+  cleaned = cleaned.replace(/<<<FILE[\s\S]*?>>>[\s\S]*?$/g, ''); // strip partial files at stream end
+  // 2. Remove other <<<...>>> markers
+  cleaned = cleaned.replace(/<<<(STATUS|SUMMARY|WARNINGS|DELETE)[^>]*>>>/g, '');
+  cleaned = cleaned.replace(/<<<END_[A-Z]+>>>/g, '');
+  // 3. Remove markdown code blocks
+  cleaned = cleaned.replace(/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?\r?\n```/g, '');
+  cleaned = cleaned.replace(/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?$/g, ''); // strip partial code blocks
+  // 4. Remove standalone fences
+  cleaned = cleaned.replace(/```/g, '');
+  return cleaned.trim();
+}
+
 export function FormattedMessage({ content, className }: FormattedMessageProps) {
-  if (!content) return null;
+  const cleanedContent = cleanMessageContent(content);
+  if (!cleanedContent) return null;
 
   // Split content by newlines
-  const lines = content.split('\n');
+  const lines = cleanedContent.split('\n');
 
   return (
     <div className="space-y-1.5 font-sans leading-relaxed text-sm">

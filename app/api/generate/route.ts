@@ -187,6 +187,23 @@ export async function POST(request: NextRequest) {
        lowerPrompt.includes('host') ||
        lowerPrompt.includes('setup'));
 
+    const isNewRequest = (p: string): boolean => {
+      const lower = p.toLowerCase().trim();
+      if (lower.startsWith('a ') || lower.startsWith('an ') || lower.startsWith('new ') || lower.startsWith('create ') || lower.startsWith('generate ') || lower.startsWith('build ') || lower.startsWith('scaffold ')) {
+        return true;
+      }
+      if ((lower.includes('eks') || lower.includes('gke') || lower.includes('aks') || lower.includes('oke') || lower.includes('fargate') || lower.includes('ecs')) && 
+          (lower.includes('api') || lower.includes('service') || lower.includes('rest') || lower.includes('app') || lower.includes('application'))) {
+        if (lower.length > 35) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const isFreshGen = !existingFiles.length || isNewRequest(prompt);
+    const isFollowUp = existingFiles.length > 0 && !isFreshGen;
+
     const hasPrescribedConfigKeyword = 
       lowerPrompt.includes('terraform') || 
       lowerPrompt.includes('yaml') || 
@@ -197,8 +214,10 @@ export async function POST(request: NextRequest) {
       lowerPrompt.includes('dockerfile');
 
     const shouldRefuse = isExecutionCommand || 
-                         (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword) ||
-                         (isCapabilityQuestion && !hasPrescribedConfigKeyword && !hasCloudKeyword);
+                         (!isFollowUp && (
+                           (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword) ||
+                           (isCapabilityQuestion && !hasPrescribedConfigKeyword && !hasCloudKeyword)
+                         ));
 
     if (shouldRefuse) {
       const stream = new ReadableStream({
@@ -235,23 +254,6 @@ export async function POST(request: NextRequest) {
         },
       });
     }
-
-    const isNewRequest = (p: string): boolean => {
-      const lower = p.toLowerCase().trim();
-      if (lower.startsWith('a ') || lower.startsWith('an ') || lower.startsWith('new ') || lower.startsWith('create ') || lower.startsWith('generate ') || lower.startsWith('build ') || lower.startsWith('scaffold ')) {
-        return true;
-      }
-      if ((lower.includes('eks') || lower.includes('gke') || lower.includes('aks') || lower.includes('oke') || lower.includes('fargate') || lower.includes('ecs')) && 
-          (lower.includes('api') || lower.includes('service') || lower.includes('rest') || lower.includes('app') || lower.includes('application'))) {
-        if (lower.length > 35) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const isFreshGen = !existingFiles.length || isNewRequest(prompt);
-    const isFollowUp = existingFiles.length > 0 && !isFreshGen;
 
     const clientIP = getClientIP(request);
     const rateLimitResult = await checkRateLimit(clientIP);
