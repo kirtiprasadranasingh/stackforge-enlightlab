@@ -898,10 +898,10 @@ export default function GeneratePage() {
                 </svg>
               </div>
               <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight leading-tight">
-                Shape your MVP in minutes.
+                Shape your cloud stack in minutes.
               </h1>
               <p className="text-sm text-gray-500 mt-2.5 max-w-lg leading-relaxed font-medium">
-                Tell me the idea, workflow, users, integrations, and timeline. I&apos;ll turn it into a blueprint-ready MVP scope in minutes.
+                Tell me your presets, workload, database, and pipelines. I&apos;ll turn it into a production-ready cloud stack in minutes.
               </p>
             </div>
 
@@ -919,7 +919,7 @@ export default function GeneratePage() {
               >
                 <input
                   className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 focus:outline-none pl-4 py-2 border-0 min-w-0"
-                  placeholder="Ask anything, e.g. I want to implement Salesforce in our sales team"
+                  placeholder="Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   disabled={isGenerating}
