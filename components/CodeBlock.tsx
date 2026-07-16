@@ -97,7 +97,7 @@ export function CodeBlock({ code, language, theme = 'dark' }: CodeBlockProps) {
 
   return (
     <div className={`vscode-editor flex min-w-full font-mono text-[13px] leading-[1.55] ${
-      theme === 'light' ? 'bg-white' : 'bg-[#1e1e1e]'
+      theme === 'light' ? 'bg-white text-[#24292e]' : 'bg-[#1e1e1e] text-[#d4d4d4]'
     }`}>
       {gutter}
       <div

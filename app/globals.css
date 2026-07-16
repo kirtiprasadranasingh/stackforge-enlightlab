@@ -314,31 +314,3 @@ h1, h2, h3, h4, h5, h6 {
 .focus-glow:focus-within {
   animation: shiver-border 3s ease-in-out infinite;
 }
-
-/* IDE Code Editor Line Numbers Gutter */
-.code-highlight pre {
-  counter-reset: line;
-  padding-left: 0 !important;
-}
-
-.code-highlight .line {
-  display: block;
-  padding-left: 3rem;
-  position: relative;
-}
-
-.code-highlight .line::before {
-  counter-increment: line;
-  content: counter(line);
-  position: absolute;
-  left: 0;
-  width: 2.25rem;
-  text-align: right;
-  color: #4b5563; /* grey code editor line number color */
-  font-family: var(--font-code), monospace;
-  font-size: 0.7rem;
-  user-select: none;
-  border-right: 1px solid #27272a; /* zinc-800 editor gutter border */
-  padding-right: 0.5rem;
-  opacity: 0.7;
-}
