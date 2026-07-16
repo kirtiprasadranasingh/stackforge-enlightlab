@@ -24,7 +24,7 @@ export function SiteHeader({ ctaHref = '/generate', ctaLabel = 'Generate your st
               Enlight Lab
             </span>
             <span className="text-[7px] font-extrabold text-blue-600 tracking-[0.16em] uppercase mt-0.5 opacity-80">
-              AI CLOUD BLUEPRINT GENERATOR
+              AI MVP BLUEPRINT GENERATOR
             </span>
           </div>
         </Link>

@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
           controller.enqueue(
             sse({
               type: 'summary',
-              summary: "Hey! I am StackForge, your AI Cloud Blueprint Generator from Enlight Labs. I can help you design and generate Terraform configurations, Dockerfiles, Helm charts, and CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins) for OCI, AWS, GCP, and Azure.\n\nDescribe the cloud infrastructure or application deployment you want to generate code for, and I'll build it!",
+              summary: "Hey! I am StackForge, your AI MVP Blueprint Generator from Enlight Labs. I can help you design and generate Terraform configurations, Dockerfiles, Helm charts, and CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins) for OCI, AWS, GCP, and Azure.\n\nDescribe the cloud infrastructure or application deployment you want to generate code for, and I'll build it!",
             })
           );
           controller.enqueue(

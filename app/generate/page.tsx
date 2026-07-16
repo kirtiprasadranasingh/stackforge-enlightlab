@@ -563,7 +563,7 @@ export default function GeneratePage() {
                 Enlight Lab
               </span>
               <span className="text-[7.5px] font-extrabold text-blue-600 tracking-[0.16em] uppercase mt-0.5 opacity-80">
-                AI CLOUD BLUEPRINT GENERATOR
+                AI MVP BLUEPRINT GENERATOR
               </span>
             </div>
           </Link>
@@ -898,10 +898,10 @@ export default function GeneratePage() {
                 </svg>
               </div>
               <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight leading-tight">
-                Shape your cloud stack in minutes.
+                Shape your MVP in minutes.
               </h1>
               <p className="text-sm text-gray-500 mt-2.5 max-w-lg leading-relaxed font-medium">
-                Tell me your presets, workload, database, and pipelines. I&apos;ll turn it into a production-ready cloud stack in minutes.
+                Tell me the idea, workflow, users, integrations, and timeline. I&apos;ll turn it into a blueprint-ready MVP scope in minutes.
               </p>
             </div>
 
@@ -919,18 +919,18 @@ export default function GeneratePage() {
               >
                 <input
                   className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 focus:outline-none pl-4 py-2 border-0 min-w-0"
-                  placeholder="Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS"
+                  placeholder="Ask anything, e.g. I want to implement Salesforce in our sales team"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   disabled={isGenerating}
                 />
                 <button
                   type="submit"
-                  className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-[#0066FF] hover:text-white transition-colors shrink-0 cursor-pointer"
+                  className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-[#0066FF] hover:text-white transition-colors shrink-0 cursor-pointer disabled:opacity-40 disabled:pointer-events-none active:scale-95"
                   disabled={isGenerating || input.trim().length < 1}
                 >
-                  <svg className="w-4 h-4 transform rotate-45 -translate-x-0.5 translate-y-0.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
                   </svg>
                 </button>
               </form>
