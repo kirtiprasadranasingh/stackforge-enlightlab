@@ -877,23 +877,6 @@ export default function GeneratePage() {
               </button>
             </form>
           </div>
-
-          {/* Action pill below the chat card */}
-          <div className="mt-4 z-10 animate-fade-slide-up" style={{ animationDelay: '100ms' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setSetupDone(false);
-                setStep(1);
-              }}
-              className="text-xs bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 px-4 py-2.5 rounded-full shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-              </svg>
-              <span>Answer 3 quick questions</span>
-            </button>
-          </div>
         </div>
       ) : (
         <div className="flex-1 flex justify-center bg-white overflow-y-auto relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_800px_at_50%_45%,#eef2ff,transparent_75%)] before:pointer-events-none">
@@ -915,7 +898,7 @@ export default function GeneratePage() {
             </div>
 
             {/* Centered input form + Suggestions */}
-            <div className="w-full flex flex-col items-center gap-4 mb-24">
+            <div className="w-full flex flex-col items-center gap-4 mb-44">
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -943,22 +926,6 @@ export default function GeneratePage() {
                   </svg>
                 </button>
               </form>
-
-              {/* Quick Questions Pill */}
-              <button
-                type="button"
-                onClick={() => {
-                  setSetupDone(false);
-                  setStep(1);
-                }}
-                className="text-xs bg-white hover:bg-gray-50 text-gray-600 border border-gray-200 px-4 py-2 rounded-full shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer animate-fade-slide-up"
-                style={{ animationDelay: '150ms' }}
-              >
-                <svg className="w-3.5 h-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                </svg>
-                <span>Answer 3 quick questions</span>
-              </button>
             </div>
 
             {/* Scroll Indicator */}
