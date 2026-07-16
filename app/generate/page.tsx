@@ -556,8 +556,8 @@ export default function GeneratePage() {
 
       {!hasGeneratedFiles && (
         <div className="absolute top-6 left-8 z-50">
-          <Link href="/" className="flex items-center gap-2.5 no-underline">
-            <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-8 w-auto object-contain" />
+          <Link href="/" className="flex items-center gap-1.5 no-underline">
+            <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-10 w-auto object-contain" />
             <div className="flex flex-col select-none leading-none">
               <span className="text-xl font-bold tracking-tight text-blue-600 font-sans">
                 Enlight Lab
