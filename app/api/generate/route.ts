@@ -9,7 +9,7 @@ import {
   getCORSHeaders,
   assertOriginAllowed,
 } from '@/lib/rate-limit';
-import { appendAndParse, createParseState, parseJsonFallback } from '@/lib/stream-parse';
+import { appendAndParse, createParseState, parseJsonFallback, parseMarkdownFallback } from '@/lib/stream-parse';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -378,6 +378,18 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          // Run the Markdown fallback parser to capture any missed files
+          const fallbackFiles = parseMarkdownFallback(fullText);
+          for (const file of fallbackFiles) {
+            const exists = collectedFiles.some(f => f.path === file.path);
+            if (!exists) {
+              if (!validateOutputSize([...collectedFiles, file])) break;
+              collectedFiles.push(file);
+              anyOutput = true;
+              controller.enqueue(sse({ type: 'file', file }));
+            }
+          }
+
           if (!anyOutput && collectedFiles.length === 0 && !summarySent) {
             controller.enqueue(
               sse({
@@ -409,7 +421,7 @@ export async function POST(request: NextRequest) {
                   let code = 0;
                   let output = "";
                   try {
-                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`);
+                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: 25000 });
                     code = 0;
                     output = stdout + stderr;
                   } catch (err: unknown) {

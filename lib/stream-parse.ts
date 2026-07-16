@@ -308,3 +308,52 @@ export function parseJsonFallback(text: string): {
     return { files: [] };
   }
 }
+
+/**
+ * Fallback: parse markdown fenced code blocks when headers are slightly malformed or have intervening text.
+ */
+export function parseMarkdownFallback(text: string): GeneratedFile[] {
+  const files: GeneratedFile[] = [];
+  const emittedPaths = new Set<string>();
+
+  const blockRegex = /```(\w*)\r?\n([\s\S]*?)\r?\n```/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = blockRegex.exec(text)) !== null) {
+    const language = match[1].trim();
+    const content = match[2];
+    const blockIndex = match.index;
+
+    // Scan backwards from blockIndex up to 300 characters to locate a filename
+    const searchArea = text.slice(Math.max(0, blockIndex - 300), blockIndex);
+    const lines = searchArea.split('\n').map((l) => l.trim()).reverse();
+    let foundPath: string | null = null;
+
+    for (const line of lines) {
+      const cleanLine = line
+        .replace(/^#+\s*/, '')
+        .replace(/^\*\*|\*\*$/, '')
+        .replace(/^`|`$/, '')
+        .replace(/:$/, '')
+        .trim();
+
+      if (validateFilePath(cleanLine)) {
+        if (cleanLine.includes('.') || cleanLine.toLowerCase() === 'dockerfile') {
+          foundPath = cleanLine;
+          break;
+        }
+      }
+    }
+
+    if (foundPath && !emittedPaths.has(foundPath)) {
+      emittedPaths.add(foundPath);
+      files.push({
+        path: foundPath,
+        language: language || getLanguageFromPath(foundPath),
+        content,
+      });
+    }
+  }
+
+  return files;
+}
