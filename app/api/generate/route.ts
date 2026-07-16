@@ -406,7 +406,7 @@ export async function POST(request: NextRequest) {
               let passed = false;
               let reportText = "";
 
-              while (attempts < 3) {
+              while (attempts < 2) {
                 attempts++;
                 let tempDir = "";
                 try {
@@ -421,7 +421,7 @@ export async function POST(request: NextRequest) {
                   let code = 0;
                   let output = "";
                   try {
-                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: 25000 });
+                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: 12000 });
                     code = 0;
                     output = stdout + stderr;
                   } catch (err: unknown) {
@@ -447,12 +447,12 @@ export async function POST(request: NextRequest) {
                     break;
                   }
 
-                  if (attempts === 3) {
+                  if (attempts === 2) {
                     passed = false;
                     break;
                   }
 
-                  controller.enqueue(sse({ type: 'status', message: `Validator flagged issues. Auto-resolving (attempt ${attempts}/2)…` }));
+                  controller.enqueue(sse({ type: 'status', message: `Validator flagged issues. Auto-resolving (attempt ${attempts}/1)…` }));
 
                   const fixPrompt = `The following files failed validation:\n${failLines.join('\n')}\n\nFix only these specific issues in the affected files and return the corrected versions — do not regenerate unaffected files.`;
                   const fixPromptText = formatFollowUpPrompt({
