@@ -13,10 +13,10 @@ export default function HomePage() {
             FREE · 30 SECONDS · NO ACCOUNT NEEDED
           </span>
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-gray-900 leading-tight mb-4">
-            How cloud-ready is <span className="text-indigo-600">your application?</span>
+            How cloud-ready is <span className="text-indigo-600">your stack?</span>
           </h1>
           <p className="text-sm sm:text-base text-gray-500 max-w-xl mx-auto mb-8 leading-relaxed">
-            Describe your infrastructure in plain English and get an instant, copyable set of working configurations: Terraform files, CI/CD pipelines, and Kubernetes manifests.
+            Describe your infrastructure in plain English and get an instant, copyable scaffold: Terraform, CI/CD, and container/orchestration manifests — plus a minimal health stub. Reviewable starting point, not drop-in production.
           </p>
           <div className="flex justify-center mb-12">
             <Link
@@ -42,7 +42,7 @@ export default function HomePage() {
             </div>
             <div className="bg-white border border-gray-100 rounded-2xl py-4 px-3 shadow-sm hover:shadow-md transition-shadow">
               <p className="text-xl font-extrabold text-gray-900">3</p>
-              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mt-0.5">Core artifacts</p>
+              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mt-0.5">Infra artifacts</p>
             </div>
             <div className="bg-white border border-gray-100 rounded-2xl py-4 px-3 shadow-sm hover:shadow-md transition-shadow">
               <p className="text-xl font-extrabold text-gray-900">Free</p>
@@ -156,9 +156,9 @@ export default function HomePage() {
                   2
                 </span>
                 <div>
-                  <h4 className="font-bold text-gray-900 text-base">Describe your application needs</h4>
+                  <h4 className="font-bold text-gray-900 text-base">Describe your infrastructure needs</h4>
                   <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                    Specify database setups, autoscaling thresholds, load balancer configurations, and environment secrets in plain prose.
+                    Specify compute targets, databases, autoscaling, load balancers, and environment secrets in plain prose.
                   </p>
                 </div>
               </div>

@@ -10,7 +10,7 @@ export type Orchestrator =
   | 'serverless'
   | 'cloud-run'
   | 'container-apps';
-export type CIProvider = 'github-actions' | 'gitlab-ci' | 'jenkins';
+export type CIProvider = 'github-actions' | 'gitlab-ci' | 'jenkins' | 'azure-devops';
 
 export interface Presets {
   cloud: CloudProvider;
@@ -31,19 +31,40 @@ export interface GenerationResult {
   warnings?: string[];
 }
 
+export type WorkflowPhase = 'clarify' | 'plan' | 'generate';
+
 export interface GenerateRequest {
   prompt: string;
   presets: Presets;
+  /** Workflow phase — plan/clarify never emit files; generate creates artifacts */
+  phase?: WorkflowPhase;
+  /** Approved architecture plan required for gated generate */
+  approvedPlan?: string;
+  /** Prior plan text when the user is revising */
+  priorPlan?: string;
 }
 
 export interface StreamEvent {
-  type: 'status' | 'file' | 'summary' | 'warnings' | 'done' | 'error';
+  type:
+    | 'status'
+    | 'file'
+    | 'summary'
+    | 'warnings'
+    | 'done'
+    | 'error'
+    | 'clear'
+    | 'delete'
+    | 'questions'
+    | 'plan';
   file?: GeneratedFile;
+  path?: string;
   content?: string;
   message?: string;
   summary?: string;
   warnings?: string[];
   error?: string;
+  questions?: string[];
+  plan?: string;
 }
 
 export interface RateLimitInfo {
@@ -94,4 +115,5 @@ export const CI_OPTIONS: PresetOption[] = [
   { value: 'github-actions', label: 'GitHub Actions', description: 'CI/CD with GitHub' },
   { value: 'gitlab-ci', label: 'GitLab CI', description: 'CI/CD with GitLab' },
   { value: 'jenkins', label: 'Jenkins', description: 'Traditional Jenkins pipelines' },
+  { value: 'azure-devops', label: 'Azure DevOps', description: 'Azure Pipelines YAML' },
 ];

@@ -9,9 +9,28 @@ const FILE_START =
   /<<<FILE\s+path="([^"]+)"\s+language="([^"]*)"(?:\s+description="([^"]*)")?\s*>>>/g;
 const END_FILE = '<<<END_FILE>>>';
 const DELETE_RE = /<<<DELETE\s+path="([^"]+)"\s*>>>/g;
-const STATUS_RE = /<<<STATUS>>>\s*([\s\S]*?)(?=<<<|\s*$)/;
-const SUMMARY_RE = /<<<SUMMARY>>>\s*([\s\S]*?)(?=<<<WARNINGS>>>|\s*$)/;
-const WARNINGS_RE = /<<<WARNINGS>>>\s*([\s\S]*?)$/;
+const MARKER_RE = /<<<[A-Z_]+(?:\s+[^>]*)?>>>/g;
+
+/**
+ * Return a section only after a following marker proves that it is complete.
+ * At end-of-stream, EOF is also a valid boundary. This prevents partial JSON
+ * such as `["Which cloud` from being emitted while model text is streaming.
+ */
+function completedSection(
+  buffer: string,
+  marker: string,
+  finalize: boolean
+): string | undefined {
+  const start = buffer.indexOf(marker);
+  if (start === -1) return undefined;
+
+  const contentStart = start + marker.length;
+  MARKER_RE.lastIndex = contentStart;
+  const nextMarker = MARKER_RE.exec(buffer);
+  if (!nextMarker && !finalize) return undefined;
+
+  return buffer.slice(contentStart, nextMarker?.index ?? buffer.length).trim();
+}
 
 export interface ParseState {
   buffer: string;
@@ -24,6 +43,8 @@ export interface ParseResult {
   deletedPaths: string[];
   summary?: string;
   warnings?: string[];
+  questions?: string[];
+  plan?: string;
   doneMarkers: boolean;
 }
 
@@ -31,18 +52,56 @@ export function createParseState(): ParseState {
   return { buffer: '', emittedPaths: new Set() };
 }
 
-export function appendAndParse(state: ParseState, chunk: string): ParseResult {
+export function appendAndParse(
+  state: ParseState,
+  chunk: string,
+  finalize = false
+): ParseResult {
   state.buffer += chunk;
   const files: GeneratedFile[] = [];
   const deletedPaths: string[] = [];
-  let status: string | undefined;
   let summary: string | undefined;
   let warnings: string[] | undefined;
+  let questions: string[] | undefined;
 
-  const statusMatch = state.buffer.match(STATUS_RE);
-  if (statusMatch) {
-    status = statusMatch[1].trim();
+  const status = completedSection(state.buffer, '<<<STATUS>>>', finalize);
+
+  const rawQuestions = completedSection(
+    state.buffer,
+    '<<<QUESTIONS>>>',
+    finalize
+  );
+  if (rawQuestions !== undefined) {
+    const raw = rawQuestions.trim();
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        questions = parsed
+          .map((value) =>
+            String(value)
+              .replace(/^\s*\d+[.)]\s*/, '')
+              .trim()
+          )
+          .filter(Boolean);
+      }
+    } catch {
+      // The section is complete but the model ignored the JSON contract.
+      // Accept a plain numbered/bulleted list without leaking JSON syntax.
+      questions = raw
+        .split('\n')
+        .map((line) =>
+          line
+            .replace(/^\s*[\[,\]]+\s*$/, '')
+            .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '')
+            .replace(/^\s*["']|["'],?\s*$/g, '')
+            .trim()
+        )
+        .filter((line) => line.endsWith('?'))
+        .filter(Boolean);
+    }
   }
+
+  const plan = completedSection(state.buffer, '<<<PLAN>>>', finalize);
 
   // Deletes
   DELETE_RE.lastIndex = 0;
@@ -234,9 +293,13 @@ export function appendAndParse(state: ParseState, chunk: string): ParseResult {
   }
   mdToRemove.length = 0;
 
-  const summaryMatch = state.buffer.match(SUMMARY_RE);
-  if (summaryMatch) {
-    summary = summaryMatch[1].trim();
+  const completedSummary = completedSection(
+    state.buffer,
+    '<<<SUMMARY>>>',
+    finalize
+  );
+  if (completedSummary !== undefined) {
+    summary = completedSummary;
   } else {
     if (!state.buffer.includes('<<<')) {
       const clean = state.buffer.replace(/```[a-zA-Z]*\r?\n[\s\S]*?\r?\n```/g, '').trim();
@@ -246,9 +309,13 @@ export function appendAndParse(state: ParseState, chunk: string): ParseResult {
     }
   }
 
-  const warningsMatch = state.buffer.match(WARNINGS_RE);
-  if (warningsMatch) {
-    const raw = warningsMatch[1].trim();
+  const completedWarnings = completedSection(
+    state.buffer,
+    '<<<WARNINGS>>>',
+    finalize
+  );
+  if (completedWarnings !== undefined) {
+    const raw = completedWarnings.trim();
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
@@ -265,7 +332,7 @@ export function appendAndParse(state: ParseState, chunk: string): ParseResult {
   const doneMarkers =
     state.buffer.includes('<<<SUMMARY>>>') && state.buffer.includes('<<<WARNINGS>>>');
 
-  return { status, files, deletedPaths, summary, warnings, doneMarkers };
+  return { status, files, deletedPaths, summary, warnings, questions, plan, doneMarkers };
 }
 
 /**

@@ -4,7 +4,8 @@
 - Region: `ap-mumbai-1` → OCIR: `bom.ocir.io`
 - Ingress class: `nginx`
 - Shared LB: `144.24.100.85`
-- App URL: **http://stackforge.144-24-100-85.nip.io**
+- App URL: **https://stackforge.144-24-100-85.nip.io** (TLS via cert-manager)
+- Fallback HTTP redirects to HTTPS once the certificate is Ready
 
 ## A) Create OCIR repo
 OCI Console → Container Registry → **Create repository** → name: `stackforge` (Private)
@@ -44,7 +45,7 @@ kubectl create secret docker-registry ocir-secret \
   --docker-password='<AUTH_TOKEN>' \
   --docker-email='you@example.com'
 
-# 3) App secret
+# 3) App secret (use https:// APP URL)
 cp k8s/secret.yaml.example k8s/secret.yaml
 # put real GEMINI_API_KEY in k8s/secret.yaml
 kubectl apply -f k8s/secret.yaml
@@ -57,10 +58,40 @@ kubectl -n stackforge rollout status deploy/stackforge
 kubectl -n stackforge get pods,svc,ingress
 ```
 
-## D) Open
-http://stackforge.144-24-100-85.nip.io
+## D) HTTPS / padlock (“Not secure” fix)
 
-## E) Remove later (keep cluster/LB)
+Ingress requests a Let's Encrypt cert via cert-manager (`letsencrypt-prod`).
+
+```bash
+# Confirm issuer exists (name may differ on your cluster)
+kubectl get clusterissuer
+
+# Watch certificate until Ready=True (often 1–3 minutes)
+kubectl -n stackforge get certificate
+kubectl -n stackforge describe certificate stackforge-tls
+
+# If issuer name is different:
+# kubectl -n stackforge edit ingress stackforge
+# change annotation cert-manager.io/cluster-issuer
+```
+
+Open: **https://stackforge.144-24-100-85.nip.io**
+
+ZIP downloads from HTTPS no longer trigger the HTTP “not secure download” warning.
+
+## E) “Could not reach the API” fix
+
+Ingress now sets 600s proxy read/send timeouts and disables buffering for SSE streams.
+After applying ingress:
+
+```bash
+kubectl apply -f k8s/ingress.yaml
+kubectl -n stackforge rollout restart deployment/stackforge
+```
+
+If generate still fails, check pod logs: `kubectl -n stackforge logs deploy/stackforge -f`
+
+## F) Remove later (keep cluster/LB)
 ```bash
 kubectl delete namespace stackforge
 ```

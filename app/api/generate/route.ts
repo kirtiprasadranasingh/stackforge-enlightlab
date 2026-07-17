@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGemini, DEFAULT_MODEL, MAX_OUTPUT_TOKENS } from '@/lib/gemini';
-import { SYSTEM_PROMPT, formatPrompt, formatFollowUpPrompt } from '@/lib/prompts';
+import {
+  SYSTEM_PROMPT,
+  formatPrompt,
+  formatFollowUpPrompt,
+  formatPlanPrompt,
+} from '@/lib/prompts';
 import { sanitizeInput, validateOutputSize } from '@/lib/utils';
 import { validateGenerateRequest, ValidationError, RateLimitError } from '@/lib/validation';
 import {
@@ -15,6 +20,20 @@ import {
   parseValidationReport,
   shouldAppendValidationWarning,
 } from '@/lib/validation-report';
+import { inferPresetsFromPrompt } from '@/lib/infer-presets';
+import { buildClarifyingQuestions } from '@/lib/clarifying-questions';
+import {
+  isFullStackPrompt,
+  isIterativeEditPrompt,
+  requiresPlanApproval,
+} from '@/lib/stack-intent';
+import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
+import {
+  buildCompletionPrompt,
+  detectScaffoldProfile,
+  getMissingRequiredPaths,
+} from '@/lib/scaffold-spec';
+import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -23,13 +42,212 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-import type { GeneratedFile } from '@/types';
-
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
 function sse(data: unknown): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function ingestParsedFile(
+  raw: GeneratedFile,
+  collected: GeneratedFile[],
+  onFile: (file: GeneratedFile) => void
+): boolean {
+  const file = normalizeScaffoldFile(raw);
+  if (!file) return false;
+  const idx = collected.findIndex((f) => f.path === file.path);
+  if (idx === -1) collected.push(file);
+  else collected[idx] = file;
+  onFile(file);
+  return true;
+}
+
+function parseFilesFromModelText(text: string): GeneratedFile[] {
+  const state = createParseState();
+  const first = appendAndParse(state, text);
+  const second = appendAndParse(state, '', true);
+  const merged = [...first.files, ...second.files];
+  for (const f of parseMarkdownFallback(text)) {
+    if (!merged.some((m) => m.path === f.path)) merged.push(f);
+  }
+  return normalizeScaffoldFiles(merged);
+}
+
+/** Keep chat summary short — long prose belongs in README.md */
+function trimSummary(summary: string): string {
+  const trimmed = summary.trim();
+  if (trimmed.length <= 600) return trimmed;
+  const firstPara = trimmed.split(/\n\n+/)[0] || trimmed;
+  return firstPara.slice(0, 600) + (firstPara.length > 600 ? '…' : '');
+}
+
+function sseResponse(stream: ReadableStream, cors: HeadersInit): NextResponse {
+  return new NextResponse(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      ...cors,
+    },
+  });
+}
+
+/** Reliable first-round interview: fast, deterministic, and never partial JSON. */
+function streamClarifyingPhase(
+  cors: HeadersInit,
+  prompt: string,
+  presets: Presets
+): NextResponse {
+  const questions = buildClarifyingQuestions(prompt, presets);
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        sse({ type: 'status', message: 'Reviewing your requirements…' })
+      );
+      controller.enqueue(sse({ type: 'questions', questions }));
+      controller.enqueue(
+        sse({
+          type: 'summary',
+          summary:
+            'I captured the stack you described. Answer these requirements questions so I can draft a detailed infrastructure plan for your approval.',
+        })
+      );
+      controller.enqueue(sse({ type: 'warnings', warnings: [] }));
+      controller.enqueue(sse({ type: 'done' }));
+      controller.close();
+    },
+  });
+
+  return sseResponse(stream, cors);
+}
+
+/** Plan/clarify phases: stream Gemini text, emit questions/plan, never files. */
+async function streamPlanningPhase(params: {
+  cors: HeadersInit;
+  systemPrompt: string;
+  userPrompt: string;
+  statusMessage: string;
+}): Promise<NextResponse> {
+  const { cors, systemPrompt, userPrompt, statusMessage } = params;
+  const stream = new ReadableStream({
+    async start(controller) {
+      const parseState = createParseState();
+      let fullText = '';
+      let questionsSent = false;
+      let planSent = false;
+      let summarySent = false;
+
+      try {
+        controller.enqueue(sse({ type: 'status', message: statusMessage }));
+
+        const model = getGemini().getGenerativeModel({
+          model: DEFAULT_MODEL,
+          systemInstruction: systemPrompt,
+          generationConfig: {
+            maxOutputTokens: 8192,
+          },
+        });
+
+        const geminiStream = await model.generateContentStream(userPrompt);
+
+        for await (const chunk of geminiStream.stream) {
+          let chunkText = '';
+          try {
+            chunkText = chunk.text();
+          } catch {
+            continue;
+          }
+          if (!chunkText) continue;
+          fullText += chunkText;
+          const parsed = appendAndParse(parseState, chunkText);
+
+          // Never emit files from planning phases even if the model misbehaves
+          if (parsed.questions?.length && !questionsSent) {
+            questionsSent = true;
+            controller.enqueue(sse({ type: 'questions', questions: parsed.questions }));
+          }
+          if (parsed.plan && parsed.plan.length > 40 && !planSent) {
+            planSent = true;
+            controller.enqueue(sse({ type: 'plan', plan: parsed.plan }));
+          }
+          if (parsed.summary && !summarySent) {
+            summarySent = true;
+            controller.enqueue(sse({ type: 'summary', summary: trimSummary(parsed.summary) }));
+          }
+        }
+
+        const finalParsed = appendAndParse(parseState, '', true);
+        if (finalParsed.questions?.length && !questionsSent) {
+          questionsSent = true;
+          controller.enqueue(sse({ type: 'questions', questions: finalParsed.questions }));
+        }
+        if (finalParsed.plan && finalParsed.plan.length > 40 && !planSent) {
+          planSent = true;
+          controller.enqueue(sse({ type: 'plan', plan: finalParsed.plan }));
+        }
+        if (finalParsed.summary && !summarySent) {
+          summarySent = true;
+          controller.enqueue(sse({ type: 'summary', summary: trimSummary(finalParsed.summary) }));
+        }
+
+        // Fallback: treat whole response as plan if markers missing but content looks like a plan
+        if (!planSent && !questionsSent && fullText.trim().length > 80) {
+          const cleaned = fullText
+            .replace(/<<<FILE[\s\S]*?<<<END_FILE>>>/g, '')
+            .replace(/<<<[^>]+>>>/g, '')
+            .trim();
+          if (
+            /file manifest|assumptions|resources|terraform|ci\/cd/i.test(cleaned) ||
+            cleaned.length > 200
+          ) {
+            controller.enqueue(sse({ type: 'plan', plan: cleaned.slice(0, 18000) }));
+            planSent = true;
+          } else if (cleaned) {
+            const qLines = cleaned
+              .split('\n')
+              .map((l) => l.replace(/^[-*\d.)\s]+/, '').trim())
+              .filter((l) => l.endsWith('?'));
+            if (qLines.length) {
+              controller.enqueue(sse({ type: 'questions', questions: qLines.slice(0, 8) }));
+              questionsSent = true;
+            }
+          }
+        }
+
+        if (!summarySent) {
+          controller.enqueue(
+            sse({
+              type: 'summary',
+              summary: planSent
+                ? 'Review the plan below. Approve to generate files, or reply with changes to revise it.'
+                : questionsSent
+                  ? 'Answer the questions above so I can draft a concrete plan.'
+                  : 'Could not draft a plan — try a clearer stack description.',
+            })
+          );
+        }
+
+        controller.enqueue(sse({ type: 'warnings', warnings: [] }));
+        controller.enqueue(sse({ type: 'done' }));
+        controller.close();
+      } catch (error) {
+        console.error('Planning stream error:', error);
+        controller.enqueue(
+          sse({
+            type: 'error',
+            error:
+              'Planning failed: ' +
+              (error instanceof Error ? error.message : 'Unknown error'),
+          })
+        );
+        controller.close();
+      }
+    },
+  });
+
+  return sseResponse(stream, cors);
 }
 
 export async function OPTIONS(request: NextRequest) {
@@ -68,14 +286,25 @@ export async function POST(request: NextRequest) {
       throw new ValidationError('Invalid request', validation.error);
     }
 
-    const { prompt: rawPrompt, presets = { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' }, history = [], existingFiles = [] } =
-      validation.data;
+    const {
+      prompt: rawPrompt,
+      presets: rawPresets = { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+      history = [],
+      existingFiles = [],
+      phase: requestedPhase,
+      approvedPlan,
+      priorPlan,
+    } = validation.data;
     const prompt = sanitizeInput(rawPrompt);
+    const presets = inferPresetsFromPrompt(prompt, rawPresets as Presets);
     const lowerPrompt = prompt.toLowerCase().trim();
+    let phase: WorkflowPhase = requestedPhase || 'generate';
 
-    // 1. Intercept Greetings
-    const greetings = ['hi', 'hello', 'hey', 'greetings', 'yo', 'good morning', 'good afternoon', 'good evening'];
-    const isGreeting = greetings.includes(lowerPrompt) || (greetings.some(g => lowerPrompt.includes(g)) && lowerPrompt.split(/\s+/).length <= 3);
+    // 1. Intercept Greetings — word-boundary only; never when chat/files already exist
+    const isGreeting =
+      (existingFiles.length === 0 && history.length === 0) &&
+      (/^(hi|hello|hey|yo|greetings|good morning|good afternoon|good evening)[!.?\s]*$/i.test(lowerPrompt) ||
+        /^(hi|hello|hey)\s+\w+/i.test(lowerPrompt) && lowerPrompt.split(/\s+/).length <= 4);
 
     if (isGreeting) {
       const stream = new ReadableStream({
@@ -90,7 +319,7 @@ export async function POST(request: NextRequest) {
           controller.enqueue(
             sse({
               type: 'summary',
-              summary: "Hey! I am StackForge, your AI MVP Blueprint Generator from Enlight Labs. I can help you design and generate Terraform configurations, Dockerfiles, Helm charts, and CI/CD pipelines (GitHub Actions, GitLab CI, Jenkins) for OCI, AWS, GCP, and Azure.\n\nDescribe the cloud infrastructure or application deployment you want to generate code for, and I'll build it!",
+              summary: "Hey! I am StackForge from Enlight Labs. I generate infrastructure scaffolds — Terraform, CI/CD pipelines, Dockerfiles, and orchestration manifests — plus a minimal health-check stub (not a full application).\n\nDescribe the cloud stack you want, answer a few clarifying questions, approve the plan, and I'll stream the files.",
             })
           );
           controller.enqueue(
@@ -106,8 +335,9 @@ export async function POST(request: NextRequest) {
       return new NextResponse(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
           ...cors,
         },
       });
@@ -187,21 +417,10 @@ export async function POST(request: NextRequest) {
        lowerPrompt.includes('host') ||
        lowerPrompt.includes('setup'));
 
-    const isNewRequest = (p: string): boolean => {
-      const lower = p.toLowerCase().trim();
-      if (lower.startsWith('a ') || lower.startsWith('an ') || lower.startsWith('new ') || lower.startsWith('create ') || lower.startsWith('generate ') || lower.startsWith('build ') || lower.startsWith('scaffold ')) {
-        return true;
-      }
-      if ((lower.includes('eks') || lower.includes('gke') || lower.includes('aks') || lower.includes('oke') || lower.includes('fargate') || lower.includes('ecs')) && 
-          (lower.includes('api') || lower.includes('service') || lower.includes('rest') || lower.includes('app') || lower.includes('application'))) {
-        if (lower.length > 35) {
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const isFreshGen = !existingFiles.length || isNewRequest(prompt);
+    // "Deploy a Go backend to Azure…" must wipe previous AWS/EKS files — not merge as a follow-up
+    const isFreshGen =
+      !existingFiles.length ||
+      (isFullStackPrompt(prompt) && !isIterativeEditPrompt(prompt));
     const isFollowUp = existingFiles.length > 0 && !isFreshGen;
 
     const hasPrescribedConfigKeyword = 
@@ -248,8 +467,9 @@ export async function POST(request: NextRequest) {
       return new NextResponse(stream, {
         headers: {
           'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
           ...cors,
         },
       });
@@ -265,6 +485,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const gated = requiresPlanApproval(prompt, existingFiles.length > 0);
+
+    // Clients that skip workflow phases — interview first, then plan (never invent silently)
+    if (phase === 'generate' && gated && !approvedPlan?.trim()) {
+      const hasPriorAssistant = history.some((m) => m.role === 'assistant');
+      phase = hasPriorAssistant ? 'plan' : 'clarify';
+    }
+
+    // Clarify / plan phases — never emit files
+    if (phase === 'clarify') {
+      return streamClarifyingPhase(cors, prompt, presets);
+    }
+
+    if (phase === 'plan') {
+      return streamPlanningPhase({
+        cors,
+        systemPrompt: SYSTEM_PROMPT,
+        userPrompt: formatPlanPrompt({
+          userPrompt: prompt,
+          presets,
+          priorPlan,
+          history,
+        }),
+        statusMessage: priorPlan ? 'Revising plan…' : 'Drafting architecture plan…',
+      });
+    }
+
     const fullPrompt = isFollowUp
       ? formatFollowUpPrompt({
           message: prompt,
@@ -272,7 +519,7 @@ export async function POST(request: NextRequest) {
           existingFiles,
           history,
         })
-      : formatPrompt(prompt, presets);
+      : formatPrompt(prompt, presets, approvedPlan);
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -292,9 +539,7 @@ export async function POST(request: NextRequest) {
           controller.enqueue(
             sse({
               type: 'status',
-              message: isFollowUp
-                ? 'Updating your project…'
-                : 'Connecting to Gemini… preparing your stack',
+              message: isFollowUp ? 'Updating…' : 'Generating…',
             })
           );
 
@@ -341,15 +586,19 @@ export async function POST(request: NextRequest) {
                 controller.close();
                 return;
               }
-              collectedFiles.push(file);
-              anyOutput = true;
-              controller.enqueue(sse({ type: 'file', file }));
+              if (
+                ingestParsedFile(file, collectedFiles, (f) => {
+                  controller.enqueue(sse({ type: 'file', file: f }));
+                })
+              ) {
+                anyOutput = true;
+              }
             }
 
             if (parsed.summary && !summarySent) {
               summarySent = true;
               anyOutput = true;
-              controller.enqueue(sse({ type: 'summary', summary: parsed.summary }));
+              controller.enqueue(sse({ type: 'summary', summary: trimSummary(parsed.summary) }));
             }
 
             if (parsed.warnings && !warningsSent) {
@@ -359,12 +608,14 @@ export async function POST(request: NextRequest) {
           }
 
           // Send the final complete summary and warnings if parsed from markers
-          const finalParsed = appendAndParse(parseState, '');
-          if (finalParsed.summary) {
+          const finalParsed = appendAndParse(parseState, '', true);
+          if (finalParsed.summary && !summarySent) {
+            summarySent = true;
             anyOutput = true;
-            controller.enqueue(sse({ type: 'summary', summary: finalParsed.summary }));
+            controller.enqueue(sse({ type: 'summary', summary: trimSummary(finalParsed.summary) }));
           }
-          if (finalParsed.warnings && finalParsed.warnings.length > 0) {
+          if (finalParsed.warnings && !warningsSent) {
+            warningsSent = true;
             controller.enqueue(sse({ type: 'warnings', warnings: finalParsed.warnings }));
           }
 
@@ -372,32 +623,113 @@ export async function POST(request: NextRequest) {
             const fallback = parseJsonFallback(fullText);
             for (const file of fallback.files) {
               if (!validateOutputSize([...collectedFiles, file])) break;
-              collectedFiles.push(file);
-              anyOutput = true;
-              controller.enqueue(sse({ type: 'file', file }));
+              if (
+                ingestParsedFile(file, collectedFiles, (f) => {
+                  controller.enqueue(sse({ type: 'file', file: f }));
+                })
+              ) {
+                anyOutput = true;
+              }
             }
-            if (fallback.summary) {
+            if (fallback.summary && !summarySent) {
+              summarySent = true;
               anyOutput = true;
-              controller.enqueue(sse({ type: 'summary', summary: fallback.summary }));
+              controller.enqueue(sse({ type: 'summary', summary: trimSummary(fallback.summary) }));
             }
-            if (fallback.warnings && fallback.warnings.length > 0) {
+            if (fallback.warnings && !warningsSent) {
+              warningsSent = true;
               controller.enqueue(sse({ type: 'warnings', warnings: fallback.warnings }));
             }
           }
 
-          // Run the Markdown fallback parser to capture any missed files
           const fallbackFiles = parseMarkdownFallback(fullText);
           for (const file of fallbackFiles) {
-            const exists = collectedFiles.some(f => f.path === file.path);
-            if (!exists) {
-              if (!validateOutputSize([...collectedFiles, file])) break;
-              collectedFiles.push(file);
-              anyOutput = true;
-              controller.enqueue(sse({ type: 'file', file }));
+            const normalized = normalizeScaffoldFile(file);
+            const exists =
+              normalized &&
+              collectedFiles.some((f) => f.path === normalized.path);
+            if (normalized && !exists) {
+              if (!validateOutputSize([...collectedFiles, normalized])) break;
+              if (
+                ingestParsedFile(normalized, collectedFiles, (f) => {
+                  controller.enqueue(sse({ type: 'file', file: f }));
+                })
+              ) {
+                anyOutput = true;
+              }
             }
           }
-          // If no summary was sent and no files were generated, try to extract a clean text summary from the full text
-          if (!anyOutput && collectedFiles.length === 0 && !summarySent) {
+
+          if (!isFollowUp) {
+            const profile = detectScaffoldProfile(prompt, presets);
+            if (profile) {
+              let missing = getMissingRequiredPaths(collectedFiles, profile);
+              if (missing.length > 0) {
+                controller.enqueue(
+                  sse({
+                    type: 'status',
+                    message: `Completing ${missing.length} missing file(s)…`,
+                  })
+                );
+                try {
+                  const completionResult = await model.generateContent(
+                    buildCompletionPrompt(missing, collectedFiles, profile)
+                  );
+                  const completionText = completionResult.response.text();
+                  for (const file of parseFilesFromModelText(completionText)) {
+                    if (!validateOutputSize([...collectedFiles, file])) break;
+                    ingestParsedFile(file, collectedFiles, (f) => {
+                      anyOutput = true;
+                      controller.enqueue(sse({ type: 'file', file: f }));
+                    });
+                  }
+                  missing = getMissingRequiredPaths(collectedFiles, profile);
+                  if (missing.length > 0 && !warningsSent) {
+                    warningsSent = true;
+                    controller.enqueue(
+                      sse({
+                        type: 'warnings',
+                        warnings: [
+                          `Still missing: ${missing.join(', ')}. Re-run or add manually.`,
+                        ],
+                      })
+                    );
+                  }
+                } catch (completionErr) {
+                  console.error('Completion pass error:', completionErr);
+                }
+              }
+            }
+          }
+          // Follow-ups must return files — do not treat prose-only replies as successful updates
+          if (isFollowUp && collectedFiles.length === 0) {
+            const cleanText = fullText
+              .replace(/<<<FILE[\s\S]*?>>>[\s\S]*?<<<END_FILE>>>/g, '')
+              .replace(/<<<[\s\S]*?>>>/g, '')
+              .replace(/```[a-zA-Z]*\r?\n[\s\S]*?\r?\n```/g, '')
+              .replace(/```[\s\S]*?$/g, '')
+              .trim();
+            if (cleanText && !summarySent) {
+              summarySent = true;
+              anyOutput = true;
+              controller.enqueue(
+                sse({
+                  type: 'summary',
+                  summary:
+                    cleanText +
+                    '\n\n⚠️ No files were updated in this turn. The project on the right is unchanged. Try again with a specific request (e.g. "Add terraform/environments/dev.tfvars and prod.tfvars and update azure-pipelines.yml with dev and prod stages").',
+                })
+              );
+            } else if (!summarySent) {
+              controller.enqueue(
+                sse({
+                  type: 'error',
+                  error:
+                    'No file updates were returned. Describe the change clearly — for dev/prod, ask for dev.tfvars, prod.tfvars, and pipeline environment stages.',
+                })
+              );
+            }
+          } else if (!anyOutput && collectedFiles.length === 0 && !summarySent) {
             const cleanText = fullText
               .replace(/<<<FILE[\s\S]*?>>>[\s\S]*?<<<END_FILE>>>/g, '')
               .replace(/<<<[\s\S]*?>>>/g, '')
@@ -488,7 +820,7 @@ export async function POST(request: NextRequest) {
 
                   const parseStateFix = createParseState();
                   const parsedFix = appendAndParse(parseStateFix, fixText);
-                  const finalParsedFix = appendAndParse(parseStateFix, '');
+                  const finalParsedFix = appendAndParse(parseStateFix, '', true);
                   const correctedFiles = [...parsedFix.files, ...finalParsedFix.files];
 
                   if (correctedFiles.length > 0) {

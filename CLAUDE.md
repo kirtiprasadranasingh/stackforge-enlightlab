@@ -39,7 +39,7 @@ StackForge is an AI-powered infrastructure code generator for Enlight Labs. User
 
 ```
 GEMINI_API_KEY=...
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=https://stackforge.144-24-100-85.nip.io
 NEXT_PUBLIC_DIAGNOSTIC_URL=https://enlightlabs.com/contact
 ```
 

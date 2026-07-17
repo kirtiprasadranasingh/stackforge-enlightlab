@@ -10,14 +10,18 @@ function cleanMessageContent(content: string): string {
   let cleaned = content;
   // 1. Remove <<<FILE ...>>> ... <<<END_FILE>>> blocks
   cleaned = cleaned.replace(/<<<FILE[\s\S]*?>>>[\s\S]*?<<<END_FILE>>>/g, '');
-  cleaned = cleaned.replace(/<<<FILE[\s\S]*?>>>[\s\S]*?$/g, ''); // strip partial files at stream end
-  // 2. Remove other <<<...>>> markers
-  cleaned = cleaned.replace(/<<<(STATUS|SUMMARY|WARNINGS|DELETE)[^>]*>>>/g, '');
+  cleaned = cleaned.replace(/<<<FILE[\s\S]*?>>>[\s\S]*?$/g, '');
+  // 2. Remove workflow markers (including PLAN / QUESTIONS leftovers)
+  cleaned = cleaned.replace(
+    /<<<(STATUS|SUMMARY|WARNINGS|DELETE|PLAN|QUESTIONS)[^>]*>>>/g,
+    ''
+  );
   cleaned = cleaned.replace(/<<<END_[A-Z]+>>>/g, '');
-  // 3. Remove markdown code blocks
+  cleaned = cleaned.replace(/<<<+/g, '');
+  cleaned = cleaned.replace(/>>>+/g, '');
+  // 3. Remove markdown code blocks (infra bodies belong in the file viewer)
   cleaned = cleaned.replace(/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?\r?\n```/g, '');
-  cleaned = cleaned.replace(/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?$/g, ''); // strip partial code blocks
-  // 4. Remove standalone fences
+  cleaned = cleaned.replace(/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?$/g, '');
   cleaned = cleaned.replace(/```/g, '');
   return cleaned.trim();
 }
@@ -26,62 +30,130 @@ export function FormattedMessage({ content, className }: FormattedMessageProps) 
   const cleanedContent = cleanMessageContent(content);
   if (!cleanedContent) return null;
 
-  // Split content by newlines
   const lines = cleanedContent.split('\n');
+  const isUserBubble = className?.includes('text-white');
 
   return (
-    <div className="space-y-1.5 font-sans leading-relaxed text-sm">
+    <div
+      className={`space-y-2 font-sans leading-relaxed text-[13px] break-words [overflow-wrap:anywhere] min-w-0 ${className || 'text-slate-700'}`}
+    >
       {lines.map((line, idx) => {
         let trimmed = line.trim();
-
-        // 1. Handle Bullet Points (e.g. starting with "* " or "- ")
-        const isBullet = trimmed.startsWith('*') || trimmed.startsWith('-');
-        if (isBullet) {
-          // Remove the bullet marker
-          trimmed = trimmed.replace(/^[\*\-\s]+/, '');
-        }
-
-        // 2. Parse inline bold (**bold**)
-        const parts = trimmed.split(/(\*\*[^*]+\*\*)/g);
-        const parsedContent = parts.map((part, pIdx) => {
-          if (part.startsWith('**') && part.endsWith('**')) {
-            const isWhiteText = className?.includes('text-white');
-            return (
-              <strong
-                key={pIdx}
-                className={`font-extrabold rounded px-1 ${
-                  isWhiteText
-                    ? 'text-white bg-white/20'
-                    : 'text-[#0066FF] bg-blue-50/50'
-                }`}
-              >
-                {part.slice(2, -2)}
-              </strong>
-            );
-          }
-          return part;
-        });
-
-        // 3. Render line
-        if (isBullet) {
-          return (
-            <div key={idx} className="flex items-start gap-2 pl-3.5 mt-1 animate-fade-slide-up">
-              <span className="text-[#0066FF] font-extrabold select-none">•</span>
-              <span className={`flex-1 ${className || 'text-gray-700'}`}>{parsedContent}</span>
-            </div>
-          );
-        }
-
         if (trimmed === '') {
           return <div key={idx} className="h-1.5" />;
         }
 
+        const headingMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          const headingText = parseInlineParts(headingMatch[2], isUserBubble);
+          const headingClass =
+            level === 1
+              ? 'text-[15px] font-bold tracking-tight mt-1'
+              : level === 2
+                ? 'text-[14px] font-bold tracking-tight mt-1'
+                : 'text-[13px] font-semibold mt-0.5';
+          return (
+            <p
+              key={idx}
+              className={`${headingClass} ${
+                isUserBubble ? 'text-white' : 'text-slate-900'
+              }`}
+            >
+              {headingText}
+            </p>
+          );
+        }
+
+        const numbered = trimmed.match(/^(\d+)\.\s+(.*)$/);
+        if (numbered) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-0.5">
+              <span
+                className={`shrink-0 font-semibold tabular-nums w-4 text-right ${
+                  isUserBubble ? 'text-white/80' : 'text-indigo-600'
+                }`}
+              >
+                {numbered[1]}.
+              </span>
+              <span className="flex-1 min-w-0">
+                {parseInlineParts(numbered[2], isUserBubble)}
+              </span>
+            </div>
+          );
+        }
+
+        const isBullet = /^[*•\-]\s+/.test(trimmed);
+        if (isBullet) {
+          trimmed = trimmed.replace(/^[*•\-]\s+/, '');
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-1">
+              <span
+                className={`mt-1.5 shrink-0 w-1.5 h-1.5 rounded-full ${
+                  isUserBubble ? 'bg-white/80' : 'bg-indigo-500'
+                }`}
+              />
+              <span className="flex-1 min-w-0">
+                {parseInlineParts(trimmed, isUserBubble)}
+              </span>
+            </div>
+          );
+        }
+
         return (
-          <p key={idx} className={className || 'text-gray-700'}>
-            {parsedContent}
+          <p key={idx} className="min-w-0">
+            {parseInlineParts(trimmed, isUserBubble)}
           </p>
         );
       })}
     </div>
   );
+}
+
+function parseInlineParts(text: string, isUserBubble?: boolean): React.ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\b[A-Z][A-Z0-9_]{2,}\b)/g);
+  return parts.map((part, pIdx) => {
+    if (!part) return null;
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong
+          key={pIdx}
+          className={`font-semibold ${
+            isUserBubble ? 'text-white' : 'text-slate-900'
+          }`}
+        >
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return (
+        <code
+          key={pIdx}
+          className={`text-[11px] px-1 py-0.5 rounded font-mono ${
+            isUserBubble
+              ? 'bg-white/20 text-white'
+              : 'bg-slate-100 text-slate-800 border border-slate-200/80'
+          }`}
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    if (/^[A-Z][A-Z0-9_]{2,}$/.test(part)) {
+      return (
+        <code
+          key={pIdx}
+          className={`text-[11px] px-1 py-0.5 rounded font-mono ${
+            isUserBubble
+              ? 'bg-white/15 text-white/95'
+              : 'bg-slate-100 text-slate-700 border border-slate-200/80'
+          }`}
+        >
+          {part}
+        </code>
+      );
+    }
+    return <span key={pIdx}>{part}</span>;
+  });
 }

@@ -72,6 +72,9 @@ function defaultAllowedOrigins(): string[] {
     'http://localhost:3001',
     'http://127.0.0.1:3000',
     getPublicAppUrl(),
+    // Demo host — both schemes (TLS rollout / ssl-redirect)
+    'http://stackforge.144-24-100-85.nip.io',
+    'https://stackforge.144-24-100-85.nip.io',
     'https://enlightlabs.com',
     'https://www.enlightlabs.com',
     'https://enlightlab.com',
@@ -125,15 +128,17 @@ export function isOriginAllowed(origin: string | null): boolean {
 }
 
 function getRequestHostOrigin(request: Request): string | null {
-  const forwardedProto = request.headers.get('x-forwarded-proto');
-  const forwardedHost = request.headers.get('x-forwarded-host');
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim();
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
   if (forwardedProto && forwardedHost) {
     return `${forwardedProto}://${forwardedHost}`.replace(/\/$/, '');
   }
 
   const host = request.headers.get('host');
   if (host) {
-    const proto = forwardedProto || (host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
+    const proto =
+      forwardedProto ||
+      (host.includes('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https');
     return `${proto}://${host}`.replace(/\/$/, '');
   }
 
@@ -144,14 +149,50 @@ function getRequestHostOrigin(request: Request): string | null {
   }
 }
 
+/** True when Origin host matches this deployment (handles http/https mismatch behind ingress). */
+function isSameDeploymentHost(origin: string, request: Request): boolean {
+  try {
+    const originHost = new URL(origin).hostname.toLowerCase();
+    const hosts = [
+      request.headers.get('x-forwarded-host')?.split(',')[0]?.trim(),
+      request.headers.get('host')?.split(',')[0]?.trim(),
+    ]
+      .filter(Boolean)
+      .map((h) => h!.split(':')[0].toLowerCase());
+
+    return hosts.includes(originHost);
+  } catch {
+    return false;
+  }
+}
+
+/** Allow shared nip.io / sslip.io demo hosts without listing every IP. */
+function isTrustedDemoHost(origin: string): boolean {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return (
+      host.endsWith('.nip.io') ||
+      host.endsWith('.sslip.io') ||
+      host.endsWith('.enlightlab.com') ||
+      host.endsWith('.enlightlabs.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function isOriginAllowedForRequest(origin: string | null, request: Request): boolean {
   if (!origin) return false;
   const normalized = origin.replace(/\/$/, '');
 
   if (isOriginAllowed(normalized)) return true;
+  if (isTrustedDemoHost(normalized)) return true;
 
   const requestOrigin = getRequestHostOrigin(request);
-  return Boolean(requestOrigin && requestOrigin === normalized);
+  if (requestOrigin && requestOrigin === normalized) return true;
+
+  // Same host as this request = same-origin UI calling its own API
+  return isSameDeploymentHost(normalized, request);
 }
 
 /**
@@ -169,8 +210,6 @@ export function assertOriginAllowed(
     if (isDev || process.env.ALLOW_NO_ORIGIN === 'true') {
       return { ok: true };
     }
-    // Same-origin browser posts sometimes omit Origin on older agents; allow on Vercel
-    // when Referer matches our deployment host.
     const referer = request.headers.get('referer');
     if (referer) {
       try {
@@ -179,6 +218,11 @@ export function assertOriginAllowed(
       } catch {
         /* ignore */
       }
+    }
+    // Same-deployment Host/X-Forwarded-Host without Origin (some proxies)
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
+    if (host && (host.includes('nip.io') || host.includes('sslip.io') || host.includes('enlightlab'))) {
+      return { ok: true };
     }
     return { ok: false, status: 403, error: 'Forbidden: missing origin' };
   }

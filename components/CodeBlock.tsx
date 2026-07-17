@@ -1,20 +1,25 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { codeToHtml } from 'shiki';
+import { codeToTokens } from 'shiki';
 
 interface CodeBlockProps {
   code: string;
   language: string;
+  path?: string;
   theme?: 'dark' | 'light';
 }
 
+type LineToken = Awaited<ReturnType<typeof codeToTokens>>['tokens'][number][number];
+
 const LANG_MAP: Record<string, string> = {
-  hcl: 'terraform',
-  tf: 'terraform',
+  hcl: 'hcl',
+  tf: 'hcl',
+  terraform: 'hcl',
   yaml: 'yaml',
   yml: 'yaml',
   dockerfile: 'dockerfile',
+  docker: 'dockerfile',
   bash: 'bash',
   shell: 'bash',
   sh: 'bash',
@@ -22,88 +27,135 @@ const LANG_MAP: Record<string, string> = {
   markdown: 'markdown',
   md: 'markdown',
   typescript: 'typescript',
+  ts: 'typescript',
   javascript: 'javascript',
+  js: 'javascript',
   python: 'python',
+  py: 'python',
   go: 'go',
+  golang: 'go',
+  toml: 'toml',
   plaintext: 'text',
+  text: 'text',
+  plain: 'text',
 };
 
-export function CodeBlock({ code, language, theme = 'dark' }: CodeBlockProps) {
-  const [html, setHtml] = useState<string | null>(null);
-  const lines = useMemo(() => code.split('\n'), [code]);
+function resolveLang(language: string, path?: string): string {
+  const fromProp = LANG_MAP[(language || '').toLowerCase().trim()];
+  if (fromProp && fromProp !== 'text') return fromProp;
+
+  if (path) {
+    const name = path.split('/').pop()?.toLowerCase() || '';
+    if (name === 'dockerfile' || name.startsWith('dockerfile.')) return 'dockerfile';
+    if (name.endsWith('.tf') || name.endsWith('.tfvars') || name.endsWith('.hcl')) return 'hcl';
+    if (name.endsWith('.yml') || name.endsWith('.yaml')) return 'yaml';
+    if (name.endsWith('.md')) return 'markdown';
+    if (name.endsWith('.go') || name === 'go.mod' || name === 'go.sum') return 'go';
+    if (name.endsWith('.json')) return 'json';
+    if (name.endsWith('.py')) return 'python';
+    if (name.endsWith('.ts') || name.endsWith('.tsx')) return 'typescript';
+    if (name.endsWith('.js') || name.endsWith('.jsx')) return 'javascript';
+    if (name.endsWith('.sh')) return 'bash';
+  }
+
+  return fromProp || 'text';
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function tokensToLineHtml(lineTokens: LineToken[]): string {
+  if (!lineTokens.length) return '&nbsp;';
+  return lineTokens
+    .map((t) => {
+      const color = t.color ? `color:${t.color}` : '';
+      const fontStyle = t.fontStyle ? tokenFontStyle(t.fontStyle) : '';
+      const style = [color, fontStyle].filter(Boolean).join(';');
+      const content = escapeHtml(t.content) || '&nbsp;';
+      return style ? `<span style="${style}">${content}</span>` : content;
+    })
+    .join('');
+}
+
+function tokenFontStyle(fontStyle: number): string {
+  const parts: string[] = [];
+  if (fontStyle & 1) parts.push('font-style:italic');
+  if (fontStyle & 2) parts.push('font-weight:bold');
+  if (fontStyle & 4) parts.push('text-decoration:underline');
+  return parts.join(';');
+}
+
+/** One highlighted HTML string per source line — keeps gutter in lockstep. */
+async function highlightByLine(
+  lines: string[],
+  lang: string,
+  theme: string
+): Promise<string[]> {
+  const out: string[] = [];
+  for (const line of lines) {
+    try {
+      const result = await codeToTokens(line.length ? line : ' ', {
+        lang: lang as 'go',
+        theme: theme as 'dark-plus',
+      });
+      const first = result.tokens[0];
+      out.push(first?.length ? tokensToLineHtml(first) : line.length ? escapeHtml(line) : '&nbsp;');
+    } catch {
+      out.push(line.length ? escapeHtml(line) : '&nbsp;');
+    }
+  }
+  return out;
+}
+
+export function CodeBlock({ code, language, path, theme = 'dark' }: CodeBlockProps) {
+  const [lineHtml, setLineHtml] = useState<string[] | null>(null);
+  const normalized = useMemo(() => code.replace(/\r\n/g, '\n'), [code]);
+  const lines = useMemo(() => normalized.split('\n'), [normalized]);
   const shikiTheme = theme === 'light' ? 'github-light' : 'dark-plus';
+  const lang = useMemo(() => resolveLang(language, path), [language, path]);
 
   useEffect(() => {
     let cancelled = false;
-    const lang = LANG_MAP[language.toLowerCase()] || 'text';
+    setLineHtml(null);
 
-    codeToHtml(code, {
-      lang,
-      theme: shikiTheme,
-    })
-      .then((result) => {
-        if (!cancelled) setHtml(result);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          codeToHtml(code, { lang, theme: theme === 'light' ? 'github-light' : 'github-dark' })
-            .then((result) => {
-              if (!cancelled) setHtml(result);
-            })
-            .catch(() => {
-              if (!cancelled) setHtml(null);
-            });
-        }
-      });
+    void highlightByLine(lines, lang, shikiTheme).then((html) => {
+      if (!cancelled) setLineHtml(html);
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [code, language, theme, shikiTheme]);
+  }, [lines, lang, shikiTheme]);
 
-  const gutter = (
-    <div
-      className={`vscode-gutter shrink-0 select-none text-right ${
-        theme === 'light' ? 'bg-[#f3f3f3] text-[#237893]' : 'bg-[#1e1e1e] text-[#858585]'
-      }`}
-      aria-hidden
-    >
-      {lines.map((_, idx) => (
-        <div key={idx} className="vscode-ln">
-          {idx + 1}
-        </div>
-      ))}
-    </div>
-  );
+  const isLight = theme === 'light';
+  const bg = isLight ? 'bg-white' : 'bg-[#1e1e1e]';
+  const gutterBg = isLight ? 'bg-[#f6f8fa]' : 'bg-[#1e1e1e]';
+  const gutterFg = isLight ? 'text-[#8c959f]' : 'text-[#858585]';
+  const gutterBorder = isLight ? 'border-[#d0d7de]' : 'border-[#2b2b2b]';
 
-  if (!html) {
-    return (
-      <div className={`vscode-editor flex min-w-full font-mono text-[13px] leading-[1.55] ${
-        theme === 'light' ? 'bg-white text-[#24292e]' : 'bg-[#1e1e1e] text-[#d4d4d4]'
-      }`}>
-        {gutter}
-        <pre className="vscode-code flex-1 m-0 overflow-x-auto p-0 pl-4 pr-4 py-3">
-          <code className="block min-w-full">
-            {lines.map((line, idx) => (
-              <span key={idx} className="block whitespace-pre">
-                {line || ' '}
-              </span>
-            ))}
-          </code>
-        </pre>
-      </div>
-    );
-  }
+  const displayLines = lineHtml ?? lines.map((l) => (l.length ? escapeHtml(l) : '&nbsp;'));
 
   return (
-    <div className={`vscode-editor flex min-w-full font-mono text-[13px] leading-[1.55] ${
-      theme === 'light' ? 'bg-white text-[#24292e]' : 'bg-[#1e1e1e] text-[#d4d4d4]'
-    }`}>
-      {gutter}
-      <div
-        className="vscode-code flex-1 min-w-0 overflow-x-auto py-3 pr-4 code-highlight [&_pre]:m-0! [&_pre]:p-0! [&_pre]:pl-4! [&_pre]:bg-transparent! [&_pre]:overflow-visible! [&_pre]:whitespace-pre! [&_code]:whitespace-pre! [&_.line]:block"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+    <div className={`vscode-editor min-w-full font-mono text-[13px] ${bg}`}>
+      {lines.map((_, idx) => (
+        <div key={idx} className="vscode-row flex min-w-full">
+          <div
+            className={`vscode-ln shrink-0 select-none text-right border-r ${gutterBg} ${gutterFg} ${gutterBorder}`}
+            aria-hidden
+          >
+            {idx + 1}
+          </div>
+          <div
+            className="vscode-code-line flex-1 min-w-0 pl-4 pr-4"
+            dangerouslySetInnerHTML={{ __html: displayLines[idx] ?? '&nbsp;' }}
+          />
+        </div>
+      ))}
     </div>
   );
 }

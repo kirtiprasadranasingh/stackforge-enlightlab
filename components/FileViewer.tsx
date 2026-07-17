@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 import { copyToClipboard } from '@/lib/clipboard';
 import { CodeBlock } from './CodeBlock';
@@ -9,6 +9,7 @@ interface FileViewerProps {
   files: { path: string; language: string; content: string; description?: string }[];
   isGenerating?: boolean;
   promptText?: string;
+  generationStatus?: string;
 }
 
 interface TreeNode {
@@ -261,19 +262,109 @@ function Breadcrumb({ path, isDark }: { path: string; isDark: boolean }) {
   );
 }
 
-export function FileViewer({ files, isGenerating, promptText }: FileViewerProps) {
+export function FileViewer({
+  files,
+  isGenerating,
+  promptText,
+  generationStatus,
+}: FileViewerProps) {
+  const [openPaths, setOpenPaths] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [editorTheme, setEditorTheme] = useState<'dark' | 'light'>('dark');
+  const [editorTheme, setEditorTheme] = useState<'dark' | 'light'>('light');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [followStream, setFollowStream] = useState(true);
+  const prevFilePathsRef = useRef<string>('');
+  const previewPathRef = useRef<string | null>(null);
+
+  // Prune open tabs when files are deleted / cleared; follow latest file while generating
+  // This intentionally synchronizes local tab state with streamed file props.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    const pathSet = new Set(files.map((f) => f.path));
+    const pathKey = files.map((f) => f.path).join('\0');
+
+    if (files.length === 0) {
+      setOpenPaths([]);
+      setSelectedPath(null);
+      setPreviewPath(null);
+      previewPathRef.current = null;
+      setFollowStream(true);
+      prevFilePathsRef.current = '';
+      return;
+    }
+
+    setOpenPaths((prev) => prev.filter((p) => pathSet.has(p)));
+    setSelectedPath((prev) => (prev && pathSet.has(prev) ? prev : null));
+    setPreviewPath((prev) => {
+      const next = prev && pathSet.has(prev) ? prev : null;
+      previewPathRef.current = next;
+      return next;
+    });
+
+    if (isGenerating && followStream && pathKey !== prevFilePathsRef.current) {
+      const newest = files[files.length - 1].path;
+      const oldPreview = previewPathRef.current;
+      setPreviewPath(newest);
+      previewPathRef.current = newest;
+      setOpenPaths((prev) => {
+        const pinned = prev.filter(
+          (p) => pathSet.has(p) && p !== oldPreview && p !== newest
+        );
+        return [...pinned, newest];
+      });
+      setSelectedPath(newest);
+    }
+
+    prevFilePathsRef.current = pathKey;
+  }, [files, isGenerating, followStream]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const openFile = useCallback((path: string, pin = true) => {
+    setOpenPaths((prev) => (prev.includes(path) ? prev : [...prev, path]));
+    setSelectedPath(path);
+    if (pin) {
+      setPreviewPath(null);
+      setFollowStream(false);
+    }
+  }, []);
+
+  const closeTab = useCallback(
+    (path: string) => {
+      setFollowStream(false);
+      setOpenPaths((prev) => {
+        const idx = prev.indexOf(path);
+        if (idx === -1) return prev;
+        const next = prev.filter((p) => p !== path);
+        setSelectedPath((cur) => {
+          if (cur !== path) return cur;
+          if (next.length === 0) return null;
+          // Prefer tab to the right, else left (VS Code-like)
+          return next[Math.min(idx, next.length - 1)] ?? null;
+        });
+        return next;
+      });
+      setPreviewPath((p) => (p === path ? null : p));
+    },
+    []
+  );
+
+  const openFiles = useMemo(
+    () =>
+      openPaths
+        .map((p) => files.find((f) => f.path === p))
+        .filter((f): f is NonNullable<typeof f> => Boolean(f)),
+    [openPaths, files]
+  );
 
   const activePath =
     selectedPath && files.some((f) => f.path === selectedPath)
       ? selectedPath
-      : files[0]?.path || null;
+      : openFiles[0]?.path ?? null;
 
   const selected = useMemo(
-    () => files.find((f) => f.path === activePath) || files[0],
+    () => files.find((f) => f.path === activePath) ?? null,
     [files, activePath]
   );
 
@@ -328,7 +419,9 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
         className={`vscode-shell flex flex-col md:flex-row w-full flex-1 min-h-0 border overflow-hidden select-none transition-all duration-200 ${
           isFullscreen
             ? 'fixed inset-6 z-[90] shadow-2xl border-[#3c3c3c] rounded-lg'
-            : 'border-[#3c3c3c] rounded-lg shadow-lg'
+            : isDark
+              ? 'border-[#3c3c3c] rounded-lg shadow-lg'
+              : 'border-[#d4d4d4] rounded-lg shadow-lg'
         } ${isDark ? 'bg-[#1e1e1e]' : 'bg-[#f3f3f3]'}`}
       >
 
@@ -372,7 +465,7 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
                   key={node.path}
                   node={node}
                   selectedPath={activePath}
-                  onSelect={setSelectedPath}
+                  onSelect={(path) => openFile(path, true)}
                   searchQuery={searchQuery}
                   isDark={isDark}
                 />
@@ -383,22 +476,21 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
 
         {/* Editor pane */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Tab bar */}
+          {/* Tab bar — only open files (not every workspace file) */}
           <div
             className={`flex items-center shrink-0 border-b overflow-hidden ${
               isDark ? 'bg-[#2d2d2d] border-[#252526]' : 'bg-[#ececec] border-[#d4d4d4]'
             }`}
           >
             <div className="flex overflow-x-auto no-scrollbar flex-1 min-w-0">
-              {files.map((f) => {
+              {openFiles.map((f) => {
                 const name = f.path.split('/').pop() || f.path;
                 const active = f.path === selected?.path;
+                const isPreview = f.path === previewPath;
                 return (
-                  <button
+                  <div
                     key={f.path}
-                    type="button"
-                    onClick={() => setSelectedPath(f.path)}
-                    className={`flex items-center gap-2 px-3 py-2 text-[12px] border-r shrink-0 cursor-pointer min-w-0 max-w-[180px] ${
+                    className={`group flex items-center gap-1 pl-3 pr-1 py-2 text-[12px] border-r shrink-0 min-w-0 max-w-[200px] ${
                       isDark ? 'border-[#252526]' : 'border-[#d4d4d4]'
                     } ${
                       active
@@ -410,25 +502,53 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
                           : 'bg-[#ececec] text-[#616161] hover:bg-[#f3f3f3]'
                     }`}
                   >
-                    <FileGlyph path={f.path} />
-                    <span className="truncate">{name}</span>
-                  </button>
+                    <button
+                      type="button"
+                      title={f.path}
+                      onClick={() => {
+                        setSelectedPath(f.path);
+                        setFollowStream(false);
+                      }}
+                      className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer text-left"
+                    >
+                      <FileGlyph path={f.path} />
+                      <span className={`truncate ${isPreview ? 'italic' : ''}`}>{name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Close ${name}`}
+                      title="Close"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeTab(f.path);
+                      }}
+                      className={`shrink-0 w-5 h-5 rounded flex items-center justify-center text-[14px] leading-none cursor-pointer opacity-60 hover:opacity-100 ${
+                        isDark ? 'hover:bg-[#3c3c3c]' : 'hover:bg-[#d4d4d4]'
+                      }`}
+                    >
+                      ×
+                    </button>
+                  </div>
                 );
               })}
             </div>
             <div className="flex items-center gap-1 px-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setEditorTheme(isDark ? 'light' : 'dark')}
-                className={`p-1.5 rounded text-[11px] cursor-pointer ${
+              <select
+                aria-label="Editor color theme"
+                title="Editor color theme"
+                value={editorTheme}
+                onChange={(event) =>
+                  setEditorTheme(event.target.value as 'light' | 'dark')
+                }
+                className={`rounded border-0 bg-transparent p-1.5 text-[11px] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#007acc] ${
                   isDark
                     ? 'text-[#cccccc] hover:bg-[#3c3c3c]'
                     : 'text-[#616161] hover:bg-[#d4d4d4]'
                 }`}
-                title="Toggle theme"
               >
-                {isDark ? 'Light' : 'Dark'}
-              </button>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
             </div>
           </div>
 
@@ -449,16 +569,33 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
               isDark ? 'bg-[#1e1e1e]' : 'bg-white'
             }`}
           >
-            {selected && (
-              <CodeBlock
-                code={selected.content}
-                language={selected.language}
-                theme={editorTheme}
-              />
+            {selected ? (
+              <div className="min-w-max">
+                <CodeBlock
+                  code={selected.content}
+                  language={selected.language}
+                  path={selected.path}
+                  theme={editorTheme}
+                />
+              </div>
+            ) : (
+              <div
+                className={`h-full flex items-center justify-center text-[13px] px-6 text-center ${
+                  isDark ? 'text-[#858585]' : 'text-[#616161]'
+                }`}
+              >
+                Open a file from Explorer. Tabs stay closed until you select a file
+                {isGenerating ? ' (preview follows the latest generated file).' : '.'}
+              </div>
             )}
             {isGenerating && (
-              <div className="absolute bottom-3 right-3 text-[11px] px-2 py-1 rounded bg-[#007acc] text-white shadow">
-                Generating…
+              <div className="absolute bottom-3 right-3 text-[11px] px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 max-w-[320px]">
+                <span className="loading-dots" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span className="truncate">{generationStatus || 'Generating files…'}</span>
               </div>
             )}
           </div>
@@ -471,7 +608,7 @@ export function FileViewer({ files, isGenerating, promptText }: FileViewerProps)
           >
             <div className="flex items-center gap-3">
               <span>{selected?.path || ''}</span>
-              <span>Ln {lineCount}, Col 1</span>
+              <span>Lines {lineCount}</span>
               <span>UTF-8</span>
               <span className="capitalize">{selected?.language || 'plain'}</span>
             </div>

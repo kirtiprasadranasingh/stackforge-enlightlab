@@ -228,6 +228,244 @@ if [ -f "$SCAFFOLD_DIR/charts/app/values.yaml" ]; then
   fi
 fi
 
+# 9. Go: Dockerfile references go.mod but files missing
+if [ -f "$SCAFFOLD_DIR/Dockerfile" ]; then
+  if grep -qE 'COPY\s+go\.mod' "$SCAFFOLD_DIR/Dockerfile" 2>/dev/null; then
+    if [ -f "$SCAFFOLD_DIR/go.mod" ]; then
+      log_pass "go.mod present (Dockerfile expects it)"
+    else
+      log_fail "Dockerfile COPY go.mod but go.mod is missing from output"
+    fi
+    if grep -qE 'COPY\s+go\.mod\s+go\.sum' "$SCAFFOLD_DIR/Dockerfile" 2>/dev/null; then
+      if [ -f "$SCAFFOLD_DIR/go.sum" ]; then
+        log_pass "go.sum present (Dockerfile expects it)"
+      else
+        log_fail "Dockerfile COPY go.sum but go.sum is missing from output"
+      fi
+    fi
+  fi
+fi
+
+# 10. Azure Container Apps: Key Vault secret wiring
+if [ -d "$SCAFFOLD_DIR/terraform" ]; then
+  if grep -rq 'azurerm_container_app' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+    if grep -rqE 'value\s*=\s*azurerm_key_vault_secret\.[a-zA-Z0-9_]+\.id' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      log_fail "container app secret uses value = key_vault_secret.id — use key_vault_secret_id + identity instead"
+    else
+      log_pass "container app does not set secret value to Key Vault secret resource id"
+    fi
+    if grep -rq 'azurerm_role_assignment' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+       && grep -rq 'Key Vault Secrets User' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      if grep -rq 'enable_rbac_authorization\s*=\s*true' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+        log_pass "Key Vault RBAC enabled for role assignments"
+      else
+        log_fail "azurerm_role_assignment for Key Vault but enable_rbac_authorization not set on azurerm_key_vault"
+      fi
+    fi
+    if grep -rqE 'delegations\s*\{' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      log_fail "azurerm_subnet uses invalid delegations block — use delegation { service_delegation { ... } }"
+    fi
+    if grep -rq 'azurerm_container_app' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+       && ! grep -rq 'ignore_changes' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      if grep -rqE 'image\s*=\s*".*:latest"' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+         && [ -f "$SCAFFOLD_DIR/azure-pipelines.yml" ]; then
+        log_fail "container app hardcodes :latest image without lifecycle ignore_changes while azure-pipelines deploys images"
+      fi
+    fi
+  fi
+fi
+
+# 11. Azure DevOps: ACR CLI name vs repository path
+if [ -f "$SCAFFOLD_DIR/azure-pipelines.yml" ]; then
+  if grep -qE 'az acr show --name.*acrRepository' "$SCAFFOLD_DIR/azure-pipelines.yml" 2>/dev/null; then
+    log_fail "azure-pipelines.yml passes acrRepository to az acr show --name (need registry name, not repo path)"
+  fi
+  if grep -qE 'on:\s*$|failure:' "$SCAFFOLD_DIR/azure-pipelines.yml" 2>/dev/null \
+     && grep -qiE 'rollback|deployment failed' "$SCAFFOLD_DIR/azure-pipelines.yml" 2>/dev/null \
+     && grep -qE '^\s*-\s*script:\s*echo' "$SCAFFOLD_DIR/azure-pipelines.yml" 2>/dev/null \
+     && ! grep -qE 'containerapp revision activate' "$SCAFFOLD_DIR/azure-pipelines.yml" 2>/dev/null; then
+    log_fail "azure-pipelines.yml rollback is echo-only — wire az containerapp revision activate"
+  fi
+fi
+
+# 12. Azure Go Container Apps — PRD file completeness
+if [ -f "$SCAFFOLD_DIR/azure-pipelines.yml" ] && [ -f "$SCAFFOLD_DIR/terraform/container_apps.tf" ]; then
+  missing=""
+  for f in \
+    terraform/versions.tf terraform/variables.tf terraform/main.tf terraform/network.tf \
+    terraform/database.tf terraform/key_vault.tf terraform/identity.tf terraform/container_apps.tf \
+    terraform/outputs.tf azure-pipelines.yml Dockerfile go.mod go.sum main.go README.md; do
+    if [ ! -f "$SCAFFOLD_DIR/$f" ]; then
+      # allow keyvault.tf alias
+      if [ "$f" = "terraform/key_vault.tf" ] && [ -f "$SCAFFOLD_DIR/terraform/keyvault.tf" ]; then
+        continue
+      fi
+      missing="$missing $f"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    log_fail "Azure Go Container Apps scaffold missing required files:$missing"
+  else
+    log_pass "Azure Go Container Apps PRD file set complete (15 files)"
+  fi
+fi
+
+# 13. AWS ECS: provider pin + healthCheck vs Dockerfile + CI image_uri
+if [ -d "$SCAFFOLD_DIR/terraform" ] && grep -rq 'aws_ecs_service\|aws_ecs_task_definition' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+  if grep -rq 'required_providers' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+     && grep -rqE 'hashicorp/aws|"aws"' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+    log_pass "ECS terraform declares required_providers for aws"
+  else
+    log_fail "ECS terraform missing required_providers { aws = ... } pin"
+  fi
+
+  if grep -rqE 'curl\s+-f|CMD-SHELL.*curl' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+    if [ -f "$SCAFFOLD_DIR/Dockerfile" ] \
+       && grep -qiE 'apk add.*curl|apt-get install.*curl|yum install.*curl|microdnf install.*curl' "$SCAFFOLD_DIR/Dockerfile" 2>/dev/null; then
+      log_pass "ECS curl healthCheck has matching curl install in Dockerfile"
+    else
+      log_fail "ECS task healthCheck uses curl but Dockerfile does not install curl"
+    fi
+  fi
+
+  if grep -rq 'aws_ecs_service' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+     && [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ]; then
+    if grep -rq 'ignore_changes' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      log_pass "ECS service has lifecycle ignore_changes for CI-owned task definition"
+    else
+      log_fail "ECS + GitHub Actions deploy present but terraform has no lifecycle ignore_changes on service/task image ownership"
+    fi
+  fi
+fi
+
+# 14. GitHub Actions: image_uri must be produced by a real step
+if [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ]; then
+  WF="$SCAFFOLD_DIR/.github/workflows/deploy.yml"
+  # Common bug: docker/build-push-action does not emit outputs.image_uri
+  if grep -qE 'steps\.build-and-push\.outputs\.image_uri|steps\.build_and_push\.outputs\.image_uri' "$WF" 2>/dev/null; then
+    log_fail "deploy.yml reads image_uri from build-and-push step — docker/build-push-action does not set that; write registry/repo:tag via a dedicated step id"
+  elif grep -qE 'needs\.[a-zA-Z0-9_-]+\.outputs\.image_uri|outputs\.image_uri' "$WF" 2>/dev/null; then
+    if grep -qE 'echo ["'\'']?image_uri=' "$WF" 2>/dev/null || grep -qE 'image_uri=\$\{' "$WF" 2>/dev/null; then
+      log_pass "deploy.yml writes image_uri to GITHUB_OUTPUT"
+    else
+      log_fail "deploy.yml references image_uri output but never writes image_uri= to GITHUB_OUTPUT"
+    fi
+  fi
+  if grep -qE 'amazon-ecr-login|ecr-login|ECR_REPOSITORY|aws ecs update-service' "$WF" 2>/dev/null; then
+    if grep -qE 'services-stable|service-stable|deployments-stable' "$WF" 2>/dev/null; then
+      log_pass "ECS deploy waits for services-stable (or equivalent)"
+    else
+      log_fail "ECS deploy.yml updates service but does not wait for services-stable before success"
+    fi
+  fi
+fi
+
+# 15. Node/Express: package-lock when Dockerfile copies package*.json
+if [ -f "$SCAFFOLD_DIR/Dockerfile" ] && grep -qE 'package\*\.json|package\.json' "$SCAFFOLD_DIR/Dockerfile" 2>/dev/null; then
+  if [ -f "$SCAFFOLD_DIR/app/package.json" ] || [ -f "$SCAFFOLD_DIR/package.json" ]; then
+    if [ -f "$SCAFFOLD_DIR/app/package-lock.json" ] || [ -f "$SCAFFOLD_DIR/package-lock.json" ]; then
+      log_pass "package-lock.json present for Node app"
+    else
+      log_fail "Node Dockerfile/package.json present but package-lock.json is missing"
+    fi
+  fi
+fi
+
+# 16. App /health must exist when ALB/target group or probes use /health
+if grep -rqE 'path\s*=\s*"/health"|path:\s*/health|/health' "$SCAFFOLD_DIR" 2>/dev/null; then
+  if grep -rqE "['\"]\/health['\"]|/health" "$SCAFFOLD_DIR" --include='*.js' --include='*.ts' --include='*.py' --include='*.go' 2>/dev/null \
+     || grep -rqE 'get\("/health"|Get\("/health"|@app\.(get|route)\("/health"' "$SCAFFOLD_DIR" 2>/dev/null; then
+    log_pass "application defines /health matching infra health checks"
+  else
+    # only fail when we clearly have an app source tree
+    if ls "$SCAFFOLD_DIR"/*.py "$SCAFFOLD_DIR"/*.go "$SCAFFOLD_DIR"/app/*.js "$SCAFFOLD_DIR"/app/*.ts 2>/dev/null | grep -q .; then
+      log_fail "infra references /health but app source has no /health route"
+    fi
+  fi
+fi
+
+# 17. GCP Cloud Run / Cloud SQL schema + networking
+if [ -d "$SCAFFOLD_DIR/terraform" ] && grep -rq 'google_sql_database_instance\|google_cloud_run' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+  if grep -rq 'deletion_protection_enabled' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+    log_fail "terraform uses deletion_protection_enabled — use deletion_protection for Cloud SQL"
+  fi
+  if grep -rqE 'ip_configuration[\s\S]*ipv4_enabled\s*=\s*false|private_network' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+    if grep -rq 'google_service_networking_connection' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+       && grep -rq 'google_compute_global_address' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      log_pass "private Cloud SQL has service networking + reserved range"
+    else
+      log_fail "private Cloud SQL configured without google_service_networking_connection + global address"
+    fi
+  fi
+  if grep -rq 'repository_url' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+     && grep -rq 'google_artifact_registry_repository' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+    log_fail "terraform references repository_url on Artifact Registry — construct the URL from location/project/repository_id"
+  fi
+fi
+
+# 18. GitLab CI: fake quality gates
+if [ -f "$SCAFFOLD_DIR/.gitlab-ci.yml" ]; then
+  if grep -qiE 'echo.*(test|lint).*pass|tests? passed' "$SCAFFOLD_DIR/.gitlab-ci.yml" 2>/dev/null \
+     && grep -qE 'allow_failure:\s*true' "$SCAFFOLD_DIR/.gitlab-ci.yml" 2>/dev/null; then
+    log_fail "GitLab CI uses simulated tests and/or allow_failure on quality gate"
+  fi
+fi
+
+# 19. AWS ECS Express — PRD file completeness
+if [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ] \
+   && grep -rq 'aws_ecs_service' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+   && { [ -f "$SCAFFOLD_DIR/app/package.json" ] || [ -f "$SCAFFOLD_DIR/package.json" ]; }; then
+  missing=""
+  for f in \
+    terraform/versions.tf terraform/variables.tf terraform/outputs.tf \
+    .github/workflows/deploy.yml Dockerfile README.md; do
+    if [ ! -f "$SCAFFOLD_DIR/$f" ]; then
+      missing="$missing $f"
+    fi
+  done
+  if [ ! -f "$SCAFFOLD_DIR/terraform/main.tf" ] \
+     && [ ! -f "$SCAFFOLD_DIR/terraform/ecs.tf" ]; then
+    missing="$missing terraform/main.tf"
+  fi
+  if [ ! -f "$SCAFFOLD_DIR/app/package.json" ] && [ ! -f "$SCAFFOLD_DIR/package.json" ]; then
+    missing="$missing app/package.json"
+  fi
+  if [ -n "$missing" ]; then
+    log_fail "AWS ECS Express scaffold missing required files:$missing"
+  else
+    log_pass "AWS ECS Express core file set present"
+  fi
+fi
+
+# 20. App stub scope — reject full business-app patterns in generated sources
+APP_SRC_HITS=$(
+  grep -RIlE \
+    'create_all\(|Base\.metadata\.create_all|@app\.(post|put|delete|patch)\(|router\.(post|put|delete)|/items|passport|jwt\.sign|SQLAlchemy|declarative_base' \
+    "$SCAFFOLD_DIR" \
+    --include='*.py' --include='*.js' --include='*.ts' --include='*.go' 2>/dev/null || true
+)
+STUB_SCOPE_OK=1
+if [ -n "$APP_SRC_HITS" ]; then
+  STUB_SCOPE_OK=0
+  log_fail "app sources look like a full business app (CRUD/ORM/auth). Keep a minimal /health stub only. Offending files: $(echo "$APP_SRC_HITS" | tr '\n' ' ')"
+fi
+for candidate in \
+  "$SCAFFOLD_DIR/main.py" \
+  "$SCAFFOLD_DIR/main.go" \
+  "$SCAFFOLD_DIR/app/index.js" \
+  "$SCAFFOLD_DIR/app/main.js"; do
+  if [ -f "$candidate" ]; then
+    lines=$(wc -l < "$candidate" | tr -d ' ')
+    if [ "$lines" -gt 120 ]; then
+      STUB_SCOPE_OK=0
+      log_fail "app stub $candidate is ${lines} lines (>120) — likely more than a health-check stub"
+    fi
+  fi
+done
+if [ "$STUB_SCOPE_OK" -eq 1 ]; then
+  log_pass "app sources stay within minimal stub patterns"
+fi
+
 # Clean up parallel log outputs
 rm -rf "$JOB_DIR"
 

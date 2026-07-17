@@ -13,7 +13,7 @@ export const PresetsSchema = z.object({
     'cloud-run',
     'container-apps',
   ]),
-  ci: z.enum(['github-actions', 'gitlab-ci', 'jenkins']),
+  ci: z.enum(['github-actions', 'gitlab-ci', 'jenkins', 'azure-devops']),
 }) as z.ZodType<Presets>;
 
 const HistoryMessageSchema = z.object({
@@ -38,6 +38,12 @@ export const GenerateRequestSchema = z
     history: z.array(HistoryMessageSchema).max(20).optional(),
     /** Current project files for follow-up edits */
     existingFiles: z.array(ExistingFileSchema).max(40).optional(),
+    /** clarify | plan | generate — defaults to generate for small edits */
+    phase: z.enum(['clarify', 'plan', 'generate']).optional(),
+    /** Required when phase=generate for new/major stacks */
+    approvedPlan: z.string().max(20000).optional(),
+    /** Prior plan when revising */
+    priorPlan: z.string().max(20000).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.prompt.trim().length < 1) {
@@ -46,6 +52,15 @@ export const GenerateRequestSchema = z
         message: 'Message cannot be empty',
         path: ['prompt'],
       });
+    }
+    if (data.phase === 'generate' && data.approvedPlan !== undefined) {
+      if (data.approvedPlan.trim().length < 20) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'approvedPlan is too short',
+          path: ['approvedPlan'],
+        });
+      }
     }
   });
 

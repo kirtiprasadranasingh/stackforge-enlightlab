@@ -27,5 +27,5 @@ export function getGemini(): GoogleGenerativeAI {
 /** Strong model for coherent infra scaffolds */
 export const DEFAULT_MODEL = 'gemini-2.5-flash';
 
-/** Bound output size / cost */
-export const MAX_OUTPUT_TOKENS = 16_000;
+/** Bound output size / cost — 16k truncates multi-file Azure/AWS scaffolds mid-stream */
+export const MAX_OUTPUT_TOKENS = 32_768;

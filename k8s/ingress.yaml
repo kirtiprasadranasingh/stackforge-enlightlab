@@ -1,7 +1,9 @@
-# Shared existing LB (144.24.100.85) — host-based, same pattern as other enlightlab apps.
-# URL: http://stackforge.144-24-100-85.nip.io
+# Shared LB (144.24.100.85) — host-based routing.
+# HTTPS: https://stackforge.144-24-100-85.nip.io
 #
-# No NEXT_BASE_PATH needed for this host style.
+# Requires cert-manager ClusterIssuer (default name: letsencrypt-prod).
+# If your issuer differs: kubectl get clusterissuer
+# Then edit the cert-manager.io/cluster-issuer annotation below.
 
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -10,7 +12,16 @@ metadata:
   namespace: stackforge
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
+    # After the TLS secret is Ready, force HTTPS so Chrome shows a padlock
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Generation is SSE — default 60s proxy timeouts cause "Could not reach the API"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-body-size: "12m"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
 spec:
   ingressClassName: nginx
   tls:

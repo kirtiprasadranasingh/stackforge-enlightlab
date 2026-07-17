@@ -16,16 +16,43 @@ export function sanitizeInput(input: string): string {
 }
 
 /**
- * Validate file path for security
+ * Validate file path for security + reject Terraform attribute refs mistaken as paths
+ * (e.g. aws_iam_role.alb_controller_role.arn).
  */
 export function validateFilePath(path: string): boolean {
-  // No path traversal, no absolute paths, no backslashes
-  const normalized = path.replace(/\\/g, '/');
-  if (path.startsWith('/') || path.startsWith('\\')) return false;
-  if (path.includes('..') || path.includes('~')) return false;
+  const normalized = path.replace(/\\/g, '/').trim();
+  if (!normalized || normalized.startsWith('/') || path.startsWith('\\')) return false;
+  if (normalized.includes('..') || normalized.includes('~')) return false;
   if (normalized.length > 512) return false;
-  // Only allow alphanumeric, slashes, dots, hyphens, underscores
-  return /^[a-zA-Z0-9/_.\-]+$/.test(normalized);
+  if (!/^[a-zA-Z0-9/_.\-]+$/.test(normalized)) return false;
+
+  const base = normalized.split('/').pop() || '';
+  const specialNames = new Set([
+    'dockerfile',
+    'jenkinsfile',
+    'makefile',
+    'go.mod',
+    'go.sum',
+    'readme.md',
+    'azure-pipelines.yml',
+    '.gitignore',
+    '.dockerignore',
+    'chart.yaml',
+    'chart.yml',
+    'values.yaml',
+    'values.yml',
+  ]);
+  if (specialNames.has(base.toLowerCase())) return true;
+
+  // Must look like a real source/config file — not a TF resource attribute (.arn, .id, .name)
+  const allowedExt =
+    /\.(tf|tfvars|hcl|yml|yaml|md|go|json|sh|toml|ts|tsx|js|jsx|py|txt|env|tpl|gotmpl)$/i;
+  if (!allowedExt.test(base)) return false;
+
+  // Reject resource.attr patterns like aws_iam_role.foo.arn
+  if (/^[a-z0-9_]+\.[a-z0-9_]+\.(arn|id|name|arn_suffix)$/i.test(base)) return false;
+
+  return true;
 }
 
 /**
@@ -49,10 +76,16 @@ export function validateOutputSize(files: { content: string }[]): boolean {
  * Get language from file extension
  */
 export function getLanguageFromPath(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase();
+  const name = path.split('/').pop()?.toLowerCase() || '';
+  if (name === 'dockerfile' || name.startsWith('dockerfile.')) return 'dockerfile';
+  if (name === 'go.mod' || name === 'go.sum') return 'go';
+  if (name === 'jenkinsfile') return 'groovy';
+
+  const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() : '';
   const map: Record<string, string> = {
     tf: 'hcl',
-    'tfvars': 'hcl',
+    tfvars: 'hcl',
+    hcl: 'hcl',
     yaml: 'yaml',
     yml: 'yaml',
     json: 'json',
@@ -64,8 +97,8 @@ export function getLanguageFromPath(path: string): string {
     js: 'javascript',
     jsx: 'javascript',
     toml: 'toml',
-    dockerfile: 'dockerfile',
     go: 'go',
+    dockerfile: 'dockerfile',
   };
   return map[ext || ''] || 'plaintext';
 }

@@ -8,6 +8,7 @@ import type {
   CloudProvider,
   Orchestrator,
   CIProvider,
+  WorkflowPhase,
 } from '@/types';
 import {
   CLOUD_OPTIONS,
@@ -16,8 +17,16 @@ import {
 } from '@/types';
 import { LeadCapture } from '@/components/LeadCapture';
 import { FileViewer } from '@/components/FileViewer';
+import { BrandLockup } from '@/components/BrandLockup';
 import { copyToClipboard } from '@/lib/clipboard';
 import { FormattedMessage } from '@/components/FormattedMessage';
+import { inferPresetsFromPrompt } from '@/lib/infer-presets';
+import {
+  isFullStackPrompt,
+  isIterativeEditPrompt,
+  requiresPlanApproval,
+} from '@/lib/stack-intent';
+import { getLanguageFromPath } from '@/lib/utils';
 
 type SetupStep = 1 | 2 | 3 | 4;
 
@@ -25,6 +34,162 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+}
+
+interface SendOptions {
+  phase?: WorkflowPhase;
+  approvedPlan?: string;
+  priorPlan?: string;
+  /** Skip adding a user bubble (e.g. Approve button) */
+  skipUserBubble?: boolean;
+}
+
+function titleCase(s: string): string {
+  return s
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function deriveProjectName(
+  files: GeneratedFile[],
+  promptText: string,
+  presets: Presets
+): string {
+  const chartFile = files.find(
+    (f) =>
+      f.path.toLowerCase().endsWith('chart.yaml') ||
+      f.path.toLowerCase().endsWith('chart.yml')
+  );
+  if (chartFile) {
+    const match = chartFile.content.match(/^name:\s*["']?([^\s"']+)/m);
+    if (match?.[1]) return titleCase(match[1].trim());
+  }
+
+  const pkgFile = files.find((f) => f.path.toLowerCase().endsWith('package.json'));
+  if (pkgFile) {
+    try {
+      const parsed = JSON.parse(pkgFile.content) as { name?: string };
+      if (parsed.name) return titleCase(parsed.name.replace(/^@[^/]+\//, ''));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const goMod = files.find((f) => f.path.toLowerCase().endsWith('go.mod'));
+  if (goMod) {
+    const mod = goMod.content.match(/^module\s+(\S+)/m);
+    if (mod?.[1]) {
+      const leaf = mod[1].split('/').pop() || mod[1];
+      return titleCase(leaf);
+    }
+  }
+
+  const tfName = files
+    .filter((f) => f.path.endsWith('.tf'))
+    .map((f) => f.content.match(/project[_-]?name\s*=\s*"([^"]+)"/i)?.[1])
+    .find(Boolean);
+  if (tfName) return titleCase(tfName);
+
+  // Infer a short label from the user prompt
+  const t = promptText.toLowerCase();
+  const lang =
+    /\bgo\b|golang/.test(t) ? 'Go' :
+    /node\.?js|express|nestjs/.test(t) ? 'Node.js' :
+    /python|django|fastapi|flask/.test(t) ? 'Python' :
+    /java|spring/.test(t) ? 'Java' :
+    /dotnet|\.net|c#/.test(t) ? '.NET' :
+    null;
+
+  const target =
+    presets.orchestrator === 'container-apps' || /container\s*apps?/.test(t)
+      ? 'Container Apps'
+      : presets.orchestrator === 'aks' || /\baks\b/.test(t)
+        ? 'AKS'
+        : presets.orchestrator === 'eks' || /\beks\b/.test(t)
+          ? 'EKS'
+          : presets.orchestrator === 'ecs' || /\becs\b/.test(t)
+            ? 'ECS'
+            : presets.orchestrator === 'gke'
+              ? 'GKE'
+              : presets.orchestrator === 'cloud-run'
+                ? 'Cloud Run'
+                : presets.orchestrator === 'oke'
+                  ? 'OKE'
+                  : 'Stack';
+
+  const cloud =
+    presets.cloud === 'oracle' ? 'OCI' :
+    presets.cloud === 'aws' ? 'AWS' :
+    presets.cloud === 'gcp' ? 'GCP' :
+    presets.cloud === 'azure' ? 'Azure' :
+    'Cloud';
+
+  if (lang) return `${lang} on ${cloud} ${target}`;
+  return `${cloud} ${target} Stack`;
+}
+
+function deriveProviderLabel(files: GeneratedFile[], presets: Presets): string {
+  const cloud =
+    presets.cloud === 'oracle' ? 'OCI' :
+    files.some((f) => /azurerm_|azure-pipelines|container.app/i.test(f.path + f.content))
+      ? 'Azure'
+      : files.some((f) => /\baws_|\beks\b|\becs\b/.test(f.content) || f.path.includes('aws'))
+        ? 'AWS'
+        : files.some((f) => /google_|gke|cloud.run/i.test(f.content))
+          ? 'GCP'
+          : files.some((f) => /oci_|oracle/i.test(f.content + f.path))
+            ? 'OCI'
+            : presets.cloud === 'aws'
+              ? 'AWS'
+              : presets.cloud === 'gcp'
+                ? 'GCP'
+                : presets.cloud === 'azure'
+                  ? 'Azure'
+                  : 'Cloud';
+
+  const orch =
+    presets.orchestrator === 'container-apps' ? 'Container Apps' :
+    presets.orchestrator === 'cloud-run' ? 'Cloud Run' :
+    presets.orchestrator === 'ecs' ? 'ECS' :
+    presets.orchestrator === 'serverless' ? 'Serverless' :
+    presets.orchestrator === 'aks' ? 'AKS' :
+    presets.orchestrator === 'eks' ? 'EKS' :
+    presets.orchestrator === 'gke' ? 'GKE' :
+    presets.orchestrator === 'oke' ? 'OKE' :
+    files.some((f) => /azurerm_container_app|container.app/i.test(f.content))
+      ? 'Container Apps'
+      : files.some((f) => f.path.includes('charts/') || f.path.includes('helm'))
+        ? 'Kubernetes, Helm'
+        : 'Containers';
+
+  const ci =
+    presets.ci === 'azure-devops' || files.some((f) => f.path.includes('azure-pipelines'))
+      ? 'Azure DevOps'
+      : presets.ci === 'gitlab-ci'
+        ? 'GitLab CI'
+        : presets.ci === 'jenkins'
+          ? 'Jenkins'
+          : 'GitHub Actions';
+
+  return `${cloud}, ${orch}, ${ci}`;
+}
+
+/** Keep follow-up payloads small so nginx/browser don't drop the request. */
+function slimExistingFiles(files: GeneratedFile[]) {
+  const MAX_FILES = 20;
+  const MAX_CHARS_PER_FILE = 4000;
+  const MAX_TOTAL = 80_000;
+  let total = 0;
+  const out: { path: string; content: string }[] = [];
+  for (const f of files.slice(0, MAX_FILES)) {
+    const slice = f.content.slice(0, MAX_CHARS_PER_FILE);
+    if (total + slice.length > MAX_TOTAL) break;
+    total += slice.length;
+    out.push({ path: f.path, content: slice });
+  }
+  return out;
 }
 
 export default function GeneratePage() {
@@ -40,12 +205,12 @@ export default function GeneratePage() {
     {
       id: 'welcome',
       role: 'assistant',
-      content: "Hey! Describe the cloud infrastructure or application setup you want to build (e.g., 'Deploy a Node.js API with PostgreSQL to AWS EKS'), and I will turn it into a production-ready cloud stack.",
+      content: "Hey! Describe the infrastructure you want. I'll ask clarifying questions first, draft a detailed plan for your approval, then generate Terraform, CI/CD, and orchestration scaffolds — plus a minimal health stub, not a full application.",
     }
   ]);
   const [input, setInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
+  const [generationStatus, setGenerationStatus] = useState('');
   const [files, setFiles] = useState<GeneratedFile[]>([]);
   const [hasGeneratedFiles, setHasGeneratedFiles] = useState(false);
   const [summary, setSummary] = useState('');
@@ -62,6 +227,10 @@ export default function GeneratePage() {
   const [selectedCidr, setSelectedCidr] = useState('10.0.0.0/16');
   const [selectedSecrets, setSelectedSecrets] = useState('placeholders');
   const [selectedProbes, setSelectedProbes] = useState('enabled');
+  const [pendingPlan, setPendingPlan] = useState<string | null>(null);
+  const [pendingQuestions, setPendingQuestions] = useState<string[]>([]);
+  const [lastStackPrompt, setLastStackPrompt] = useState('');
+  const [awaitingApproval, setAwaitingApproval] = useState(false);
 
   useEffect(() => {
     const now = new Date();
@@ -105,6 +274,7 @@ export default function GeneratePage() {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const filesRef = useRef<GeneratedFile[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const lastStackPromptRef = useRef('');
 
   useEffect(() => {
     filesRef.current = files;
@@ -116,7 +286,7 @@ export default function GeneratePage() {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, statusMessage, isGenerating]);
+  }, [messages, isGenerating]);
 
   const orchOptions = ORCHESTRATOR_OPTIONS[presets.cloud] || [];
 
@@ -149,25 +319,29 @@ export default function GeneratePage() {
   };
 
   const mergeFile = useCallback((file: GeneratedFile) => {
+    const normalized: GeneratedFile = {
+      ...file,
+      language:
+        !file.language ||
+        file.language === 'plaintext' ||
+        file.language === 'text' ||
+        file.language === 'plain'
+          ? getLanguageFromPath(file.path)
+          : file.language,
+    };
     setFiles((prev) => {
-      const idx = prev.findIndex((f) => f.path === file.path);
-      if (idx === -1) return [...prev, file];
+      const idx = prev.findIndex((f) => f.path === normalized.path);
+      if (idx === -1) return [...prev, normalized];
       const next = [...prev];
-      next[idx] = file;
+      next[idx] = normalized;
       return next;
     });
   }, []);
 
   const sendMessage = useCallback(
-    async (rawText: string) => {
+    async (rawText: string, options?: SendOptions) => {
       const text = rawText.trim();
       if (!text || isGenerating) return;
-
-      const userMsg: ChatMessage = {
-        id: `u-${Date.now()}`,
-        role: 'user',
-        content: text,
-      };
 
       const priorHistory = messagesRef.current
         .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -176,37 +350,154 @@ export default function GeneratePage() {
           content: m.content,
         }));
 
-      const existing = filesRef.current.map((f) => ({
-        path: f.path,
-        content: f.content,
-      }));
+      const startFresh =
+        isFullStackPrompt(text) && !isIterativeEditPrompt(text);
+      const hasFiles = filesRef.current.length > 0;
+      const gated =
+        options?.phase === 'generate'
+          ? Boolean(options.approvedPlan)
+          : requiresPlanApproval(text, hasFiles && !startFresh);
 
-      setMessages((prev) => [...prev, userMsg]);
+      let phase: WorkflowPhase;
+      if (options?.phase) {
+        phase = options.phase;
+      } else if (options?.approvedPlan) {
+        phase = 'generate';
+      } else if (awaitingApproval && pendingPlan) {
+        // User is revising an existing plan
+        phase = 'plan';
+      } else if (pendingQuestions.length > 0) {
+        // Client answered clarifying questions → draft the plan
+        phase = 'plan';
+      } else if (gated) {
+        // New / major stack → interview like a consultant first
+        phase = 'clarify';
+      } else {
+        phase = 'generate';
+      }
+
+      const existing =
+        startFresh || phase === 'plan' || phase === 'clarify'
+          ? []
+          : slimExistingFiles(filesRef.current);
+
+      if (!options?.skipUserBubble) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `u-${Date.now()}`,
+            role: 'user',
+            content: text,
+          },
+        ]);
+      }
       setInput('');
       setIsGenerating(true);
+      setGenerationStatus(
+        phase === 'clarify'
+          ? 'Asking a few requirements questions…'
+          : phase === 'plan'
+            ? options?.priorPlan || awaitingApproval
+              ? 'Revising architecture plan…'
+              : 'Drafting a detailed architecture plan…'
+            : 'Generating infrastructure files…'
+      );
       setError(null);
       setWarnings([]);
-      setStatusMessage('Thinking…');
       abortController.current = new AbortController();
 
+      if (phase === 'plan' || phase === 'clarify') {
+        setPendingQuestions([]);
+        if (startFresh || !hasFiles) {
+          setFiles([]);
+          setHasGeneratedFiles(false);
+          setSummary('');
+        }
+        // Keep the original stack request when answering questions or revising a plan
+        if (phase === 'clarify' || !lastStackPromptRef.current) {
+          lastStackPromptRef.current = text;
+          setLastStackPrompt(text);
+        } else if (
+          !awaitingApproval &&
+          pendingQuestions.length === 0 &&
+          startFresh
+        ) {
+          setLastStackPrompt(text);
+        }
+      }
+
+      if (phase === 'generate' && (startFresh || options?.approvedPlan)) {
+        setFiles([]);
+        setHasGeneratedFiles(false);
+        setSummary('');
+        setAwaitingApproval(false);
+        setPendingQuestions([]);
+      }
+
+      const originalRequestPresets = inferPresetsFromPrompt(
+        lastStackPrompt || text,
+        presets
+      );
+      const resolvedPresets = options?.approvedPlan
+        ? inferPresetsFromPrompt(options.approvedPlan, presets)
+        : phase === 'plan' && lastStackPrompt && text !== lastStackPrompt
+          ? inferPresetsFromPrompt(text, originalRequestPresets)
+          : originalRequestPresets;
+      if (
+        resolvedPresets.cloud !== presets.cloud ||
+        resolvedPresets.orchestrator !== presets.orchestrator ||
+        resolvedPresets.ci !== presets.ci
+      ) {
+        setPresets(resolvedPresets);
+      }
+
       let assistantText = '';
+      let receivedPlan = '';
+      let receivedQuestions: string[] = [];
+      const snapshotBefore =
+        phase === 'generate' && !options?.approvedPlan && !startFresh
+          ? filesRef.current.map((f) => ({
+              path: f.path,
+              content: f.content,
+            }))
+          : [];
+
+      const requestPrompt =
+        phase === 'generate' && lastStackPrompt
+          ? lastStackPrompt
+          : phase === 'plan' && lastStackPrompt && text !== lastStackPrompt
+            ? `${lastStackPrompt}\n\nClient answers / revision feedback:\n${text}`
+            : text;
 
       try {
         const response = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: text,
-            presets,
-            history: priorHistory,
+            prompt: requestPrompt,
+            presets: resolvedPresets,
+            history: phase === 'generate' ? [] : priorHistory,
             existingFiles: existing,
+            phase,
+            approvedPlan: options?.approvedPlan,
+            priorPlan:
+              options?.priorPlan ||
+              (phase === 'plan' && awaitingApproval
+                ? pendingPlan || undefined
+                : undefined),
           }),
           signal: abortController.current.signal,
         });
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
-          throw new Error(data.error || 'Generation failed');
+          const apiError = data.error || 'Generation failed';
+          if (/plan approval required/i.test(apiError) && !options?.approvedPlan) {
+            throw new Error(
+              'Starting architecture plan first — review it, then click Approve & Generate.'
+            );
+          }
+          throw new Error(apiError);
         }
 
         const reader = response.body?.getReader();
@@ -237,6 +528,8 @@ export default function GeneratePage() {
               warnings?: string[];
               message?: string;
               error?: string;
+              plan?: string;
+              questions?: string[];
             };
             try {
               event = JSON.parse(dataStr);
@@ -253,10 +546,13 @@ export default function GeneratePage() {
                 setFiles([]);
                 break;
               case 'status':
-                if (event.message) setStatusMessage(event.message);
+                if (event.message) {
+                  setGenerationStatus(event.message);
+                }
                 break;
               case 'file':
                 if (event.file) {
+                  setGenerationStatus(`Generating ${event.file.path}…`);
                   mergeFile(event.file);
                   setHasGeneratedFiles(true);
                 }
@@ -264,6 +560,26 @@ export default function GeneratePage() {
               case 'delete':
                 if (event.path) {
                   setFiles((prev) => prev.filter((f) => f.path !== event.path));
+                }
+                break;
+              case 'plan':
+                if (event.plan) {
+                  receivedPlan = event.plan;
+                  setPendingPlan(event.plan);
+                  setPendingQuestions([]);
+                  setAwaitingApproval(true);
+                }
+                break;
+              case 'questions':
+                if (event.questions?.length) {
+                  receivedQuestions = event.questions;
+                  if (!lastStackPromptRef.current) {
+                    lastStackPromptRef.current = text;
+                    setLastStackPrompt(text);
+                  }
+                  setPendingQuestions(event.questions);
+                  setAwaitingApproval(false);
+                  setPendingPlan(null);
                 }
                 break;
               case 'summary':
@@ -276,31 +592,81 @@ export default function GeneratePage() {
                 setWarnings(event.warnings || []);
                 break;
               case 'done':
-                setStatusMessage('');
-                setLastUpdateTime(`Today, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+                setLastUpdateTime(
+                  `Today, ${new Date().toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}`
+                );
                 break;
             }
           }
         }
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `a-${Date.now()}`,
-            role: 'assistant',
-            content:
-              assistantText ||
-              (existing.length
-                ? 'Updated the project files on the right.'
-                : 'Generated the stack — open files on the right.'),
-          },
-        ]);
+        const resolvedPhase: WorkflowPhase = receivedPlan
+          ? 'plan'
+          : receivedQuestions.length
+            ? 'clarify'
+            : phase;
+
+        if (resolvedPhase === 'plan' || resolvedPhase === 'clarify') {
+          let content = assistantText || '';
+          if (receivedQuestions.length) {
+            content =
+              (content ? content + '\n\n' : '') +
+              '## Clarifying questions\n' +
+              receivedQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+          }
+          if (receivedPlan) {
+            // Prefer the structured plan body; keep summary as a short lead-in
+            content = receivedPlan;
+            if (assistantText?.trim()) {
+              content = `${assistantText.trim()}\n\n${receivedPlan}`;
+            }
+          }
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `a-${Date.now()}`,
+              role: 'assistant',
+              content:
+                content ||
+                'Drafted a response — reply with answers or changes.',
+            },
+          ]);
+        } else {
+          if (options?.approvedPlan) {
+            setPendingPlan(null);
+            setAwaitingApproval(false);
+          }
+          const filesChanged =
+            filesRef.current.length !== snapshotBefore.length ||
+            filesRef.current.some((f) => {
+              const prev = snapshotBefore.find((b) => b.path === f.path);
+              return !prev || prev.content !== f.content;
+            });
+
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `a-${Date.now()}`,
+              role: 'assistant',
+              content:
+                assistantText ||
+                (filesChanged
+                  ? 'Updated the project files on the right.'
+                  : snapshotBefore.length
+                    ? 'No files were changed on the right — the previous reply may have been text only. Try your request again with more detail.'
+                    : 'Generated the stack — open files on the right.'),
+            },
+          ]);
+        }
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') return;
         const rawMsg = e instanceof Error ? e.message : 'Something went wrong';
         const msg =
           /failed to fetch|network\s?error/i.test(rawMsg)
-            ? 'Request failed before the API could respond. This is usually a blocked origin/CORS issue or an unreachable backend.'
+            ? 'Could not reach the API. Try again — follow-up edits need a reachable backend (check ingress/HTTP). If the first generate worked, this is often a blocked origin or dropped large request.'
             : rawMsg;
         setError(msg);
         setMessages((prev) => [
@@ -313,8 +679,11 @@ export default function GeneratePage() {
         ]);
       } finally {
         setIsGenerating(false);
-        setStatusMessage('');
+        setGenerationStatus('');
         abortController.current = null;
+        if (filesRef.current.length > 0) {
+          setHasGeneratedFiles(true);
+        }
         const now = new Date();
         const timeString = now.toLocaleTimeString('en-US', {
           hour: '2-digit',
@@ -324,15 +693,31 @@ export default function GeneratePage() {
         setLastUpdateTime(`Today, ${timeString}`);
       }
     },
-    [isGenerating, presets, mergeFile]
+    [
+      isGenerating,
+      presets,
+      mergeFile,
+      awaitingApproval,
+      pendingPlan,
+      pendingQuestions,
+      lastStackPrompt,
+    ]
   );
 
-
+  const approvePlan = useCallback(() => {
+    const originalPrompt = lastStackPromptRef.current || lastStackPrompt;
+    if (!pendingPlan || !originalPrompt || isGenerating) return;
+    void sendMessage(originalPrompt, {
+      phase: 'generate',
+      approvedPlan: pendingPlan,
+      skipUserBubble: true,
+    });
+  }, [pendingPlan, lastStackPrompt, isGenerating, sendMessage]);
 
   const handleStop = () => {
     abortController.current?.abort();
     setIsGenerating(false);
-    setStatusMessage('');
+    setGenerationStatus('');
   };
 
   const handleNew = () => {
@@ -343,7 +728,7 @@ export default function GeneratePage() {
       {
         id: 'welcome',
         role: 'assistant',
-        content: "Hello! I'm StackForge, your AI platform engineering assistant. Describe the infrastructure stack you want to build (e.g., 'A Node.js REST API on Oracle Cloud OKE with a load balancer and GitHub Actions CI'), and I'll generate the Terraform configurations, Dockerfiles, Helm charts, and CI/CD pipelines for you!",
+        content: "Hello! I'm StackForge. Describe the infrastructure you want — I'll ask a few clarifying questions like a platform consultant, draft a detailed plan for your approval, then generate Terraform, CI/CD, and orchestration scaffolds (plus a minimal health stub — not a full application).",
       }
     ]);
     setFiles([]);
@@ -352,8 +737,13 @@ export default function GeneratePage() {
     setWarnings([]);
     setError(null);
     setInput('');
-    setStatusMessage('');
     setIsGenerating(false);
+    setGenerationStatus('');
+    setPendingPlan(null);
+    setPendingQuestions([]);
+    setLastStackPrompt('');
+    lastStackPromptRef.current = '';
+    setAwaitingApproval(false);
   };
 
 
@@ -397,42 +787,49 @@ export default function GeneratePage() {
   // ——— Setup (assessment-style) ———
   if (!setupDone) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <header className="border-b border-gray-100 sticky top-0 bg-white/95 backdrop-blur-sm z-50">
-          <div className="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-3">
-              <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-10 w-auto object-contain" />
-            </Link>
-            <Link href="/" className="text-sm font-medium text-gray-500 hover:text-indigo-600 transition-colors no-underline">
-              Home
-            </Link>
+      <div className="min-h-screen flex flex-col bg-white bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_1000px_at_50%_150px,#eeeffc,transparent)] before:pointer-events-none">
+        <header className="relative z-10 sticky top-0 bg-white/90 backdrop-blur-sm">
+          <div className="max-w-3xl mx-auto px-6 h-16 flex items-center justify-between">
+            <BrandLockup />
+            <button
+              type="button"
+              onClick={() => setSetupDone(true)}
+              className="text-sm font-medium text-[#64748B] hover:text-[#4F46E5] transition-colors cursor-pointer"
+            >
+              Skip
+            </button>
           </div>
         </header>
 
-        <main className="flex-1 max-w-3xl mx-auto w-full px-4 sm:px-6 py-10">
+        <main className="relative z-10 flex-1 max-w-3xl mx-auto w-full px-4 sm:px-6 py-10">
           <div className="mb-8">
             <div className="flex justify-between text-sm mb-2">
-              <span className="font-medium">Step {step} of 3</span>
-              <span className="text-[var(--muted-text)]">{Math.round((step / 3) * 100)}%</span>
+              <span className="font-medium text-[#0F172A]">Step {step} of 3</span>
+              <span className="text-[#64748B]">{Math.round((step / 3) * 100)}%</span>
             </div>
-            <div className="progress-track h-1.5">
+            <div className="h-1.5 rounded-full bg-[#E2E8F0] overflow-hidden">
               <div
-                className="progress-fill-blue h-full"
-                style={{ width: `${(step / 3) * 100}%`, animation: 'none' }}
+                className="h-full rounded-full bg-[#4F46E5] transition-all duration-300"
+                style={{ width: `${(step / 3) * 100}%` }}
               />
             </div>
           </div>
 
           {step === 1 && (
             <div>
-              <p className="section-label mb-2">Cloud · 1 of 3</p>
-              <h1 className="text-3xl font-bold mb-2">Which cloud are you on?</h1>
-              <p className="text-[var(--muted-text)] mb-8">Then we’ll open a chat + file workspace.</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#60A5FA] mb-2">Cloud · 1 of 3</p>
+              <h1 className="text-3xl font-bold text-[#0F172A] mb-2 tracking-tight">Which cloud are you on?</h1>
+              <p className="text-[#64748B] mb-8">Then we&apos;ll open a chat + file workspace.</p>
               <div className="grid gap-3">
                 {CLOUD_OPTIONS.map((opt) => (
-                  <button key={opt.value} type="button" className="choice-card" onClick={() => pickCloud(opt.value as CloudProvider)}>
-                    <span className="choice-card-title">{opt.label}</span>
-                    <span className="choice-card-desc">{opt.description}</span>
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className="text-left rounded-2xl border border-[#E2E8F0] bg-white hover:border-indigo-300 hover:bg-indigo-50/60 px-5 py-4 transition-all cursor-pointer shadow-sm"
+                    onClick={() => pickCloud(opt.value as CloudProvider)}
+                  >
+                    <span className="block text-[15px] font-semibold text-[#0F172A]">{opt.label}</span>
+                    <span className="block text-sm text-[#64748B] mt-1">{opt.description}</span>
                   </button>
                 ))}
               </div>
@@ -441,14 +838,19 @@ export default function GeneratePage() {
 
           {step === 2 && (
             <div>
-              <button type="button" className="text-sm text-[var(--muted-text)] mb-4" onClick={() => setStep(1)}>← Back</button>
-              <p className="section-label mb-2">Orchestration · 2 of 3</p>
-              <h1 className="text-3xl font-bold mb-2">How do you run containers?</h1>
+              <button type="button" className="text-sm text-[#64748B] mb-4 cursor-pointer hover:text-[#4F46E5]" onClick={() => setStep(1)}>← Back</button>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#60A5FA] mb-2">Orchestration · 2 of 3</p>
+              <h1 className="text-3xl font-bold text-[#0F172A] mb-2 tracking-tight">How do you run containers?</h1>
               <div className="grid gap-3 mt-8">
                 {orchOptions.map((opt) => (
-                  <button key={opt.value} type="button" className="choice-card" onClick={() => pickOrch(opt.value as Orchestrator)}>
-                    <span className="choice-card-title">{opt.label}</span>
-                    <span className="choice-card-desc">{opt.description}</span>
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className="text-left rounded-2xl border border-[#E2E8F0] bg-white hover:border-indigo-300 hover:bg-indigo-50/60 px-5 py-4 transition-all cursor-pointer shadow-sm"
+                    onClick={() => pickOrch(opt.value as Orchestrator)}
+                  >
+                    <span className="block text-[15px] font-semibold text-[#0F172A]">{opt.label}</span>
+                    <span className="block text-sm text-[#64748B] mt-1">{opt.description}</span>
                   </button>
                 ))}
               </div>
@@ -457,14 +859,19 @@ export default function GeneratePage() {
 
           {step === 3 && (
             <div>
-              <button type="button" className="text-sm text-[var(--muted-text)] mb-4" onClick={() => setStep(2)}>← Back</button>
-              <p className="section-label mb-2">CI / CD · 3 of 3</p>
-              <h1 className="text-3xl font-bold mb-2">Where does your pipeline live?</h1>
+              <button type="button" className="text-sm text-[#64748B] mb-4 cursor-pointer hover:text-[#4F46E5]" onClick={() => setStep(2)}>← Back</button>
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#60A5FA] mb-2">CI / CD · 3 of 3</p>
+              <h1 className="text-3xl font-bold text-[#0F172A] mb-2 tracking-tight">Where does your pipeline live?</h1>
               <div className="grid gap-3 mt-8">
                 {CI_OPTIONS.map((opt) => (
-                  <button key={opt.value} type="button" className="choice-card" onClick={() => pickCi(opt.value as CIProvider)}>
-                    <span className="choice-card-title">{opt.label}</span>
-                    <span className="choice-card-desc">{opt.description}</span>
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className="text-left rounded-2xl border border-[#E2E8F0] bg-white hover:border-indigo-300 hover:bg-indigo-50/60 px-5 py-4 transition-all cursor-pointer shadow-sm"
+                    onClick={() => pickCi(opt.value as CIProvider)}
+                  >
+                    <span className="block text-[15px] font-semibold text-[#0F172A]">{opt.label}</span>
+                    <span className="block text-sm text-[#64748B] mt-1">{opt.description}</span>
                   </button>
                 ))}
               </div>
@@ -475,38 +882,13 @@ export default function GeneratePage() {
     );
   }
 
-  // Dynamic parsing of project & provider from code
-  const chartFile = files.find(f => f.path.toLowerCase().endsWith('chart.yaml') || f.path.toLowerCase().endsWith('chart.yml'));
-  let parsedProjName = "Go Microservice Infra";
-  if (chartFile) {
-    const match = chartFile.content.match(/^name:\s*(.+)$/m);
-    if (match && match[1]) {
-      parsedProjName = match[1].trim();
-    }
-  } else {
-    const pkgFile = files.find(f => f.path.toLowerCase().endsWith('package.json'));
-    if (pkgFile) {
-      try {
-        const parsed = JSON.parse(pkgFile.content);
-        if (parsed.name) parsedProjName = parsed.name;
-      } catch {}
-    }
-  }
+  // Dynamic project name + provider from generated files / presets / prompt
+  const parsedProjName = deriveProjectName(files, promptVal || input, presets);
+  const parsedProvider = deriveProviderLabel(files, presets);
 
-  let parsedProvider = `${presets.cloud === 'oracle' ? 'OCI' : presets.cloud.toUpperCase()}, Kubernetes, Helm`;
-  if (files.some(f => f.path.includes('oracle') || f.path.includes('oci') || f.content.includes('oci_'))) {
-    parsedProvider = "OCI, Kubernetes, Helm";
-  } else if (files.some(f => f.path.includes('aws') || f.content.includes('aws_'))) {
-    parsedProvider = "AWS, Kubernetes, Helm";
-  } else if (files.some(f => f.path.includes('gcp') || f.content.includes('google_'))) {
-    parsedProvider = "GCP, Kubernetes, Helm";
-  } else if (files.some(f => f.path.includes('azure') || f.content.includes('azurerm_'))) {
-    parsedProvider = "Azure, Kubernetes, Helm";
-  }
-
-  // ——— Lovable-style workspace ———
+  // ——— Workspace (MVP-matched empty state) ———
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-[#f8fafc]">
+    <div className="h-screen flex flex-col overflow-hidden bg-white bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px]">
       {hasGeneratedFiles && (
         <header className="border-b border-gray-200 sticky top-0 bg-white z-50 shrink-0 select-none">
           <div className="px-6 h-14 flex items-center justify-between gap-3">
@@ -522,14 +904,7 @@ export default function GeneratePage() {
                 </svg>
               </button>
               
-              <Link href="/" className="flex items-center gap-2.5 shrink-0 no-underline">
-                <img src="/enlight-labs-logo.png" alt="StackForge" className="w-8 h-8 object-contain rounded-lg shadow-sm" />
-                <div className="flex flex-col select-none leading-none">
-                  <span className="text-base font-bold text-gray-900 font-sans tracking-tight">
-                    StackForge
-                  </span>
-                </div>
-              </Link>
+              <BrandLockup />
             </div>
             
             <div className="flex items-center gap-4 shrink-0">
@@ -556,22 +931,12 @@ export default function GeneratePage() {
 
       {!hasGeneratedFiles && (
         <div className="absolute top-6 left-8 z-50">
-          <Link href="/" className="flex items-center gap-1.5 no-underline">
-            <img src="/enlight-labs-logo.png" alt="Enlight Lab" className="h-10 w-auto object-contain" />
-            <div className="flex flex-col select-none leading-none">
-              <span className="text-xl font-bold tracking-tight text-blue-600 font-sans">
-                Enlight Lab
-              </span>
-              <span className="text-[7.5px] font-extrabold text-blue-600 tracking-[0.16em] uppercase mt-0.5 opacity-80">
-                AI MVP BLUEPRINT GENERATOR
-              </span>
-            </div>
-          </Link>
+          <BrandLockup />
         </div>
       )}
 
       {hasGeneratedFiles ? (
-        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-slate-50 relative overflow-hidden before:absolute before:w-[600px] before:h-[600px] before:rounded-full before:bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.04),transparent_60%)] before:-top-40 before:-left-40 before:pointer-events-none">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-white/80 relative overflow-hidden before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_80px,#eeeffc,transparent_72%)] before:pointer-events-none">
           {/* LEFT — AI Assistant Sidebar */}
           <aside
             style={{ width: isSidebarOpen ? `${leftWidth}px` : '0px' }}
@@ -589,13 +954,6 @@ export default function GeneratePage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setMessages([
-                      {
-                        id: 'welcome',
-                        role: 'assistant',
-                        content: "Hey! Describe the cloud infrastructure or application setup you want to build (e.g., 'Deploy a Node.js API with PostgreSQL to AWS EKS'), and I will turn it into a production-ready cloud stack.",
-                      }
-                    ]);
                     setPromptVal('');
                     handleNew();
                   }}
@@ -606,11 +964,11 @@ export default function GeneratePage() {
               </div>
 
               {/* Chat Messages Feed */}
-              <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1 text-xs select-text scrollbar-thin">
+              <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 mb-3 pr-1 text-xs select-text scrollbar-thin min-w-0">
                 {messages.map((m, idx) => (
                   <div
                     key={m.id || idx}
-                    className={`flex gap-2.5 items-start ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
+                    className={`flex gap-2.5 items-start min-w-0 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
                   >
                     {m.role !== 'user' && (
                       <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center text-white shrink-0 shadow-sm border border-indigo-200/20 select-none ring-2 ring-indigo-50">
@@ -619,33 +977,98 @@ export default function GeneratePage() {
                         </svg>
                       </div>
                     )}
-                    <div className="flex-1 flex flex-col max-w-[85%]">
+                    <div className={`min-w-0 flex flex-col ${m.role === 'user' ? 'max-w-[88%] items-end' : 'max-w-[88%]'}`}>
                       <div
-                        className={`rounded-2xl px-3.5 py-2 leading-relaxed shadow-xs ${
+                        className={`rounded-2xl px-3.5 py-2.5 leading-relaxed min-w-0 max-w-full overflow-hidden ${
                           m.role === 'user'
-                            ? 'bg-gradient-to-tr from-indigo-600 to-violet-600 border-0 text-white rounded-tr-xs shadow-indigo-100/40 font-medium'
-                            : m.role === 'system'
+                            ? 'bg-gradient-to-tr from-indigo-600 to-violet-600 text-white rounded-tr-sm shadow-md shadow-indigo-200/40 font-medium'
+                              : m.role === 'system'
                               ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
-                                ? 'bg-rose-50 border border-rose-100/80 text-rose-700 font-medium rounded-xl p-3 shadow-xs'
-                                : 'bg-amber-50 text-amber-800 border border-amber-100/80 font-mono text-[10px] rounded-xl p-3'
-                              : 'bg-white border border-slate-100 text-slate-800 rounded-tl-xs'
+                                ? 'bg-rose-50 border border-rose-200/80 text-rose-800 rounded-xl shadow-sm'
+                                : 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl shadow-sm'
+                              : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'
                         }`}
                       >
                         <FormattedMessage
                           content={m.content}
-                          className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-slate-700' : 'text-slate-800'}
+                          className={
+                            m.role === 'user'
+                              ? 'text-white'
+                              : m.role === 'system'
+                                ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
+                                  ? 'text-rose-800'
+                                  : 'text-amber-900'
+                                : 'text-slate-700'
+                          }
                         />
                       </div>
                     </div>
                   </div>
                 ))}
+                {isGenerating && (
+                  <div className="flex gap-2.5 items-center" role="status" aria-label="Generating">
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center text-white shrink-0 shadow-sm">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
+                      </svg>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-white min-h-8 px-3 shadow-xs text-[11px] font-medium text-indigo-700 max-w-[260px]">
+                      <span className="loading-dots" aria-hidden>
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                      <span className="truncate">{generationStatus || 'Thinking…'}</span>
+                    </div>
+                  </div>
+                )}
+                {awaitingApproval && pendingPlan && !isGenerating && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5 shadow-sm">
+                    <p className="text-[12px] font-semibold text-slate-900">
+                      Do you want to go forward with this plan?
+                    </p>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      Approve to generate infrastructure files (Terraform, CI/CD, manifests + a minimal health stub). Or reply with changes to revise.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={approvePlan}
+                        className="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                      >
+                        Yes — Approve &amp; Generate
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAwaitingApproval(false);
+                          setPendingPlan(null);
+                          setPendingQuestions([]);
+                          setLastStackPrompt('');
+                          lastStackPromptRef.current = '';
+                        }}
+                        className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                      >
+                        Discard plan
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {pendingQuestions.length > 0 && !isGenerating && !awaitingApproval && (
+                  <p className="text-[11px] text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    Answer the questions above (cloud, compute, CI, environments, etc.), then send — I&apos;ll draft a detailed plan next.
+                  </p>
+                )}
               </div>
               {/* Input section at bottom of chat card */}
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (promptVal.trim()) {
-                    void sendMessage(promptVal);
+                    void sendMessage(promptVal, {
+                      phase: awaitingApproval && pendingPlan ? 'plan' : undefined,
+                      priorPlan: awaitingApproval ? pendingPlan || undefined : undefined,
+                    });
                     setPromptVal('');
                   }
                 }}
@@ -656,7 +1079,13 @@ export default function GeneratePage() {
                   value={promptVal}
                   onChange={(e) => setPromptVal(e.target.value)}
                   disabled={isGenerating}
-                  placeholder="Ask for changes..."
+                  placeholder={
+                    awaitingApproval
+                      ? 'Describe plan changes…'
+                      : pendingQuestions.length
+                        ? 'Answer the questions…'
+                        : 'Ask for changes...'
+                  }
                   className="flex-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none pl-2.5 py-1.5 border-0 min-w-0 font-sans"
                 />
                 <button
@@ -670,31 +1099,6 @@ export default function GeneratePage() {
                   </svg>
                 </button>
               </form>
-            </div>
-
-            {/* Actions Grid */}
-            <div className="bg-white/80 backdrop-blur-md border border-slate-200/60 rounded-xl p-3.5 shadow-sm shadow-slate-100/30 shrink-0">
-              <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2.5 select-none">Quick Actions</h4>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { text: 'Add HPA autoscaling', icon: '📈' },
-                  { text: 'Add dev/prod envs', icon: '📁' },
-                  { text: 'Setup PostgreSQL DB', icon: '💾' },
-                  { text: 'Secure network NSGs', icon: '🛡️' }
-                ].map((action) => (
-                  <button
-                    key={action.text}
-                    type="button"
-                    onClick={() => {
-                      void sendMessage(action.text);
-                    }}
-                    className="text-[10px] bg-white hover:bg-indigo-50/50 hover:text-indigo-600 text-slate-650 hover:border-indigo-200/60 border border-slate-200/80 p-2.5 rounded-xl text-left transition-all duration-200 font-semibold shadow-xs cursor-pointer active:scale-95 leading-tight flex items-center gap-1.5"
-                  >
-                    <span>{action.icon}</span>
-                    <span>{action.text.replace('Add ', '').replace('Setup ', '')}</span>
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Powered by */}
@@ -805,147 +1209,230 @@ export default function GeneratePage() {
 
             {/* Split View Editor Workspace */}
             <div className="flex-1 min-h-0 overflow-hidden bg-gray-50 flex flex-col justify-between gap-4">
+              <div className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+                Reviewable infrastructure scaffold — validate and review these files before provisioning. This is not drop-in production code.
+              </div>
               <FileViewer
                 files={files}
                 isGenerating={isGenerating}
                 promptText={promptVal}
+                generationStatus={generationStatus}
               />
             </div>
           </section>
         </div>
       ) : messages.some(m => m.role === 'user') ? (
-        <div className="flex-1 flex flex-col items-center justify-center bg-white bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] p-6 relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_800px_at_50%_45%,#eef2ff,transparent_75%)] before:pointer-events-none overflow-y-auto">
-          <div className="w-full max-w-2xl bg-white border border-gray-150 rounded-[32px] shadow-xl p-6 flex flex-col min-h-[380px] max-h-[70vh] relative z-10 animate-fade-slide-up">
-            {/* Scrollable messages container */}
-            <div className="flex-1 overflow-y-auto space-y-4 mb-4 pr-1">
+        <div className="flex-1 flex flex-col items-center justify-center bg-white p-6 relative overflow-y-auto bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_150px,#eeeffc,transparent_72%)] before:pointer-events-none">
+          <div className="w-full max-w-2xl bg-white/90 backdrop-blur-sm border border-[#E2E8F0] rounded-[28px] shadow-[0_20px_50px_-24px_rgba(37,99,235,0.25)] p-6 sm:p-7 flex flex-col min-h-[380px] max-h-[70vh] relative z-10">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-4 mb-4 pr-1 min-w-0">
               {messages.map((m, idx) => (
                 <div
                   key={m.id}
-                  className={`w-full flex gap-2.5 ${m.role === 'user' ? 'justify-end' : 'justify-start'} items-start animate-fade-slide-up`}
-                  style={{ animationDelay: `${idx * 40}ms` }}
+                  className={`w-full flex gap-2.5 min-w-0 ${m.role === 'user' ? 'justify-end' : 'justify-start'} items-start`}
                 >
                   {m.role !== 'user' && (
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white shrink-0 shadow-sm border border-blue-500/10 select-none">
+                    <div className="w-7 h-7 rounded-full bg-[#4F46E5] flex items-center justify-center text-white shrink-0 shadow-sm select-none">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
                       </svg>
                     </div>
                   )}
-                  <div className="max-w-[80%] text-sm leading-relaxed flex flex-col">
+                  <div className={`min-w-0 max-w-[85%] flex flex-col ${m.role === 'user' ? 'items-end' : ''}`}>
                     <div
-                      className={`rounded-2xl px-4 py-2.5 shadow-sm border ${
+                      className={`rounded-2xl px-4 py-2.5 min-w-0 max-w-full overflow-hidden ${
                         m.role === 'user'
-                          ? 'bg-[#0066FF] border-[#0066FF] text-white rounded-tr-none shadow-md shadow-blue-500/5'
+                          ? 'bg-[#4F46E5] text-white rounded-tr-md shadow-md shadow-indigo-200/40'
                           : m.role === 'system'
-                            ? 'bg-amber-50 text-[var(--muted-text)] border-amber-100 font-mono text-xs'
-                            : 'bg-white border border-gray-150 text-gray-800 rounded-tl-none'
+                            ? 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl'
+                            : 'bg-white border border-[#E2E8F0] text-[#0F172A] rounded-tl-md shadow-sm'
                       }`}
                     >
                       <FormattedMessage
                         content={m.content}
-                        className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-[var(--muted-text)]' : 'text-gray-800'}
+                        className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-amber-900' : 'text-slate-700'}
                       />
                     </div>
                   </div>
                   {m.role === 'user' && (
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-sm text-[10px] font-extrabold font-sans tracking-wide select-none">
+                    <div className="w-7 h-7 rounded-full bg-[#4F46E5] flex items-center justify-center text-white shrink-0 shadow-sm text-[10px] font-extrabold font-sans tracking-wide select-none">
                       US
                     </div>
                   )}
                 </div>
               ))}
+              {isGenerating && (
+                <div className="flex gap-2 items-center" role="status" aria-label="Generating">
+                  <div className="w-7 h-7 rounded-full bg-[#4F46E5] flex items-center justify-center text-white shrink-0">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
+                    </svg>
+                  </div>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-white min-h-8 px-3 shadow-sm text-xs font-medium text-indigo-700 max-w-[300px]">
+                    <span className="loading-dots" aria-hidden>
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    <span className="truncate">{generationStatus || 'Thinking…'}</span>
+                  </div>
+                </div>
+              )}
+              {awaitingApproval && pendingPlan && !isGenerating && (
+                <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5 shadow-sm">
+                  <p className="text-xs font-semibold text-slate-900">
+                    Do you want to go forward with this plan?
+                  </p>
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
+                    Approve to generate infrastructure files (Terraform, CI/CD, manifests + a minimal health stub). Or reply with changes to revise.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={approvePlan}
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                    >
+                      Yes — Approve &amp; Generate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAwaitingApproval(false);
+                        setPendingPlan(null);
+                        setPendingQuestions([]);
+                        setLastStackPrompt('');
+                        lastStackPromptRef.current = '';
+                      }}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      Discard plan
+                    </button>
+                  </div>
+                </div>
+              )}
+              {pendingQuestions.length > 0 && !isGenerating && !awaitingApproval && (
+                <p className="text-[11px] text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                  Answer the questions above, then send — I&apos;ll draft a detailed plan next.
+                </p>
+              )}
               <div ref={chatEndRef} />
             </div>
 
-            {/* Embedded input container inside the card */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 if (input.trim().length >= 1) {
-                  void sendMessage(input);
+                  void sendMessage(input, {
+                    phase: awaitingApproval && pendingPlan ? 'plan' : undefined,
+                    priorPlan: awaitingApproval ? pendingPlan || undefined : undefined,
+                  });
                 }
               }}
-              className="relative border border-gray-200 focus-glow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-50/50 rounded-full p-2 bg-[#FAFAFA] flex items-center gap-2 transition-all"
+              className={`relative bg-white border border-gray-200 shadow-sm focus-within:shadow-md p-2 pl-5 flex items-end gap-3 transition-all ${
+                pendingQuestions.length ? 'rounded-2xl' : 'rounded-full'
+              }`}
             >
-              <input
-                className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 focus:outline-none pl-4 py-2 border-0 min-w-0"
-                placeholder="Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS"
+              <textarea
+                className="flex-1 resize-none bg-transparent text-[15px] leading-relaxed text-gray-900 placeholder-gray-400 focus:outline-none py-2.5 border-0 min-w-0 font-sans"
+                placeholder={
+                  awaitingApproval
+                    ? 'Describe plan changes, then send…'
+                    : pendingQuestions.length
+                      ? 'Answer the questions…'
+                      : 'Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS'
+                }
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                rows={pendingQuestions.length ? 3 : 1}
                 disabled={isGenerating}
               />
               <button
                 type="submit"
-                className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-[#0066FF] hover:text-white transition-colors shrink-0 cursor-pointer"
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors shrink-0 cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
                 disabled={isGenerating || input.trim().length < 1}
               >
-                <svg className="w-4 h-4 transform rotate-45 -translate-x-0.5 translate-y-0.5" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
                 </svg>
               </button>
             </form>
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex justify-center bg-white overflow-y-auto relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_800px_at_50%_45%,#eef2ff,transparent_75%)] before:pointer-events-none">
-          <div className="w-full max-w-2xl px-6 py-12 flex flex-col min-h-full justify-between items-center gap-6 relative z-10">
-            {/* Center icon / Title banner */}
-            <div className="flex-1 flex flex-col items-center justify-center text-center my-auto py-10 animate-fade-slide-up">
-              {/* Floating icon card */}
-              <div className="w-14 h-14 rounded-2xl bg-white border border-gray-150 flex items-center justify-center mb-6 shadow-md relative z-20 animate-pulse-glow">
-                <svg className="w-6 h-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 0 1-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8Z" />
+        <div className="flex-1 flex flex-col bg-white overflow-hidden relative bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_150px,#eeeffc,transparent_72%)] before:pointer-events-none">
+          <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 pb-16 pt-24 w-full">
+            <div className="flex flex-col items-center text-center w-full px-2">
+              {/* Messaging icon — white tile + blue outlined bubble with 3 text lines */}
+              <div className="w-[52px] h-[52px] rounded-[16px] bg-white flex items-center justify-center mb-7 shadow-[0_8px_24px_rgba(37,99,235,0.12)] border border-white">
+                <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M5 6.5C5 5.12 6.12 4 7.5 4h9C17.88 4 19 5.12 19 6.5v7c0 1.38-1.12 2.5-2.5 2.5H11l-3.2 2.4c-.55.41-1.3.02-1.3-.66V16H7.5C6.12 16 5 14.88 5 13.5v-7Z"
+                    stroke="#4F46E5"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M8 8.25h8M8 11h8M8 13.75h4.5" stroke="#4F46E5" strokeWidth="1.8" strokeLinecap="round" />
                 </svg>
               </div>
-              <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight leading-tight">
+
+              <h1 className="text-[40px] sm:text-[44px] font-extrabold text-gray-900 tracking-tight leading-tight font-sans">
                 Shape your cloud stack in minutes.
               </h1>
-              <p className="text-sm text-gray-500 mt-2.5 max-w-lg leading-relaxed font-medium">
-                Tell me your presets, workload, database, and pipelines. I&apos;ll turn it into a production-ready cloud stack in minutes.
-              </p>
-            </div>
 
-            {/* Centered input form + Suggestions */}
-            <div className="w-full flex flex-col items-center gap-4 mb-44">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (input.trim().length >= 1) {
-                    void sendMessage(input);
-                  }
-                }}
-                className="relative border border-gray-200 focus-glow focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-50/50 rounded-full p-2 bg-white flex items-center gap-2 transition-all shadow-md w-full max-w-xl animate-fade-slide-up"
-                style={{ animationDelay: '100ms' }}
-              >
-                <input
-                  className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 focus:outline-none pl-4 py-2 border-0 min-w-0"
-                  placeholder="Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  disabled={isGenerating}
-                />
-                <button
-                  type="submit"
-                  className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-200 text-gray-500 hover:bg-[#0066FF] hover:text-white transition-colors shrink-0 cursor-pointer disabled:opacity-40 disabled:pointer-events-none active:scale-95"
-                  disabled={isGenerating || input.trim().length < 1}
+              {/* Subtitle + input share the same width (one-line subtitle drives the box length) */}
+              <div className="mt-4 inline-flex flex-col items-stretch max-w-full">
+                <p className="text-[15px] sm:text-[16px] text-gray-500 leading-relaxed font-normal whitespace-nowrap text-center">
+                  Tell me your cloud, workload, database, and pipelines. I&apos;ll turn it into a blueprint-ready stack in minutes.
+                </p>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (input.trim().length >= 1) {
+                      void sendMessage(input);
+                    }
+                  }}
+                  className="mt-9 w-full relative rounded-full bg-white border border-gray-200/90 shadow-[0_8px_30px_rgba(37,99,235,0.08)] focus-within:shadow-[0_10px_36px_rgba(37,99,235,0.12)] p-2 pl-6 flex items-center gap-3 transition-shadow"
                 >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                  </svg>
-                </button>
-              </form>
+                  <input
+                    className="flex-1 bg-transparent text-[15px] text-gray-900 placeholder-gray-400 focus:outline-none py-2.5 border-0 min-w-0 font-sans"
+                    placeholder="Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    disabled={isGenerating}
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors shrink-0 cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
+                    disabled={isGenerating || input.trim().length < 1}
+                    aria-label="Send"
+                  >
+                    <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                    </svg>
+                  </button>
+                </form>
+              </div>
             </div>
+          </div>
 
-            {/* Scroll Indicator */}
-            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2">
-              <Link href="/" className="text-xs bg-white text-gray-500 border border-gray-150 px-4 py-2.5 rounded-full shadow-sm flex items-center gap-1.5 no-underline hover:text-gray-700 hover:scale-[1.02] active:scale-95 transition-all font-medium cursor-pointer">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-                <span>Scroll to learn more</span>
-                <svg className="w-3 h-3 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-              </Link>
-            </div>
+          <div className="relative z-10 pb-7 flex justify-center">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-[13px] text-gray-500 bg-white border border-gray-200 rounded-full px-4 py-2.5 no-underline hover:text-gray-700 hover:border-gray-300 transition-colors font-medium shadow-sm"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-[#4F46E5] animate-blink-dot" />
+              <span>Scroll to learn more</span>
+              <svg className="w-3.5 h-3.5 text-[#4F46E5]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+              </svg>
+            </Link>
           </div>
         </div>
       )}
