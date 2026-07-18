@@ -1199,7 +1199,7 @@ export default function GeneratePage() {
           )}
 
           {/* RIGHT — IDE / files area */}
-          <section className="flex-1 min-w-0 flex flex-col gap-4 overflow-hidden">
+          <section className="relative z-10 flex-1 min-w-0 flex flex-col gap-4 overflow-hidden">
             {/* Stats Row */}
             <div className="bg-white border border-gray-200 rounded-xl px-5 py-3.5 shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4 select-none shrink-0">
               <div className="flex flex-wrap items-center gap-x-8 gap-y-3.5 w-full lg:w-auto">
