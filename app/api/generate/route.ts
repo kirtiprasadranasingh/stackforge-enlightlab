@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGemini, DEFAULT_MODEL, MAX_OUTPUT_TOKENS } from '@/lib/gemini';
+import { getGemini, DEFAULT_MODEL, GENERATION_CONFIG } from '@/lib/gemini';
 import {
   SYSTEM_PROMPT,
   formatPrompt,
@@ -31,7 +31,8 @@ import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-s
 import {
   buildCompletionPrompt,
   detectScaffoldProfile,
-  getMissingRequiredPaths,
+  getMissingPaths,
+  parseFileManifestFromPlan,
 } from '@/lib/scaffold-spec';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
@@ -43,7 +44,7 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 function sse(data: unknown): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -111,7 +112,7 @@ function streamClarifyingPhase(
         sse({
           type: 'summary',
           summary:
-            'I captured the stack you described. Answer these requirements questions so I can draft a detailed infrastructure plan for your approval.',
+            "Great — here's what I've got so far. A few quick choices will help me tailor the plan. Pick an option for each (or type your own), and I'll draft a detailed infrastructure plan for your approval.",
         })
       );
       controller.enqueue(sse({ type: 'warnings', warnings: [] }));
@@ -147,7 +148,8 @@ async function streamPlanningPhase(params: {
           systemInstruction: systemPrompt,
           generationConfig: {
             maxOutputTokens: 8192,
-          },
+            thinkingConfig: { thinkingBudget: 0 },
+          } as unknown as typeof GENERATION_CONFIG,
         });
 
         const geminiStream = await model.generateContentStream(userPrompt);
@@ -223,7 +225,7 @@ async function streamPlanningPhase(params: {
               summary: planSent
                 ? 'Review the plan below. Approve to generate files, or reply with changes to revise it.'
                 : questionsSent
-                  ? 'Answer the questions above so I can draft a concrete plan.'
+                  ? 'Pick an option for each question above (or type your own) so I can draft a concrete plan.'
                   : 'Could not draft a plan — try a clearer stack description.',
             })
           );
@@ -418,7 +420,9 @@ export async function POST(request: NextRequest) {
        lowerPrompt.includes('setup'));
 
     // "Deploy a Go backend to Azure…" must wipe previous AWS/EKS files — not merge as a follow-up
+    // Approved plans always start a full scaffold generation (never a delta edit).
     const isFreshGen =
+      Boolean(approvedPlan?.trim()) ||
       !existingFiles.length ||
       (isFullStackPrompt(prompt) && !isIterativeEditPrompt(prompt));
     const isFollowUp = existingFiles.length > 0 && !isFreshGen;
@@ -547,7 +551,7 @@ export async function POST(request: NextRequest) {
             model: DEFAULT_MODEL,
             systemInstruction: SYSTEM_PROMPT,
             generationConfig: {
-              maxOutputTokens: MAX_OUTPUT_TOKENS,
+              ...GENERATION_CONFIG,
             },
           });
 
@@ -662,42 +666,67 @@ export async function POST(request: NextRequest) {
 
           if (!isFollowUp) {
             const profile = detectScaffoldProfile(prompt, presets);
-            if (profile) {
-              let missing = getMissingRequiredPaths(collectedFiles, profile);
-              if (missing.length > 0) {
+            const planPaths = parseFileManifestFromPlan(approvedPlan || '');
+            const requiredPaths =
+              planPaths.length >= 4
+                ? planPaths
+                : profile
+                  ? [...profile.requiredPaths]
+                  : [];
+
+            if (requiredPaths.length > 0) {
+              let missing = getMissingPaths(collectedFiles, requiredPaths);
+              let completionPasses = 0;
+              const maxCompletionPasses = 3;
+
+              while (missing.length > 0 && completionPasses < maxCompletionPasses) {
+                completionPasses += 1;
+                const batch = missing.slice(0, 8);
                 controller.enqueue(
                   sse({
                     type: 'status',
-                    message: `Completing ${missing.length} missing file(s)…`,
+                    message: `Completing ${batch.length} missing file(s)…`,
                   })
                 );
                 try {
                   const completionResult = await model.generateContent(
-                    buildCompletionPrompt(missing, collectedFiles, profile)
+                    buildCompletionPrompt(batch, collectedFiles, profile)
                   );
                   const completionText = completionResult.response.text();
+                  let added = 0;
                   for (const file of parseFilesFromModelText(completionText)) {
                     if (!validateOutputSize([...collectedFiles, file])) break;
-                    ingestParsedFile(file, collectedFiles, (f) => {
-                      anyOutput = true;
-                      controller.enqueue(sse({ type: 'file', file: f }));
-                    });
-                  }
-                  missing = getMissingRequiredPaths(collectedFiles, profile);
-                  if (missing.length > 0 && !warningsSent) {
-                    warningsSent = true;
-                    controller.enqueue(
-                      sse({
-                        type: 'warnings',
-                        warnings: [
-                          `Still missing: ${missing.join(', ')}. Re-run or add manually.`,
-                        ],
+                    if (
+                      ingestParsedFile(file, collectedFiles, (f) => {
+                        anyOutput = true;
+                        controller.enqueue(sse({ type: 'file', file: f }));
                       })
-                    );
+                    ) {
+                      added += 1;
+                    }
                   }
+                  const nextMissing = getMissingPaths(collectedFiles, requiredPaths);
+                  if (added === 0 || nextMissing.length >= missing.length) {
+                    missing = nextMissing;
+                    break;
+                  }
+                  missing = nextMissing;
                 } catch (completionErr) {
                   console.error('Completion pass error:', completionErr);
+                  break;
                 }
+              }
+
+              if (missing.length > 0 && !warningsSent) {
+                warningsSent = true;
+                controller.enqueue(
+                  sse({
+                    type: 'warnings',
+                    warnings: [
+                      `Still missing: ${missing.join(', ')}. Re-run Approve & Generate or add manually.`,
+                    ],
+                  })
+                );
               }
             }
           }

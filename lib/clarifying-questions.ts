@@ -1,13 +1,13 @@
 import type { Presets } from '@/types';
 
-const CLOUD_LABELS: Record<Presets['cloud'], string> = {
+export const CLOUD_LABELS: Record<Presets['cloud'], string> = {
   aws: 'AWS',
   azure: 'Microsoft Azure',
   gcp: 'Google Cloud',
   oracle: 'Oracle Cloud Infrastructure',
 };
 
-const ORCHESTRATOR_LABELS: Record<Presets['orchestrator'], string> = {
+export const ORCHESTRATOR_LABELS: Record<Presets['orchestrator'], string> = {
   eks: 'Amazon EKS',
   ecs: 'Amazon ECS',
   aks: 'Azure Kubernetes Service (AKS)',
@@ -18,12 +18,136 @@ const ORCHESTRATOR_LABELS: Record<Presets['orchestrator'], string> = {
   serverless: 'serverless containers',
 };
 
-const CI_LABELS: Record<Presets['ci'], string> = {
+export const CI_LABELS: Record<Presets['ci'], string> = {
   'github-actions': 'GitHub Actions',
   'gitlab-ci': 'GitLab CI',
   jenkins: 'Jenkins',
   'azure-devops': 'Azure DevOps Pipelines',
 };
+
+export const REGION_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
+  aws: ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-south-1'],
+  gcp: ['us-central1', 'europe-west1', 'asia-south1'],
+  azure: ['eastus', 'westeurope', 'centralindia'],
+  oracle: ['ap-mumbai-1', 'us-ashburn-1', 'eu-frankfurt-1'],
+};
+
+export const HOSTING_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
+  aws: ['Amazon EKS', 'Amazon ECS'],
+  azure: ['Azure Kubernetes Service (AKS)', 'Azure Container Apps'],
+  gcp: ['Google Kubernetes Engine (GKE)', 'Google Cloud Run'],
+  oracle: ['Oracle Kubernetes Engine (OKE)'],
+};
+
+function detectCloudLabel(text: string): Presets['cloud'] | null {
+  const value = text.toLowerCase();
+  if (value.includes('oracle')) return 'oracle';
+  if (value.includes('google cloud') || value.includes('gcp')) return 'gcp';
+  if (value.includes('microsoft azure') || /\bazure\b/.test(value)) return 'azure';
+  if (/\baws\b/.test(value) || value.includes('amazon web services')) return 'aws';
+  return null;
+}
+
+export function cloudFromInterviewAnswer(
+  answer: string | undefined
+): Presets['cloud'] | null {
+  if (!answer) return null;
+  const text = answer.trim();
+
+  if (text.startsWith('Change the cloud:')) {
+    const choice = text
+      .slice('Change the cloud:'.length)
+      .split(/\s*\|\s*/)[0]
+      .trim();
+    return detectCloudLabel(choice);
+  }
+
+  if (text.startsWith('Change the hosting platform:')) {
+    const choice = text.slice('Change the hosting platform:'.length).toLowerCase();
+    if (choice.includes('oke') || choice.includes('oracle')) return 'oracle';
+    if (
+      choice.includes('gke') ||
+      choice.includes('cloud run') ||
+      choice.includes('google')
+    ) {
+      return 'gcp';
+    }
+    if (
+      choice.includes('aks') ||
+      choice.includes('container apps') ||
+      choice.includes('azure')
+    ) {
+      return 'azure';
+    }
+    if (choice.includes('eks') || choice.includes('ecs') || choice.includes('amazon')) {
+      return 'aws';
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Keep later questions aligned with earlier choices (e.g. region list matches
+ * the cloud the client picked in a "Change the cloud" follow-up).
+ */
+export function adaptClarifyingQuestions(
+  questions: string[],
+  answers: Record<number, string>
+): string[] {
+  const chosenCloud = cloudFromInterviewAnswer(answers[0]);
+  if (!chosenCloud) return questions;
+
+  const regions = REGION_OPTIONS_BY_CLOUD[chosenCloud].join(' / ');
+  return questions.map((question) => {
+    if (/^Where should we host it\?/i.test(question)) {
+      return `Where should we host it? (options: ${regions})`;
+    }
+    return question;
+  });
+}
+
+/** Expand interview picks into explicit requirements for the plan model. */
+export function formatInterviewAnswerForPlan(rawAnswer: string): string {
+  const answer = rawAnswer.trim();
+  if (!answer) return answer;
+
+  if (answer === 'Yes, use this setup') {
+    return 'Keep the suggested cloud, hosting platform, and CI/CD as proposed.';
+  }
+
+  if (answer.startsWith('Change the cloud:')) {
+    const rest = answer.slice('Change the cloud:'.length).trim();
+    const [cloudPart, ...more] = rest.split(/\s*\|\s*/);
+    const hostingPart = more
+      .find((part) => /^Hosting:\s*/i.test(part))
+      ?.replace(/^Hosting:\s*/i, '')
+      .trim();
+    const cloud = cloudPart.trim();
+    if (hostingPart) {
+      return `Cloud provider (client override): ${cloud}. Hosting platform (client override): ${hostingPart}. Use these instead of the originally suggested values.`;
+    }
+    return `Cloud provider (client override): ${cloud}. Use this instead of the originally suggested cloud.`;
+  }
+
+  const changeMatchers: Array<{ prefix: string; label: string }> = [
+    {
+      prefix: 'Change the hosting platform:',
+      label: 'Hosting platform (client override)',
+    },
+    { prefix: 'Change CI/CD:', label: 'CI/CD system (client override)' },
+    { prefix: 'Another service:', label: 'Data service (client override)' },
+  ];
+
+  for (const { prefix, label } of changeMatchers) {
+    if (answer.startsWith(prefix)) {
+      const choice = answer.slice(prefix.length).trim();
+      return `${label}: ${choice}. Use this instead of the originally suggested value.`;
+    }
+  }
+
+  return answer;
+}
 
 function detectRuntime(prompt: string): string | null {
   const text = prompt.toLowerCase();
@@ -76,36 +200,38 @@ export function buildClarifyingQuestions(
     database,
   ].filter(Boolean);
 
+  const regionOptions = REGION_OPTIONS_BY_CLOUD[presets.cloud].join(' / ');
+
   const questions = [
-    `I have the target as ${target}${
+    `Does this setup match what you need: ${target}${
       details.length ? `, using ${details.join(' and ')}` : ''
-    }. Is that correct?`,
-    `Which ${CLOUD_LABELS[presets.cloud]} region should the infrastructure use?`,
+    }? (options: Yes, use this setup / Change the cloud / Change the hosting platform / Change CI/CD)`,
+    `Where should we host it? (options: ${regionOptions})`,
     environments.length
       ? `You mentioned ${environments.join(
           ' and '
-        )}. Should the scaffold cover only that environment, or also development and production?`
-      : 'Which environments should the scaffold cover? (development, staging, production, or a subset)',
-    'Should the service be internet-facing or private, and do you need a custom domain with managed TLS?',
+        )}. Which environments do you need? (options: Staging only / Development and staging / Development, staging, and production)`
+      : 'Which environments do you need? (options: One environment / Development and staging / Development, staging, and production)',
+    'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
   ];
 
   if (database) {
     questions.push(
-      `For ${database}, should it use private networking, high availability, automated backups, and what retention period do you require?`
+      `How should ${database} be configured? (options: Standard private database / High availability / Private database with 7-day automatic backups)`
     );
   } else {
     questions.push(
-      'Does the workload need a managed database, cache, queue, or other stateful service? (none is valid)'
+      'Does the service need stored data or a cache? (options: No data service / PostgreSQL / MySQL / Redis cache / Another service)'
     );
   }
 
   if (!runtime) {
     questions.push(
-      'Which runtime should the minimal buildable health-check container use? (Node.js, Go, Python, Java, or .NET)'
+      'Which language should the health-check service use? (options: Node.js / Go / Python / Java / .NET)'
     );
   } else {
     questions.push(
-      'What traffic, availability, and scaling baseline should I design for? (expected requests, minimum replicas, and any uptime target)'
+      'How much traffic should we plan for? (options: Small — 2 app copies / Medium — 3 to 5 app copies / High traffic — automatic scaling)'
     );
   }
 

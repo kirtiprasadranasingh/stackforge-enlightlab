@@ -5,8 +5,9 @@ import { getLanguageFromPath, validateFilePath, validateFileSize } from '@/lib/u
  * Incremental parser for StackForge streaming markers.
  */
 
+/** Accept path-only markers and optional language/description attrs in either order. */
 const FILE_START =
-  /<<<FILE\s+path="([^"]+)"\s+language="([^"]*)"(?:\s+description="([^"]*)")?\s*>>>/g;
+  /<<<FILE\s+path="([^"]+)"(?:\s+language="([^"]*)")?(?:\s+description="([^"]*)")?\s*>>>/g;
 const END_FILE = '<<<END_FILE>>>';
 const DELETE_RE = /<<<DELETE\s+path="([^"]+)"\s*>>>/g;
 const MARKER_RE = /<<<[A-Z_]+(?:\s+[^>]*)?>>>/g;
@@ -129,7 +130,7 @@ export function appendAndParse(
     if (endIdx === -1) break;
 
     const path = match[1].trim();
-    const language = match[2].trim() || getLanguageFromPath(path);
+    const language = match[2]?.trim() || getLanguageFromPath(path);
     const description = match[3]?.trim();
     const content = state.buffer.slice(headerEnd, endIdx).replace(/^\r?\n/, '').replace(/\r?\n$/, '');
 

@@ -29,3 +29,13 @@ export const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 /** Bound output size / cost — 16k truncates multi-file Azure/AWS scaffolds mid-stream */
 export const MAX_OUTPUT_TOKENS = 32_768;
+
+/**
+ * Gemini 2.5 thinking tokens share the same maxOutputTokens budget as visible
+ * file bodies. Cap thinking so multi-file scaffolds are not truncated after
+ * the first <<<FILE>>> block. Passed through even if SDK types omit the field.
+ */
+export const GENERATION_CONFIG = {
+  maxOutputTokens: MAX_OUTPUT_TOKENS,
+  thinkingConfig: { thinkingBudget: 0 },
+} as const;

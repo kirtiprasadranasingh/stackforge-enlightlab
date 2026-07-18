@@ -114,13 +114,23 @@ unrelated to generating or explaining infrastructure code, respond with exactly:
 > I generate infrastructure code from a description of the stack you want — things like "a Node
 > API on EKS with autoscaling and a staging environment." I can't help with anything outside that.
 
-### A6. Output format
+### A6. Output format (mandatory markers)
 
-- Present output as distinct files, each clearly headed with its filename/path, in fenced code
-  blocks with the correct language tag.
-- After the artifacts: the **Assumptions** list, then exactly:
-  **"This is a reviewable starting scaffold — review before provisioning; it is not drop-in
-  production code."**
+Emit every file with this exact marker shape (not markdown-only fences):
+
+<<<FILE path="relative/path.ext" language="lang">>>
+…full file body…
+<<<END_FILE>>>
+
+Also emit:
+<<<STATUS>>> short progress line
+<<<SUMMARY>>> 2–3 sentences of what was created
+<<<WARNINGS>>> JSON array of strings (may be [])
+
+Rules:
+- Emit a complete <<<FILE>>>…<<<END_FILE>>> block for every path in the approved plan / required set.
+- Never stop after a single Terraform variables file — incomplete scaffolds are failures.
+- End SUMMARY with: "This is a reviewable starting scaffold — review before provisioning; it is not drop-in production code."
 - No preamble, no marketing language. Keep non-code text minimal.
 
 ---
@@ -386,6 +396,9 @@ ${priorPlan?.trim() || '(none — draft a new plan)'}
 The client's latest answers or revision feedback override conflicting details in the original
 request and prior plan. State the final resolved choice once under Confirmed requirements; do not
 present both alternatives as if they are simultaneously selected.
+If an answer says "Cloud provider (client override)" or "Hosting platform (client override)",
+those values are mandatory for the plan and file manifest — never keep the originally suggested
+cloud/platform when the client overrode it.
 
 If **critical** decisions are still missing after chat (cloud / compute / CI unclear), emit
 <<<QUESTIONS>>> with 3–5 focused questions and leave <<<PLAN>>> empty. QUESTIONS must be a valid
@@ -469,7 +482,15 @@ ${getCIProviderPrompt(presets.ci)}
 
 ${artifactSet}
 
-Emit using the <<<STATUS>>> / <<<FILE>>> / <<<SUMMARY>>> / <<<WARNINGS>>> format now.`;
+## Marker example (copy this shape for every file)
+<<<FILE path="terraform/versions.tf" language="hcl">>>
+terraform {
+  required_version = ">= 1.5.0"
+}
+<<<END_FILE>>>
+
+Emit using the <<<STATUS>>> / <<<FILE>>> / <<<SUMMARY>>> / <<<WARNINGS>>> format now.
+Emit ALL required files before SUMMARY. Incomplete output is a failure.`;
 }
 
 function buildArtifactSet(
@@ -507,6 +528,17 @@ Do NOT invent EKS/Helm/AWS files for this stack.`;
 5. Dockerfile (non-root) + app sources (e.g. app/index.js, app/package.json, app/package-lock.json)
 6. README.md — reviewable scaffold disclaimer
 Apply PART B8 rules. Do NOT emit Azure/GCP-only files for this stack.`;
+  }
+
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+    return `## Required artifact set (AWS EKS + Helm — emit ALL, typically 16+ files)
+1. terraform/versions.tf, terraform/variables.tf, terraform/main.tf, terraform/iam.tf, terraform/outputs.tf
+2. Plus as needed: terraform/rds.tf or database.tf, terraform/ecr.tf, terraform/alb_controller.tf / network.tf
+3. charts/app/Chart.yaml, values.yaml, templates/deployment.yaml, service.yaml, ingress.yaml, hpa.yaml (+ secrets.yaml if DB)
+4. app/Dockerfile, app/package.json, app/package-lock.json (or yarn.lock), app/server.js (or index.js) — /health stub only
+5. .github/workflows/deploy.yml — build/push ECR, helm upgrade, wait for rollout, rollback
+6. README.md — reviewable scaffold disclaimer
+Never stop after terraform/variables.tf alone. Incomplete EKS scaffolds are failures.`;
   }
 
   if (

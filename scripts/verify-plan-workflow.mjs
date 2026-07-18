@@ -69,7 +69,11 @@ assert.ok(interview[0].includes('GitHub Actions'));
 assert.ok(interview.some((question) => question.includes('PostgreSQL')));
 assert.ok(interview.every((question) => question.endsWith('?') || question.endsWith(')')));
 assert.ok(interview.every((question) => !/^\d+[.)]/.test(question)));
-console.log('PASS  deterministic client interview is contextual and unnumbered');
+assert.ok(
+  interview.every((question) => /\(options:/.test(question)),
+  'every interview question should present selectable options'
+);
+console.log('PASS  deterministic client interview is contextual, optioned, and unnumbered');
 
 const parsed = runCheck(
   'stream-parse',
@@ -156,5 +160,52 @@ console.log(JSON.stringify({
 assert.equal(validation.planOk, true);
 assert.equal(validation.shortPlanRejected, true);
 console.log('PASS  GenerateRequestSchema phase + approvedPlan');
+
+const eksCompletion = runCheck(
+  'eks-manifest-completion-inputs',
+  `
+import {
+  detectScaffoldProfile,
+  parseFileManifestFromPlan,
+  getMissingPaths,
+} from ${JSON.stringify(path.join(root, 'lib/scaffold-spec.ts'))};
+import { createParseState, appendAndParse } from ${JSON.stringify(path.join(root, 'lib/stream-parse.ts'))};
+
+const profile = detectScaffoldProfile(
+  'A Node.js REST API on AWS EKS with GitHub Actions and PostgreSQL',
+  { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' }
+);
+const plan = \`## File manifest
+terraform/versions.tf: Terraform and AWS provider versions.
+terraform/variables.tf: Input variables.
+terraform/main.tf: Core VPC and EKS.
+app/Dockerfile: Container definition.
+charts/app/Chart.yaml: Helm chart metadata.
+.github/workflows/deploy.yml: CI/CD pipeline.
+README.md: Setup instructions.
+\`;
+const paths = parseFileManifestFromPlan(plan);
+const missing = getMissingPaths([{ path: 'terraform/variables.tf' }], paths);
+
+const state = createParseState();
+const parsed = appendAndParse(
+  state,
+  '<<<FILE path="terraform/main.tf">>>\\nresource "aws_vpc" "main" {}\\n<<<END_FILE>>>',
+  true
+);
+
+console.log(JSON.stringify({
+  profileId: profile?.id ?? null,
+  pathCount: paths.length,
+  missingCount: missing.length,
+  pathOnlyParsed: parsed.files.map((f) => f.path),
+}));
+`
+);
+assert.equal(eksCompletion.profileId, 'aws-eks-helm');
+assert.ok(eksCompletion.pathCount >= 6);
+assert.ok(eksCompletion.missingCount >= 5);
+assert.deepEqual(eksCompletion.pathOnlyParsed, ['terraform/main.tf']);
+console.log('PASS  EKS profile + plan manifest + path-only FILE markers');
 
 console.log('===== ALL WORKFLOW CHECKS PASSED =====');

@@ -20,6 +20,14 @@ import { FileViewer } from '@/components/FileViewer';
 import { BrandLockup } from '@/components/BrandLockup';
 import { copyToClipboard } from '@/lib/clipboard';
 import { FormattedMessage } from '@/components/FormattedMessage';
+import {
+  ClarifyingInterview,
+  parseClarifyingQuestion,
+} from '@/components/ClarifyingInterview';
+import {
+  adaptClarifyingQuestions,
+  formatInterviewAnswerForPlan,
+} from '@/lib/clarifying-questions';
 import { inferPresetsFromPrompt } from '@/lib/infer-presets';
 import {
   isFullStackPrompt,
@@ -42,6 +50,22 @@ interface SendOptions {
   priorPlan?: string;
   /** Skip adding a user bubble (e.g. Approve button) */
   skipUserBubble?: boolean;
+}
+
+const MIN_WORKFLOW_THINKING_MS = 2000;
+
+function formatInterviewAnswers(
+  questions: string[],
+  answers: Record<number, string>
+): string {
+  const effective = adaptClarifyingQuestions(questions, answers);
+  return effective
+    .map((question, index) => {
+      const prompt = parseClarifyingQuestion(question).prompt;
+      const raw = answers[index] || '';
+      return `${index + 1}. ${prompt}\nSelected answer: ${formatInterviewAnswerForPlan(raw)}`;
+    })
+    .join('\n\n');
 }
 
 function titleCase(s: string): string {
@@ -229,6 +253,7 @@ export default function GeneratePage() {
   const [selectedProbes, setSelectedProbes] = useState('enabled');
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<string[]>([]);
+  const [questionAnswers, setQuestionAnswers] = useState<Record<number, string>>({});
   const [lastStackPrompt, setLastStackPrompt] = useState('');
   const [awaitingApproval, setAwaitingApproval] = useState(false);
 
@@ -375,9 +400,13 @@ export default function GeneratePage() {
       } else {
         phase = 'generate';
       }
+      const workflowStartedAt = Date.now();
 
       const existing =
-        startFresh || phase === 'plan' || phase === 'clarify'
+        startFresh ||
+        phase === 'plan' ||
+        phase === 'clarify' ||
+        Boolean(options?.approvedPlan)
           ? []
           : slimExistingFiles(filesRef.current);
 
@@ -408,6 +437,7 @@ export default function GeneratePage() {
 
       if (phase === 'plan' || phase === 'clarify') {
         setPendingQuestions([]);
+        setQuestionAnswers({});
         if (startFresh || !hasFiles) {
           setFiles([]);
           setHasGeneratedFiles(false);
@@ -432,6 +462,7 @@ export default function GeneratePage() {
         setSummary('');
         setAwaitingApproval(false);
         setPendingQuestions([]);
+        setQuestionAnswers({});
       }
 
       const originalRequestPresets = inferPresetsFromPrompt(
@@ -567,6 +598,7 @@ export default function GeneratePage() {
                   receivedPlan = event.plan;
                   setPendingPlan(event.plan);
                   setPendingQuestions([]);
+                  setQuestionAnswers({});
                   setAwaitingApproval(true);
                 }
                 break;
@@ -578,6 +610,7 @@ export default function GeneratePage() {
                     setLastStackPrompt(text);
                   }
                   setPendingQuestions(event.questions);
+                  setQuestionAnswers({});
                   setAwaitingApproval(false);
                   setPendingPlan(null);
                 }
@@ -603,6 +636,16 @@ export default function GeneratePage() {
           }
         }
 
+        if (phase === 'clarify' || phase === 'plan') {
+          const remainingThinkingTime =
+            MIN_WORKFLOW_THINKING_MS - (Date.now() - workflowStartedAt);
+          if (remainingThinkingTime > 0) {
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, remainingThinkingTime)
+            );
+          }
+        }
+
         const resolvedPhase: WorkflowPhase = receivedPlan
           ? 'plan'
           : receivedQuestions.length
@@ -613,9 +656,8 @@ export default function GeneratePage() {
           let content = assistantText || '';
           if (receivedQuestions.length) {
             content =
-              (content ? content + '\n\n' : '') +
-              '## Clarifying questions\n' +
-              receivedQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+              content ||
+              'Choose one option for each requirement below, or type a custom answer.';
           }
           if (receivedPlan) {
             // Prefer the structured plan body; keep summary as a short lead-in
@@ -714,6 +756,35 @@ export default function GeneratePage() {
     });
   }, [pendingPlan, lastStackPrompt, isGenerating, sendMessage]);
 
+  const submitClarifyingAnswers = useCallback(() => {
+    if (isGenerating || pendingQuestions.length === 0) return;
+
+    const incomplete = pendingQuestions.some((_, index) => {
+      const answer = questionAnswers[index]?.trim() || '';
+      if (!answer) return true;
+      if (answer === 'Change the cloud') return true;
+      if (answer.startsWith('Change the cloud:') && !/\|\s*Hosting:/i.test(answer)) {
+        return true;
+      }
+      if (
+        answer === 'Change the hosting platform' ||
+        answer === 'Change CI/CD' ||
+        answer === 'Another service' ||
+        answer.endsWith(': Other')
+      ) {
+        return true;
+      }
+      return false;
+    });
+    if (incomplete) return;
+
+    const formattedAnswers = formatInterviewAnswers(
+      pendingQuestions,
+      questionAnswers
+    );
+    void sendMessage(formattedAnswers, { phase: 'plan' });
+  }, [isGenerating, pendingQuestions, questionAnswers, sendMessage]);
+
   const handleStop = () => {
     abortController.current?.abort();
     setIsGenerating(false);
@@ -741,6 +812,7 @@ export default function GeneratePage() {
     setGenerationStatus('');
     setPendingPlan(null);
     setPendingQuestions([]);
+    setQuestionAnswers({});
     setLastStackPrompt('');
     lastStackPromptRef.current = '';
     setAwaitingApproval(false);
@@ -936,18 +1008,18 @@ export default function GeneratePage() {
       )}
 
       {hasGeneratedFiles ? (
-        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-white/80 relative overflow-hidden before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_80px,#eeeffc,transparent_72%)] before:pointer-events-none">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-white relative overflow-hidden before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_80px,#eeeffc,transparent_72%)] before:pointer-events-none">
           {/* LEFT — AI Assistant Sidebar */}
           <aside
             style={{ width: isSidebarOpen ? `${leftWidth}px` : '0px' }}
-            className={`shrink-0 flex flex-col gap-3.5 min-h-0 select-none ${isSidebarOpen ? 'opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300`}
+            className={`relative z-10 shrink-0 flex flex-col gap-3.5 min-h-0 select-none ${isSidebarOpen ? 'opacity-100' : 'w-0 opacity-0 overflow-hidden pointer-events-none hidden'} transition-all duration-300`}
           >
             {/* Interactive Chat Log */}
-            <div className="bg-white/80 backdrop-blur-md border border-slate-200/70 rounded-2xl p-4.5 shadow-sm shadow-slate-100/40 flex-1 flex flex-col min-h-0 relative">
-              <div className="flex items-center justify-between mb-3.5 border-b border-slate-100/80 pb-2.5">
+            <div className="bg-white border border-indigo-100 rounded-2xl p-4.5 shadow-sm flex-1 flex flex-col min-h-0 relative">
+              <div className="flex items-center justify-between mb-3.5 border-b border-gray-100 pb-2.5">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-bold text-slate-800 tracking-wider uppercase font-sans">AI Assistant Chat</h3>
-                  <span className="text-[9px] font-bold text-indigo-650 bg-indigo-50 px-2 py-0.5 rounded-full uppercase tracking-wider border border-indigo-100/80">
+                  <h3 className="text-xs font-bold text-gray-900 tracking-wider uppercase font-sans">AI Assistant Chat</h3>
+                  <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase tracking-wider border border-indigo-100">
                     BETA
                   </span>
                 </div>
@@ -981,7 +1053,7 @@ export default function GeneratePage() {
                       <div
                         className={`rounded-2xl px-3.5 py-2.5 leading-relaxed min-w-0 max-w-full overflow-hidden ${
                           m.role === 'user'
-                            ? 'bg-gradient-to-tr from-indigo-600 to-violet-600 text-white rounded-tr-sm shadow-md shadow-indigo-200/40 font-medium'
+                            ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40 font-medium'
                               : m.role === 'system'
                               ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
                                 ? 'bg-rose-50 border border-rose-200/80 text-rose-800 rounded-xl shadow-sm'
@@ -1044,6 +1116,7 @@ export default function GeneratePage() {
                           setAwaitingApproval(false);
                           setPendingPlan(null);
                           setPendingQuestions([]);
+                          setQuestionAnswers({});
                           setLastStackPrompt('');
                           lastStackPromptRef.current = '';
                         }}
@@ -1055,9 +1128,18 @@ export default function GeneratePage() {
                   </div>
                 )}
                 {pendingQuestions.length > 0 && !isGenerating && !awaitingApproval && (
-                  <p className="text-[11px] text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                    Answer the questions above (cloud, compute, CI, environments, etc.), then send — I&apos;ll draft a detailed plan next.
-                  </p>
+                  <ClarifyingInterview
+                    key={pendingQuestions.join('||')}
+                    questions={pendingQuestions}
+                    answers={questionAnswers}
+                    onAnswer={(index, answer) =>
+                      setQuestionAnswers((current) => ({
+                        ...current,
+                        [index]: answer,
+                      }))
+                    }
+                    onSubmit={submitClarifyingAnswers}
+                  />
                 )}
               </div>
               {/* Input section at bottom of chat card */}
@@ -1072,7 +1154,7 @@ export default function GeneratePage() {
                     setPromptVal('');
                   }
                 }}
-                className="mt-3.5 pt-3.5 border-t border-slate-100 relative flex items-center gap-2 bg-slate-50/60 border border-slate-200/80 focus-within:border-indigo-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-100/40 rounded-xl p-2 shrink-0 transition-all duration-200 shadow-inner"
+                className="mt-3.5 pt-3.5 border-t border-gray-100 relative flex items-center gap-2 bg-white border border-gray-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-xl p-2 shrink-0 transition-all duration-200"
               >
                 <input
                   type="text"
@@ -1083,7 +1165,7 @@ export default function GeneratePage() {
                     awaitingApproval
                       ? 'Describe plan changes…'
                       : pendingQuestions.length
-                        ? 'Answer the questions…'
+                        ? 'Type your choices or your own answer…'
                         : 'Ask for changes...'
                   }
                   className="flex-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none pl-2.5 py-1.5 border-0 min-w-0 font-sans"
@@ -1208,7 +1290,7 @@ export default function GeneratePage() {
             </div>
 
             {/* Split View Editor Workspace */}
-            <div className="flex-1 min-h-0 overflow-hidden bg-gray-50 flex flex-col justify-between gap-4">
+            <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col justify-between gap-4">
               <div className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
                 Reviewable infrastructure scaffold — validate and review these files before provisioning. This is not drop-in production code.
               </div>
@@ -1222,8 +1304,8 @@ export default function GeneratePage() {
           </section>
         </div>
       ) : messages.some(m => m.role === 'user') ? (
-        <div className="flex-1 flex flex-col items-center justify-center bg-white p-6 relative overflow-y-auto bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_150px,#eeeffc,transparent_72%)] before:pointer-events-none">
-          <div className="w-full max-w-2xl bg-white/90 backdrop-blur-sm border border-[#E2E8F0] rounded-[28px] shadow-[0_20px_50px_-24px_rgba(37,99,235,0.25)] p-6 sm:p-7 flex flex-col min-h-[380px] max-h-[70vh] relative z-10">
+        <div className="flex-1 flex flex-col items-center justify-center bg-white p-6 relative overflow-y-auto before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_150px,#eeeffc,transparent_72%)] before:pointer-events-none">
+          <div className="w-full max-w-2xl bg-white border border-indigo-100 rounded-[28px] shadow-[0_20px_50px_-24px_rgba(37,99,235,0.25)] p-6 sm:p-7 flex flex-col min-h-[380px] max-h-[70vh] relative z-10">
             <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-4 mb-4 pr-1 min-w-0">
               {messages.map((m, idx) => (
                 <div
@@ -1299,6 +1381,7 @@ export default function GeneratePage() {
                         setAwaitingApproval(false);
                         setPendingPlan(null);
                         setPendingQuestions([]);
+                        setQuestionAnswers({});
                         setLastStackPrompt('');
                         lastStackPromptRef.current = '';
                       }}
@@ -1310,9 +1393,18 @@ export default function GeneratePage() {
                 </div>
               )}
               {pendingQuestions.length > 0 && !isGenerating && !awaitingApproval && (
-                <p className="text-[11px] text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
-                  Answer the questions above, then send — I&apos;ll draft a detailed plan next.
-                </p>
+                <ClarifyingInterview
+                  key={pendingQuestions.join('||')}
+                  questions={pendingQuestions}
+                  answers={questionAnswers}
+                  onAnswer={(index, answer) =>
+                    setQuestionAnswers((current) => ({
+                      ...current,
+                      [index]: answer,
+                    }))
+                  }
+                  onSubmit={submitClarifyingAnswers}
+                />
               )}
               <div ref={chatEndRef} />
             </div>
@@ -1327,34 +1419,27 @@ export default function GeneratePage() {
                   });
                 }
               }}
-              className={`relative bg-white border border-gray-200 shadow-sm focus-within:shadow-md p-2 pl-5 flex items-end gap-3 transition-all ${
-                pendingQuestions.length ? 'rounded-2xl' : 'rounded-full'
-              }`}
+              className="relative rounded-full bg-white border border-gray-200 shadow-[0_8px_30px_rgba(37,99,235,0.08)] focus-within:border-indigo-400 focus-within:shadow-[0_10px_36px_rgba(37,99,235,0.12)] focus-within:ring-2 focus-within:ring-indigo-100 p-2 pl-5 flex items-center gap-3 transition-all"
             >
-              <textarea
-                className="flex-1 resize-none bg-transparent text-[15px] leading-relaxed text-gray-900 placeholder-gray-400 focus:outline-none py-2.5 border-0 min-w-0 font-sans"
+              <input
+                type="text"
+                className="flex-1 bg-transparent text-[15px] leading-relaxed text-gray-900 placeholder-gray-400 focus:outline-none py-2.5 border-0 min-w-0 font-sans"
                 placeholder={
                   awaitingApproval
                     ? 'Describe plan changes, then send…'
                     : pendingQuestions.length
-                      ? 'Answer the questions…'
+                      ? 'Or type an extra note…'
                       : 'Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS'
                 }
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    e.currentTarget.form?.requestSubmit();
-                  }
-                }}
-                rows={pendingQuestions.length ? 3 : 1}
                 disabled={isGenerating}
               />
               <button
                 type="submit"
-                className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors shrink-0 cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white hover:from-indigo-700 hover:to-violet-700 transition-all shrink-0 cursor-pointer shadow-sm disabled:opacity-40 disabled:pointer-events-none"
                 disabled={isGenerating || input.trim().length < 1}
+                aria-label="Send"
               >
                 <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
@@ -1364,7 +1449,7 @@ export default function GeneratePage() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col bg-white overflow-hidden relative bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px] before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_150px,#eeeffc,transparent_72%)] before:pointer-events-none">
+        <div className="flex-1 flex flex-col bg-white overflow-hidden relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_150px,#eeeffc,transparent_72%)] before:pointer-events-none">
           <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 pb-16 pt-24 w-full">
             <div className="flex flex-col items-center text-center w-full px-2">
               {/* Messaging icon — white tile + blue outlined bubble with 3 text lines */}
@@ -1409,7 +1494,7 @@ export default function GeneratePage() {
                   />
                   <button
                     type="submit"
-                    className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors shrink-0 cursor-pointer disabled:opacity-40 disabled:pointer-events-none"
+                    className="w-10 h-10 flex items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 text-white hover:from-indigo-700 hover:to-violet-700 transition-all shrink-0 cursor-pointer shadow-sm disabled:opacity-40 disabled:pointer-events-none"
                     disabled={isGenerating || input.trim().length < 1}
                     aria-label="Send"
                   >
