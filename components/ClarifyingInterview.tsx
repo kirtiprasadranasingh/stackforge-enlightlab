@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import {
   HOSTING_OPTIONS_BY_CLOUD,
   adaptClarifyingQuestions,
+  baseCloudFromSetupQuestion,
   cloudFromInterviewAnswer,
 } from '@/lib/clarifying-questions';
 
@@ -237,6 +238,13 @@ export function ClarifyingInterview({
   const isCiChange = selectedOption === 'Change CI/CD';
   const isDataOther = selectedOption === 'Another service';
 
+  // Keep 'Change the hosting platform' within the cloud proposed in question 1
+  // so we never mix, e.g., Oracle OKE compute with a Google Cloud SQL database.
+  const baseCloud = baseCloudFromSetupQuestion(effectiveQuestions[0]);
+  const hostingChangeOptions = baseCloud
+    ? HOSTING_OPTIONS_BY_CLOUD[baseCloud]
+    : ALL_HOSTING_OPTIONS;
+
   const cloudChoice = isCloudChange
     ? CLOUD_FOLLOW_UP.options.find((option) => option === followUpPrimary) ||
       null
@@ -244,7 +252,7 @@ export function ClarifyingInterview({
   const hostingChoice = isCloudChange
     ? followUpHosting || null
     : isHostingChange
-      ? ALL_HOSTING_OPTIONS.find((option) => option === followUpPrimary) || null
+      ? hostingChangeOptions.find((option) => option === followUpPrimary) || null
       : null;
   const ciChoice = isCiChange
     ? CI_FOLLOW_UP.options.find((option) => option === followUpPrimary) || null
@@ -466,8 +474,8 @@ export function ClarifyingInterview({
           {isHostingChange && (
             <FollowUpPanel
               prompt="Which hosting platform do you want instead?"
-              hint="Pick one option below, then continue."
-              options={ALL_HOSTING_OPTIONS}
+              hint="These stay on your selected cloud. To use a different cloud, go back and pick 'Change the cloud'."
+              options={hostingChangeOptions}
               selected={hostingChoice}
               disabled={disabled}
               onSelect={selectHostingFollowUp}

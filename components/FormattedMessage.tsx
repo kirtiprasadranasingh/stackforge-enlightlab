@@ -71,7 +71,7 @@ export function FormattedMessage({ content, className }: FormattedMessageProps) 
             <div key={idx} className="flex items-start gap-2 pl-0.5">
               <span
                 className={`shrink-0 font-semibold tabular-nums w-4 text-right ${
-                  isUserBubble ? 'text-white/80' : 'text-indigo-600'
+                  isUserBubble ? 'text-white' : 'text-indigo-600'
                 }`}
               >
                 {numbered[1]}.
@@ -90,7 +90,7 @@ export function FormattedMessage({ content, className }: FormattedMessageProps) 
             <div key={idx} className="flex items-start gap-2 pl-1">
               <span
                 className={`mt-1.5 shrink-0 w-1.5 h-1.5 rounded-full ${
-                  isUserBubble ? 'bg-white/80' : 'bg-indigo-500'
+                  isUserBubble ? 'bg-white' : 'bg-indigo-500'
                 }`}
               />
               <span className="flex-1 min-w-0">
@@ -132,7 +132,7 @@ function parseInlineParts(text: string, isUserBubble?: boolean): React.ReactNode
           key={pIdx}
           className={`text-[11px] px-1 py-0.5 rounded font-mono ${
             isUserBubble
-              ? 'bg-white/20 text-white'
+              ? 'bg-white/25 text-white'
               : 'bg-slate-100 text-slate-800 border border-slate-200/80'
           }`}
         >
@@ -141,14 +141,17 @@ function parseInlineParts(text: string, isUserBubble?: boolean): React.ReactNode
       );
     }
     if (/^[A-Z][A-Z0-9_]{2,}$/.test(part)) {
+      if (isUserBubble) {
+        return (
+          <span key={pIdx} className="font-semibold text-white">
+            {part}
+          </span>
+        );
+      }
       return (
         <code
           key={pIdx}
-          className={`text-[11px] px-1 py-0.5 rounded font-mono ${
-            isUserBubble
-              ? 'bg-white/15 text-white/95'
-              : 'bg-slate-100 text-slate-700 border border-slate-200/80'
-          }`}
+          className="text-[11px] px-1 py-0.5 rounded font-mono bg-slate-100 text-slate-700 border border-slate-200/80"
         >
           {part}
         </code>

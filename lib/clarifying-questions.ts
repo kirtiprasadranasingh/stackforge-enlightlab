@@ -88,6 +88,23 @@ export function cloudFromInterviewAnswer(
 }
 
 /**
+ * Detect the cloud proposed in the first "Does this setup match…" question so
+ * that a "Change the hosting platform" follow-up can stay within that cloud.
+ */
+export function baseCloudFromSetupQuestion(
+  question: string | undefined
+): Presets['cloud'] | null {
+  if (!question) return null;
+  const lower = question.toLowerCase();
+  // Order matters: check the more specific labels first.
+  if (lower.includes('oracle cloud infrastructure')) return 'oracle';
+  if (lower.includes('microsoft azure')) return 'azure';
+  if (lower.includes('google cloud')) return 'gcp';
+  if (lower.includes('aws')) return 'aws';
+  return null;
+}
+
+/**
  * Keep later questions aligned with earlier choices (e.g. region list matches
  * the cloud the client picked in a "Change the cloud" follow-up).
  */
