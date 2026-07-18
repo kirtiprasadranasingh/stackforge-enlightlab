@@ -90,26 +90,23 @@ function tokenFontStyle(fontStyle: number): string {
   return parts.join(';');
 }
 
-/** One highlighted HTML string per source line — keeps gutter in lockstep. */
-async function highlightByLine(
-  lines: string[],
+/** Highlights the entire code block and returns an array of HTML lines. */
+async function highlightCode(
+  code: string,
   lang: string,
   theme: string
 ): Promise<string[]> {
-  const out: string[] = [];
-  for (const line of lines) {
-    try {
-      const result = await codeToTokens(line.length ? line : ' ', {
-        lang: lang as 'go',
-        theme: theme as 'dark-plus',
-      });
-      const first = result.tokens[0];
-      out.push(first?.length ? tokensToLineHtml(first) : line.length ? escapeHtml(line) : '&nbsp;');
-    } catch {
-      out.push(line.length ? escapeHtml(line) : '&nbsp;');
-    }
+  try {
+    const result = await codeToTokens(code.length ? code : ' ', {
+      lang: lang as 'go',
+      theme: theme as 'dark-plus',
+    });
+    return result.tokens.map((lineTokens) =>
+      lineTokens.length ? tokensToLineHtml(lineTokens) : '&nbsp;'
+    );
+  } catch {
+    return code.split('\n').map((line) => (line.length ? escapeHtml(line) : '&nbsp;'));
   }
-  return out;
 }
 
 export function CodeBlock({ code, language, path, theme = 'dark' }: CodeBlockProps) {
@@ -121,16 +118,18 @@ export function CodeBlock({ code, language, path, theme = 'dark' }: CodeBlockPro
 
   useEffect(() => {
     let cancelled = false;
-    setLineHtml(null);
+    Promise.resolve().then(() => {
+      if (!cancelled) setLineHtml(null);
+    });
 
-    void highlightByLine(lines, lang, shikiTheme).then((html) => {
+    void highlightCode(normalized, lang, shikiTheme).then((html) => {
       if (!cancelled) setLineHtml(html);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [lines, lang, shikiTheme]);
+  }, [normalized, lang, shikiTheme]);
 
   const isLight = theme === 'light';
   const bg = isLight ? 'bg-white' : 'bg-[#1e1e1e]';

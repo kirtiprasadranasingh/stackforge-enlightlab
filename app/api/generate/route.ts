@@ -26,6 +26,7 @@ import {
   isFullStackPrompt,
   isIterativeEditPrompt,
   requiresPlanApproval,
+  isConversationalPrompt,
 } from '@/lib/stack-intent';
 import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import {
@@ -487,6 +488,25 @@ export async function POST(request: NextRequest) {
         'Rate limit exceeded. Please try again later.',
         rateLimitResult.remaining
       );
+    }
+
+    if (isConversationalPrompt(prompt)) {
+      const CONVERSATIONAL_SYSTEM_PROMPT = `You are StackForge, a helpful AI cloud architect assistant.
+The user is having a casual conversation with you (saying hello, thanking you, or indicating that everything looks good).
+Politely respond to the user's message in a helpful, conversational manner.
+Do NOT generate any code, files, or <<<FILE>>> / <<<DELETE>>> markers. Just chat with the user.
+Always format your response by wrapping the chat reply in the following markers:
+<<<SUMMARY>>>
+[Your conversational reply here]
+<<<WARNINGS>>>
+[]
+`;
+      return streamPlanningPhase({
+        cors,
+        systemPrompt: CONVERSATIONAL_SYSTEM_PROMPT,
+        userPrompt: prompt,
+        statusMessage: 'Chatting…',
+      });
     }
 
     const gated = requiresPlanApproval(prompt, existingFiles.length > 0);

@@ -1042,11 +1042,15 @@ export default function GeneratePage() {
                     key={m.id || idx}
                     className={`flex gap-2.5 items-start min-w-0 ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}
                   >
-                    {m.role !== 'user' && (
-                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center text-white shrink-0 shadow-sm border border-indigo-200/20 select-none ring-2 ring-indigo-50">
+                    {m.role !== 'user' ? (
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center text-white shrink-0 shadow-sm border border-indigo-200/20 select-none ring-2 ring-indigo-50" aria-hidden>
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
                         </svg>
+                      </div>
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-[#4F46E5] flex items-center justify-center text-white shrink-0 shadow-sm text-[10px] font-extrabold font-sans tracking-wide select-none" aria-hidden>
+                        US
                       </div>
                     )}
                     <div className={`min-w-0 flex flex-col ${m.role === 'user' ? 'max-w-[88%] items-end' : 'max-w-[88%]'}`}>
@@ -1154,7 +1158,7 @@ export default function GeneratePage() {
                     setPromptVal('');
                   }
                 }}
-                className="mt-3.5 pt-3.5 border-t border-gray-100 relative flex items-center gap-2 bg-white border border-gray-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-xl p-2 shrink-0 transition-all duration-200"
+                className="mt-3.5 pt-3.5 border-t border-gray-100 relative flex items-center gap-2 bg-white border border-gray-200 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 rounded-full p-2 pl-4 shrink-0 transition-all duration-200 shadow-[0_4px_12px_rgba(37,99,235,0.04)] focus-within:shadow-[0_6px_20px_rgba(37,99,235,0.08)]"
               >
                 <input
                   type="text"
@@ -1168,12 +1172,12 @@ export default function GeneratePage() {
                         ? 'Type your choices or your own answer…'
                         : 'Ask for changes...'
                   }
-                  className="flex-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none pl-2.5 py-1.5 border-0 min-w-0 font-sans"
+                  className="flex-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none pl-1 py-1.5 border-0 min-w-0 font-sans"
                 />
                 <button
                   type="submit"
                   disabled={isGenerating || !promptVal.trim()}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white transition-all shrink-0 cursor-pointer shadow-xs disabled:opacity-40 disabled:pointer-events-none active:scale-95"
+                  className="w-8 h-8 flex items-center justify-center rounded-full bg-gradient-to-tr from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white transition-all shrink-0 cursor-pointer shadow-xs disabled:opacity-40 disabled:pointer-events-none active:scale-95"
                   title="Send message"
                 >
                   <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
@@ -1313,7 +1317,7 @@ export default function GeneratePage() {
                   className={`w-full flex gap-2.5 min-w-0 ${m.role === 'user' ? 'justify-end' : 'justify-start'} items-start`}
                 >
                   {m.role !== 'user' && (
-                    <div className="w-7 h-7 rounded-full bg-[#4F46E5] flex items-center justify-center text-white shrink-0 shadow-sm select-none">
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center text-white shrink-0 shadow-sm border border-indigo-200/20 select-none ring-2 ring-indigo-50">
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 21l8.982-11.795H13.62l1.382-7.205L6 13.795h5.196l-.383 2.11z" />
                       </svg>
@@ -1323,10 +1327,10 @@ export default function GeneratePage() {
                     <div
                       className={`rounded-2xl px-4 py-2.5 min-w-0 max-w-full overflow-hidden ${
                         m.role === 'user'
-                          ? 'bg-[#4F46E5] text-white rounded-tr-md shadow-md shadow-indigo-200/40'
+                          ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40'
                           : m.role === 'system'
                             ? 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl'
-                            : 'bg-white border border-[#E2E8F0] text-[#0F172A] rounded-tl-md shadow-sm'
+                            : 'bg-white border border-[#E2E8F0] text-[#0F172A] rounded-tl-sm shadow-sm'
                       }`}
                     >
                       <FormattedMessage
@@ -1419,7 +1423,7 @@ export default function GeneratePage() {
                   });
                 }
               }}
-              className="relative rounded-full bg-white border border-gray-200 shadow-[0_8px_30px_rgba(37,99,235,0.08)] focus-within:border-indigo-400 focus-within:shadow-[0_10px_36px_rgba(37,99,235,0.12)] focus-within:ring-2 focus-within:ring-indigo-100 p-2 pl-5 flex items-center gap-3 transition-all"
+              className="relative rounded-full bg-white border border-gray-200 shadow-[0_8px_30px_rgba(37,99,235,0.08)] focus-within:border-indigo-400 focus-within:shadow-[0_10px_36px_rgba(37,99,235,0.12)] focus-within:ring-2 focus-within:ring-indigo-100 p-2 pl-6 flex items-center gap-3 transition-all"
             >
               <input
                 type="text"
@@ -1482,7 +1486,7 @@ export default function GeneratePage() {
                       void sendMessage(input);
                     }
                   }}
-                  className="mt-9 w-full relative rounded-full bg-white border border-gray-200/90 shadow-[0_8px_30px_rgba(37,99,235,0.08)] focus-within:shadow-[0_10px_36px_rgba(37,99,235,0.12)] p-2 pl-6 flex items-center gap-3 transition-shadow"
+                  className="mt-9 w-full relative rounded-full bg-white border border-gray-200 shadow-[0_8px_30px_rgba(37,99,235,0.08)] focus-within:border-indigo-400 focus-within:shadow-[0_10px_36px_rgba(37,99,235,0.12)] focus-within:ring-2 focus-within:ring-indigo-100 p-2 pl-6 flex items-center gap-3 transition-all duration-200"
                 >
                   <input
                     className="flex-1 bg-transparent text-[15px] text-gray-900 placeholder-gray-400 focus:outline-none py-2.5 border-0 min-w-0 font-sans"
