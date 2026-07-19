@@ -76,7 +76,54 @@ function patchTerraform(content: string): string {
     '$1.status[0].url'
   );
 
+  // 4. GKE Workload Identity: the google provider v5 renamed the
+  //    workload_identity_config argument `identity_namespace` to `workload_pool`.
+  //    It is a google-only attribute, so a bare rename is safe.
+  out = out.replace(/\bidentity_namespace(\s*=)/g, 'workload_pool$1');
+
+  // 5. GKE Autopilot clusters reject node-count fields. Within any
+  //    google_container_cluster block that enables Autopilot, drop
+  //    initial_node_count (the common `terraform plan` blocker). The block
+  //    matcher stops at the first column-0 `}`, i.e. the resource's own close.
+  out = out.replace(
+    /resource\s+"google_container_cluster"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) =>
+      /enable_autopilot\s*=\s*true/.test(block)
+        ? block.replace(/^[ \t]*initial_node_count\s*=.*\r?\n/gm, '')
+        : block
+  );
+
   return out;
+}
+
+/**
+ * If a non-root USER is declared before dependencies are installed, pip/npm
+ * cannot write to system locations and the image build fails. Relocate a single
+ * premature USER instruction to just before the app runs (CMD/ENTRYPOINT), so
+ * installs run as root while the runtime stays non-root.
+ */
+function patchDockerfileUser(content: string): string {
+  const lines = content.split('\n');
+  const userIdx = lines.findIndex((l) => /^\s*USER\s+\S+/i.test(l));
+  if (userIdx === -1) return content;
+
+  const installIdx = lines.findIndex((l) =>
+    /^\s*RUN\b.*\b(pip\s+install|apt-get\s+install|apk\s+add|npm\s+(ci|install)|yarn\s+(add|install)|pnpm\s+(add|install)|gem\s+install|go\s+(build|install)|mvn\b|gradle\b)/i.test(
+      l
+    )
+  );
+  // Only intervene in the failure mode: USER declared before an install step.
+  if (installIdx === -1 || userIdx > installIdx) return content;
+
+  const userLine = lines[userIdx].trim();
+  const remaining = lines.filter((_, i) => i !== userIdx);
+  const cmdIdx = remaining.findIndex((l) => /^\s*(CMD|ENTRYPOINT)\b/i.test(l));
+  if (cmdIdx === -1) {
+    remaining.push(userLine);
+  } else {
+    remaining.splice(cmdIdx, 0, userLine);
+  }
+  return remaining.join('\n');
 }
 
 export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null {
@@ -86,6 +133,7 @@ export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null
   let content = file.content;
   if (path === 'Dockerfile') {
     content = patchDockerfileForRoot(content);
+    content = patchDockerfileUser(content);
   }
   if (path === 'azure-pipelines.yml') {
     content = patchPipelineForRoot(content);

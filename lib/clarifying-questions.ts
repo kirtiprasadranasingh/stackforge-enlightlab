@@ -176,8 +176,23 @@ function detectRuntime(prompt: string): string | null {
   return null;
 }
 
+/**
+ * True when the prompt explicitly rules out persistence, e.g. "no database",
+ * "without a db", "stateless". Prevents the interview from asking how to
+ * configure a database that the user said they don't want.
+ */
+function hasNoDataSignal(prompt: string): boolean {
+  const text = prompt.toLowerCase();
+  return (
+    /\bno\s+(database|db|data\s*(?:store|base)?|persistence|storage)\b/.test(text) ||
+    /\bwithout\s+(a\s+)?(database|db|data\s*store|persistence)\b/.test(text) ||
+    /\bstateless\b/.test(text)
+  );
+}
+
 function detectDatabase(prompt: string): string | null {
   const text = prompt.toLowerCase();
+  if (hasNoDataSignal(prompt)) return null;
   if (/\b(postgresql|postgres|rds postgres)\b/.test(text)) return 'PostgreSQL';
   if (/\b(mysql|mariadb)\b/.test(text)) return 'MySQL';
   if (/\b(mongodb|mongo)\b/.test(text)) return 'MongoDB';
@@ -249,6 +264,7 @@ export function buildClarifyingQuestions(
   presets: Presets
 ): string[] {
   const runtime = detectRuntime(prompt);
+  const noData = hasNoDataSignal(prompt);
   const database = detectDatabase(prompt);
   const environments = detectEnvironments(prompt);
   const target = `${CLOUD_LABELS[presets.cloud]} with ${
@@ -274,7 +290,10 @@ export function buildClarifyingQuestions(
     questions.push(
       `How should ${database} be configured? (options: Standard private database / High availability / Private database with 7-day automatic backups)`
     );
-  } else {
+  } else if (!noData) {
+    // Only ask about data when the user hasn't already ruled it out. When the
+    // prompt says "no database", we skip this entirely so the scaffold stays
+    // stateless and Q1 never tacks on "and the database".
     questions.push(
       'Does the service need stored data or a cache? (options: No data service / PostgreSQL / MySQL / Redis cache / Another service)'
     );

@@ -819,7 +819,7 @@ Always format your response by wrapping the chat reply in the following markers:
           } else {
             if (collectedFiles.length > 0) {
               const currentFiles = [...collectedFiles];
-              const MAX_VALIDATION_ATTEMPTS = 2; // 1 validate + up to 1 auto-repair pass
+              const MAX_VALIDATION_ATTEMPTS = 4; // 1 validate + up to 3 auto-repair passes (terraform surfaces errors in waves)
               let attempts = 0;
               let passed = false;
               let reportText = "";
