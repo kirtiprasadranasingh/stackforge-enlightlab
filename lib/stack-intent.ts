@@ -98,23 +98,29 @@ export function isConversationalPrompt(prompt: string): boolean {
 
   const genericQuestions = [
     'how are you', 'how is it going', 'how goes it', 'who are you', 'what is this', 
-    'what can you do', 'what are you', 'how do you work'
+    'what can you do', 'what are you', 'how do you work', 'what are your capabilities',
+    'what can you help with', 'what do you do', 'help', 'what should i say'
   ];
   if (genericQuestions.includes(lower)) return true;
 
-  const words = lower.split(/\s+/);
-  if (words.length <= 3) {
-    const actionKeywords = [
-      'add', 'update', 'fix', 'change', 'harden', 'secure', 'wire', 'include', 'remove', 
-      'delete', 'rename', 'move', 'terraform', 'yaml', 'manifest', 'code', 'blueprint', 
-      'helm', 'dockerfile', 'docker', 'kubernetes', 'k8s', 'pipeline', 'deployment',
-      'service', 'db', 'database', 'postgres', 'aws', 'gcp', 'azure', 'oci', 'oracle',
-      'eks', 'gke', 'aks', 'oke', 'ecs'
-    ];
-    const hasAction = words.some(w => actionKeywords.includes(w));
-    if (!hasAction) return true;
-  }
+  // Use the ORIGINAL (unstripped) prompt for signal detection so we keep
+  // punctuation-sensitive tokens like "ci/cd" and "node.js".
+  const raw = prompt.toLowerCase();
 
-  return false;
+  // Any concrete infrastructure signal means this is a real request, not chit-chat.
+  const infraSignal =
+    /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s|terraform|helm|dockerfile|docker|pipeline|ci\s*\/?\s*cd|gitlab|github\s*actions|jenkins|circleci|microservice|micro-?service|backend|frontend|serverless|cluster|ingress|autoscal|replica|hpa|nsg|vpc|subnet|load\s*balancer|database|postgres|postgresql|mysql|mongo|mongodb|redis|dynamodb|graphql|rest\s*api|\bapi\b|manifest|scaffold|provision|infrastructure|infra\b|node\.?js|nextjs|next\.js|python|fastapi|django|flask|golang|\bjava\b|spring|\.net|dotnet|express|nestjs|rails|\bphp\b|laravel)\b/;
+  if (infraSignal.test(raw)) return false;
+
+  // Explicit build/edit commands (even without a named technology) are requests.
+  const commandVerb =
+    /^(add|update|fix|change|remove|delete|rename|move|create|generate|build|make|set\s*up|setup|deploy|scaffold|provision|harden|secure|wire|include|configure|refactor|optimize|design)\b/;
+  if (commandVerb.test(lower)) return false;
+
+  // No infrastructure signal and no build/edit command → treat as general
+  // conversation (capabilities, identity, small talk, off-topic questions).
+  // This keeps the assistant from inventing an AWS/EKS interview for prompts
+  // the user never framed as an infrastructure request.
+  return true;
 }
 
