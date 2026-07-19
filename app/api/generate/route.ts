@@ -131,8 +131,10 @@ async function streamPlanningPhase(params: {
   systemPrompt: string;
   userPrompt: string;
   statusMessage: string;
+  /** Casual chat: only emit a summary reply, never questions or a plan. */
+  conversational?: boolean;
 }): Promise<NextResponse> {
-  const { cors, systemPrompt, userPrompt, statusMessage } = params;
+  const { cors, systemPrompt, userPrompt, statusMessage, conversational } = params;
   const stream = new ReadableStream({
     async start(controller) {
       const parseState = createParseState();
@@ -196,7 +198,7 @@ async function streamPlanningPhase(params: {
         }
 
         // Fallback: treat whole response as plan if markers missing but content looks like a plan
-        if (!planSent && !questionsSent && fullText.trim().length > 80) {
+        if (!conversational && !planSent && !questionsSent && fullText.trim().length > 80) {
           const cleaned = fullText
             .replace(/<<<FILE[\s\S]*?<<<END_FILE>>>/g, '')
             .replace(/<<<[^>]+>>>/g, '')
@@ -220,14 +222,21 @@ async function streamPlanningPhase(params: {
         }
 
         if (!summarySent) {
+          const conversationalReply = fullText
+            .replace(/<<<[^>]+>>>/g, '')
+            .replace(/\[\s*\]/g, '')
+            .trim();
           controller.enqueue(
             sse({
               type: 'summary',
-              summary: planSent
-                ? 'Review the plan below. Approve to generate files, or reply with changes to revise it.'
-                : questionsSent
-                  ? 'Pick an option for each question above (or type your own) so I can draft a concrete plan.'
-                  : 'Could not draft a plan — try a clearer stack description.',
+              summary: conversational
+                ? conversationalReply ||
+                  "I'm here to help you scaffold cloud infrastructure. Describe the stack you want and I'll draft a plan."
+                : planSent
+                  ? 'Review the plan below. Approve to generate files, or reply with changes to revise it.'
+                  : questionsSent
+                    ? 'Pick an option for each question above (or type your own) so I can draft a concrete plan.'
+                    : 'Could not draft a plan — try a clearer stack description.',
             })
           );
         }
@@ -506,6 +515,7 @@ Always format your response by wrapping the chat reply in the following markers:
         systemPrompt: CONVERSATIONAL_SYSTEM_PROMPT,
         userPrompt: prompt,
         statusMessage: 'Chatting…',
+        conversational: true,
       });
     }
 

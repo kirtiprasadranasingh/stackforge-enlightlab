@@ -436,10 +436,17 @@ export function ClarifyingInterview({
           Got it — preparing the next question…
         </div>
       ) : (
-        <fieldset className="min-w-0 rounded-2xl border border-gray-200 bg-gray-50/50 p-3.5">
-          <legend className="max-w-full px-1 text-[13px] font-semibold leading-relaxed text-gray-900">
+        <div
+          role="group"
+          aria-labelledby="clarify-current-question"
+          className="min-w-0 rounded-2xl border border-gray-200 bg-gray-50/50 p-3.5"
+        >
+          <p
+            id="clarify-current-question"
+            className="min-w-0 break-words text-[13px] font-semibold leading-relaxed text-gray-900"
+          >
             {prompt}
-          </legend>
+          </p>
 
           <OptionCards
             options={options}
@@ -549,7 +556,7 @@ export function ClarifyingInterview({
                 className="mt-3 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
             )}
-        </fieldset>
+        </div>
       )}
 
       <div className="flex gap-2">
