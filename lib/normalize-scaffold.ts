@@ -44,6 +44,41 @@ function patchPipelineForRoot(content: string): string {
     .replace(/go-backend\//g, '');
 }
 
+/**
+ * Deterministically repair recurring Terraform mistakes that hard-block
+ * `terraform validate`, so we don't depend on the model getting them right.
+ * Each rule is scoped tightly to avoid touching otherwise-valid config.
+ */
+function patchTerraform(content: string): string {
+  let out = content;
+
+  // 1. depends_on cannot contain indexed/expression references. Strip
+  //    [each.key] / [each.value] / [count.index] used inside a depends_on list.
+  //    The array matcher tolerates one level of nested [...] index brackets.
+  out = out.replace(
+    /depends_on\s*=\s*\[(?:[^[\]]|\[[^\]]*\])*\]/g,
+    (block) =>
+      block.replace(/\[\s*(?:each\.key|each\.value|count\.index)\s*\]/g, '')
+  );
+
+  // 2. google_secret_manager_secret: the google provider v5 line removed the
+  //    boolean `automatic = true` in favor of an `auto {}` block.
+  out = out.replace(
+    /replication\s*\{\s*automatic\s*=\s*true\s*\}/g,
+    'replication {\n    auto {}\n  }'
+  );
+
+  // 3. google_cloud_run_service (v1) exposes status[0].url, not .uri (.uri is a
+  //    v2-only attribute). Rewrite v1 references; the pattern never matches
+  //    google_cloud_run_v2_service.
+  out = out.replace(
+    /(google_cloud_run_service\.[A-Za-z0-9_]+(?:\[[^\]]*\])?)\.uri\b/g,
+    '$1.status[0].url'
+  );
+
+  return out;
+}
+
 export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null {
   let path = canonicalPath(file.path);
   if (!validateFilePath(path)) return null;
@@ -54,6 +89,9 @@ export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null
   }
   if (path === 'azure-pipelines.yml') {
     content = patchPipelineForRoot(content);
+  }
+  if (path.endsWith('.tf')) {
+    content = patchTerraform(content);
   }
 
   const language =

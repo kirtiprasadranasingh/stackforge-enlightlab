@@ -819,11 +819,12 @@ Always format your response by wrapping the chat reply in the following markers:
           } else {
             if (collectedFiles.length > 0) {
               const currentFiles = [...collectedFiles];
+              const MAX_VALIDATION_ATTEMPTS = 2; // 1 validate + up to 1 auto-repair pass
               let attempts = 0;
               let passed = false;
               let reportText = "";
 
-              while (attempts < 1) {
+              while (attempts < MAX_VALIDATION_ATTEMPTS) {
                 attempts++;
                 let tempDir = "";
                 try {
@@ -838,7 +839,7 @@ Always format your response by wrapping the chat reply in the following markers:
                   let code = 0;
                   let output = "";
                   try {
-                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: 12000 });
+                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: 60000 });
                     code = 0;
                     output = stdout + stderr;
                   } catch (err: unknown) {
@@ -865,14 +866,15 @@ Always format your response by wrapping the chat reply in the following markers:
                     break;
                   }
 
-                  if (attempts === 1) {
+                  if (attempts >= MAX_VALIDATION_ATTEMPTS) {
+                    // Out of repair budget — ship with the README warning appended below.
                     passed = false;
                     break;
                   }
 
-                  controller.enqueue(sse({ type: 'status', message: `Validator flagged issues. Auto-resolving (attempt ${attempts}/1)…` }));
+                  controller.enqueue(sse({ type: 'status', message: `Validator flagged issues — auto-resolving (pass ${attempts}/${MAX_VALIDATION_ATTEMPTS - 1})…` }));
 
-                  const fixPrompt = `The following files failed validation:\n${failLines.join('\n')}\n\nFix only these specific issues in the affected files and return the corrected versions — do not regenerate unaffected files.`;
+                  const fixPrompt = `Static validation FAILED for the generated scaffold. Fix ONLY the issues below and return the corrected full file(s). Do not regenerate unaffected files, and do not change the cloud, region, environments, or architecture from the approved plan:\n\n${failLines.join('\n')}`;
                   const fixPromptText = formatFollowUpPrompt({
                     message: fixPrompt,
                     presets,
@@ -886,7 +888,10 @@ Always format your response by wrapping the chat reply in the following markers:
                   const parseStateFix = createParseState();
                   const parsedFix = appendAndParse(parseStateFix, fixText);
                   const finalParsedFix = appendAndParse(parseStateFix, '', true);
-                  const correctedFiles = [...parsedFix.files, ...finalParsedFix.files];
+                  const correctedFiles = normalizeScaffoldFiles([
+                    ...parsedFix.files,
+                    ...finalParsedFix.files,
+                  ]);
 
                   if (correctedFiles.length > 0) {
                     for (const file of correctedFiles) {

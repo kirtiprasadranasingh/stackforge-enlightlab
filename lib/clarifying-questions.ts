@@ -199,6 +199,48 @@ function detectEnvironments(prompt: string): string[] {
 }
 
 /**
+ * Build the environments question so the exact combination the user asked for is
+ * always the first (default) selectable option. Without this, a "dev + prod"
+ * request could only be answered with "Development and staging", which silently
+ * drops production and adds staging.
+ */
+function buildEnvironmentsQuestion(environments: string[]): string {
+  const titleCase = (value: string) =>
+    value.charAt(0).toUpperCase() + value.slice(1);
+
+  // Human label for a set of environments, e.g. ["development","production"]
+  // -> "Development and production"; three-plus uses Oxford-comma style so it
+  // never collides with the " / " option delimiter.
+  const labelFor = (envs: string[]): string => {
+    const names = envs.map(titleCase);
+    if (names.length <= 1) return names[0] ?? '';
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+  };
+
+  const alternatives = [
+    'Development and staging',
+    'Development, staging, and production',
+  ];
+
+  if (!environments.length) {
+    return `Which environments do you need? (options: One environment / ${alternatives.join(
+      ' / '
+    )})`;
+  }
+
+  const detectedLabel = labelFor(environments);
+  const options = [detectedLabel, ...alternatives].filter(
+    (option, index, all) =>
+      all.findIndex((o) => o.toLowerCase() === option.toLowerCase()) === index
+  );
+
+  return `You mentioned ${environments.join(
+    ' and '
+  )}. Which environments do you need? (options: ${options.join(' / ')})`;
+}
+
+/**
  * Build a reliable first-round client interview without depending on streamed
  * model JSON. Presets have already been reconciled with explicit prompt terms.
  */
@@ -224,11 +266,7 @@ export function buildClarifyingQuestions(
       details.length ? `, using ${details.join(' and ')}` : ''
     }? (options: Yes, use this setup / Change the cloud / Change the hosting platform / Change CI/CD)`,
     `Where should we host it? (options: ${regionOptions})`,
-    environments.length
-      ? `You mentioned ${environments.join(
-          ' and '
-        )}. Which environments do you need? (options: Staging only / Development and staging / Development, staging, and production)`
-      : 'Which environments do you need? (options: One environment / Development and staging / Development, staging, and production)',
+    buildEnvironmentsQuestion(environments),
     'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
   ];
 
