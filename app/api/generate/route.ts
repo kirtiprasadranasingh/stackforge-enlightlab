@@ -571,6 +571,13 @@ Always format your response by wrapping the chat reply in the following markers:
         const collectedFiles: GeneratedFile[] = [];
         let anyOutput = false;
 
+        // Wall-clock budget so post-generation work (missing-file completion +
+        // validate/repair) never runs past the serverless function limit and
+        // leaves the client spinner hanging. Leave a margin to flush the stream.
+        const requestStartedAt = Date.now();
+        const HARD_DEADLINE_MS = (maxDuration - 20) * 1000;
+        const timeLeftMs = () => HARD_DEADLINE_MS - (Date.now() - requestStartedAt);
+
         try {
           if (isFreshGen && existingFiles.length > 0) {
             controller.enqueue(sse({ type: 'clear' }));
@@ -716,6 +723,9 @@ Always format your response by wrapping the chat reply in the following markers:
               const maxCompletionPasses = 3;
 
               while (missing.length > 0 && completionPasses < maxCompletionPasses) {
+                // Stop completing if we can't afford another model round-trip and
+                // still leave room for validation below.
+                if (timeLeftMs() < 60000) break;
                 completionPasses += 1;
                 const batch = missing.slice(0, 8);
                 controller.enqueue(
@@ -819,12 +829,18 @@ Always format your response by wrapping the chat reply in the following markers:
           } else {
             if (collectedFiles.length > 0) {
               const currentFiles = [...collectedFiles];
-              const MAX_VALIDATION_ATTEMPTS = 4; // 1 validate + up to 3 auto-repair passes (terraform surfaces errors in waves)
+              const MAX_VALIDATION_ATTEMPTS = 3; // 1 validate + up to 2 auto-repair passes (bounded by the wall-clock budget below)
               let attempts = 0;
               let passed = false;
               let reportText = "";
 
               while (attempts < MAX_VALIDATION_ATTEMPTS) {
+                // Never start a validate run we don't have time to finish; ship
+                // with the advisory warning instead of hanging past the limit.
+                if (timeLeftMs() < 35000) {
+                  passed = false;
+                  break;
+                }
                 attempts++;
                 let tempDir = "";
                 try {
@@ -836,10 +852,15 @@ Always format your response by wrapping the chat reply in the following markers:
                   }
 
                   const scriptPath = path.join(process.cwd(), 'scripts', 'validate-scaffold.sh');
+                  // Cap the validator so it can't run past our remaining budget.
+                  const validateTimeout = Math.min(
+                    60000,
+                    Math.max(15000, timeLeftMs() - 20000)
+                  );
                   let code = 0;
                   let output = "";
                   try {
-                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: 60000 });
+                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: validateTimeout });
                     code = 0;
                     output = stdout + stderr;
                   } catch (err: unknown) {
@@ -868,6 +889,13 @@ Always format your response by wrapping the chat reply in the following markers:
 
                   if (attempts >= MAX_VALIDATION_ATTEMPTS) {
                     // Out of repair budget — ship with the README warning appended below.
+                    passed = false;
+                    break;
+                  }
+
+                  // A repair pass costs a model round-trip plus another validate.
+                  // If that won't fit, stop now and ship with the warning.
+                  if (timeLeftMs() < 70000) {
                     passed = false;
                     break;
                   }
