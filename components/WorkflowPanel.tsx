@@ -77,32 +77,32 @@ export function WorkflowPanel({
 
   // Cursor-like: show the explorer as soon as the first file streams in
   if (hasFiles && (phase === 'generate' || !draftingPlan)) {
-    const recent = files.slice(-6).reverse();
     return (
-      <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col gap-3">
+      <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col gap-2">
         <div className="shrink-0 space-y-2">
           <WorkflowStepper active={active} />
           {writingCode ? (
-            <div className="rounded-lg border border-indigo-100 bg-indigo-50/80 px-3 py-2.5">
-              <div className="flex items-center gap-2 text-[11px] font-semibold text-indigo-800">
-                <span className="loading-dots" aria-hidden>
-                  <span />
-                  <span />
-                  <span />
-                </span>
-                Writing files to the workspace…
+            <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+              <span
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-indigo-600 text-white"
+                aria-hidden
+              >
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
+                </svg>
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold text-slate-800">
+                  Generating scaffold
+                </p>
+                <p className="text-[11px] font-mono text-slate-500 truncate">
+                  {generationStatus?.replace(/^Writing\s+/i, '') ||
+                    files[files.length - 1]?.path ||
+                    'Streaming files…'}
+                  <span className="text-slate-400"> · {files.length} file{files.length === 1 ? '' : 's'}</span>
+                </p>
               </div>
-              <ul className="mt-2 space-y-1 max-h-24 overflow-y-auto">
-                {recent.map((f) => (
-                  <li
-                    key={f.path}
-                    className="flex items-center gap-2 text-[11px] font-mono text-slate-700 truncate"
-                  >
-                    <span className="text-emerald-600 shrink-0">+</span>
-                    <span className="truncate">{f.path}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
           ) : (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
@@ -110,12 +110,12 @@ export function WorkflowPanel({
             </div>
           )}
           {validationSummary && !writingCode ? (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-700 font-mono whitespace-pre-wrap">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-700 font-mono whitespace-pre-wrap max-h-28 overflow-y-auto">
               {validationSummary}
             </div>
           ) : null}
         </div>
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <FileViewer
             files={files}
             isGenerating={isGenerating}
@@ -197,7 +197,13 @@ export function WorkflowPanel({
               </div>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto mx-4 sm:mx-5 mb-3 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm">
-              <FormattedMessage content={pendingPlan} className="text-slate-700" />
+              <FormattedMessage
+                content={pendingPlan.replace(
+                  /\n*##\s*Approval request[\s\S]*$/i,
+                  ''
+                ).trim()}
+                className="text-slate-700"
+              />
             </div>
             {(onApprove || onDiscard) && (
               <div className="shrink-0 border-t border-indigo-100 bg-gradient-to-r from-indigo-50 via-white to-violet-50 px-4 sm:px-5 py-3.5 animate-approve-slide">

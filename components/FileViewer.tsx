@@ -416,7 +416,7 @@ export function FileViewer({
         />
       )}
       <div
-        className={`vscode-shell flex flex-col md:flex-row w-full flex-1 min-h-0 border overflow-hidden select-none transition-all duration-200 ${
+        className={`vscode-shell flex flex-col md:flex-row w-full h-full min-h-0 flex-1 border overflow-hidden select-none transition-all duration-200 ${
           isFullscreen
             ? 'fixed inset-6 z-[90] shadow-2xl border-[#3c3c3c] rounded-lg'
             : isDark
@@ -427,7 +427,7 @@ export function FileViewer({
 
         {/* Sidebar explorer */}
         <aside
-          className={`w-full md:w-56 md:shrink-0 flex flex-col max-h-[220px] md:max-h-none overflow-hidden border-b md:border-b-0 md:border-r ${
+          className={`w-full md:w-56 md:shrink-0 flex flex-col max-h-[40%] md:max-h-none md:h-full overflow-hidden border-b md:border-b-0 md:border-r ${
             isDark ? 'bg-[#252526] border-[#3c3c3c]' : 'bg-[#f3f3f3] border-[#d4d4d4]'
           }`}
         >
@@ -475,7 +475,7 @@ export function FileViewer({
         </aside>
 
         {/* Editor pane */}
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+        <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden h-full">
           {/* Tab bar — only open files (not every workspace file) */}
           <div
             className={`flex items-center shrink-0 border-b overflow-hidden ${
@@ -565,12 +565,12 @@ export function FileViewer({
 
           {/* Code area */}
           <div
-            className={`flex-1 overflow-auto min-w-0 relative ${
+            className={`flex-1 overflow-x-auto overflow-y-auto min-h-0 min-w-0 relative overscroll-contain ${
               isDark ? 'bg-[#1e1e1e]' : 'bg-white'
             }`}
           >
             {selected ? (
-              <div className="min-w-max">
+              <div className="min-w-max pb-8">
                 <CodeBlock
                   code={selected.content}
                   language={selected.language}

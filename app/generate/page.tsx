@@ -1174,29 +1174,8 @@ export default function GeneratePage() {
                   </div>
                 )}
                 {awaitingApproval && pendingPlan && !isGenerating && (
-                  <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3.5 space-y-2.5 shadow-md shadow-indigo-100/50 animate-approve-slide">
-                    <p className="text-[12px] font-semibold text-slate-900">
-                      Do you want to go forward with this plan?
-                    </p>
-                    <p className="text-[11px] text-slate-600 leading-relaxed">
-                      The full plan is on the right. Approve here or there to generate files — or reply with changes.
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={approvePlan}
-                        className="text-[11px] font-bold px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer shadow-sm"
-                      >
-                        Yes — Approve &amp; Generate
-                      </button>
-                      <button
-                        type="button"
-                        onClick={discardPlan}
-                        className="text-[11px] font-semibold px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
-                      >
-                        Discard plan
-                      </button>
-                    </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[11px] text-slate-600 leading-relaxed">
+                    Plan is ready on the right — use <span className="font-semibold text-slate-800">Approve &amp; Generate</span> there, or reply here with changes.
                   </div>
                 )}
                 {pendingQuestions.length > 0 && !isGenerating && !awaitingApproval && (
@@ -1364,7 +1343,7 @@ export default function GeneratePage() {
             </div>
 
             {/* Split View Editor Workspace */}
-            <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col justify-between gap-4 transition-opacity duration-300">
+            <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col transition-opacity duration-300">
               <WorkflowPanel
                 phase={workflowPhase}
                 files={files}
@@ -1442,29 +1421,8 @@ export default function GeneratePage() {
                 </div>
               )}
               {awaitingApproval && pendingPlan && !isGenerating && (
-                <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3.5 space-y-2.5 shadow-md shadow-indigo-100/50 animate-approve-slide">
-                  <p className="text-xs font-semibold text-slate-900">
-                    Do you want to go forward with this plan?
-                  </p>
-                  <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Approve to generate infrastructure files, or reply with changes to revise.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={approvePlan}
-                      className="text-xs font-bold px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer shadow-sm"
-                    >
-                      Yes — Approve &amp; Generate
-                    </button>
-                    <button
-                      type="button"
-                      onClick={discardPlan}
-                      className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
-                    >
-                      Discard plan
-                    </button>
-                  </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[11px] text-slate-600 leading-relaxed">
+                  Plan is ready — approve on the main panel, or reply with changes.
                 </div>
               )}
               {pendingQuestions.length > 0 && !isGenerating && !awaitingApproval && (

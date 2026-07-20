@@ -435,7 +435,8 @@ Plan must use these headings exactly (markdown ## / ### / - bullets; no marker l
 ## Validation expectations
 - terraform validate, docker build, health path, helm lint/template if applicable
 ## Approval request
-- End with: "Do you want to go forward with this plan? Click Approve & Generate, or reply with changes."
+- End with one short sentence: "Approve on the right to generate files, or reply with changes."
+- Do NOT repeat a full Approve & Generate call-to-action in the plan body (the UI already shows that button).
 
 Emit EXACTLY in this marker format (no FILE markers):
 <<<STATUS>>>
