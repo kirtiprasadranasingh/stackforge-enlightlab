@@ -66,7 +66,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Validator script used by /api/generate auto-repair and /api/validate-scaffold
 COPY --from=builder --chown=nextjs:nodejs /app/scripts ./scripts
-RUN chmod +x ./scripts/validate-scaffold.sh
+# Strip Windows CRLF if present (breaks bash `set -o pipefail` in the container)
+RUN sed -i 's/\r$//' ./scripts/*.sh && chmod +x ./scripts/*.sh
 
 USER nextjs
 EXPOSE 3000
