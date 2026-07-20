@@ -219,7 +219,8 @@ instead.
 
 ### B9. GCP Cloud Run + Cloud SQL + Artifact Registry + GitLab CI (recurring real bugs)
 - **Terraform schema**: Use real arguments only — Cloud SQL uses \`deletion_protection\` (not \`deletion_protection_enabled\`). Artifact Registry image URLs must be constructed from location/project/repository_id (do not invent a nonexistent \`repository_url\` attribute unless it exists on that resource type).
-- **Private Cloud SQL**: If using private IP, emit \`google_compute_global_address\` (VPC peering range) + \`google_service_networking_connection\` and \`depends_on\` them from the SQL instance. Incomplete private networking is a blocking failure.
+- **One resource, one file**: Never declare the same \`resource "TYPE" "NAME"\` in two Terraform files. Common failure: duplicating \`google_sql_database\`, \`google_sql_user\`, or \`google_compute_global_address\` across \`cloud_sql.tf\` + \`database.tf\` / \`network.tf\`. Prefer \`database.tf\` for Cloud SQL instance/db/user and \`network.tf\` for private IP allocation + service networking; do **not** also emit those in \`cloud_sql.tf\`. If you use \`cloud_sql.tf\`, put *all* SQL there and omit the same resources from \`database.tf\`.
+- **Private Cloud SQL**: If using private IP, emit \`google_compute_global_address\` (VPC peering range) + \`google_service_networking_connection\` **once** (in \`network.tf\`) and \`depends_on\` them from the SQL instance. Incomplete private networking is a blocking failure.
 - **Secrets**: Never embed Secret Manager *resource names/IDs* inside a DATABASE_URL string as if they were passwords. Inject secret *values* via Cloud Run secret env/volumes, or use the connector socket + discrete user/password secret refs.
 - **Cloud SQL attachment**: If the app uses the \`/cloudsql/...\` Unix socket, Cloud Run must attach the instance (\`volumes\` / \`cloud_sql_instance\` / \`annotation\` pattern appropriate to the google provider version you pin). Private IP apps must use the private host, not a fake socket path.
 - **App startup**: Do not run \`create_all()\` / blocking DB connect at module import. Migrations belong in a job or explicit startup path; \`/health\` must not crash the process on import.
@@ -355,6 +356,27 @@ export function getCIProviderPrompt(ci: string): string {
 - Separate variables: acrName (registry resource name for az acr show) vs acrRepository (image path inside registry)
 - Rollback on failure: az containerapp revision activate against a captured prior-good revision — not echo placeholders
 - Deploy targets must match Terraform outputs (Container Apps / ACR names)`;
+    case 'aws-codepipeline':
+      return `AWS CodePipeline + CodeBuild:
+- Path: buildspec.yml (CodeBuild) plus Terraform for CodePipeline/CodeBuild if infra-owned, or document wiring in README
+- Stages: build → test (must fail the build on error) → push image to ECR → deploy (ECS/EKS) → rollback notes
+- Use IAM role placeholders / OIDC-style assumptions — never hardcode access keys
+- Image tags and service/cluster names must match Terraform outputs
+- Do NOT also emit GitHub Actions / GitLab / Jenkins files unless the user asked for them`;
+    case 'gcp-cloud-build':
+      return `Google Cloud Build:
+- Path: cloudbuild.yaml at repo root
+- Steps: test → build/push to Artifact Registry → deploy Cloud Run or GKE → onFailure rollback where possible
+- Prefer Workload Identity Federation / service account placeholders — never embed JSON keys
+- Substitutions and image URLs must match Terraform (location/project/repository_id)
+- Do NOT also emit GitHub Actions / GitLab / Jenkins files unless the user asked for them`;
+    case 'oci-devops':
+      return `OCI DevOps:
+- Path: build_spec.yaml (or .devops/build_spec.yaml) plus README wiring to OCI DevOps project/pipeline
+- Stages: build → test → push OCIR → deploy to OKE → rollback guidance
+- Use OCI resource principal / instance principal placeholders — never hardcode auth tokens
+- OCIR path and OKE cluster/namespace must match Terraform outputs
+- Do NOT also emit GitHub Actions / GitLab / Jenkins files unless the user asked for them`;
     default:
       return 'Use GitHub Actions with pinned official actions.';
   }
@@ -418,7 +440,8 @@ Plan must use these headings exactly (markdown ## / ### / - bullets; no marker l
 - How pieces fit: network → compute → data → ingress → CI deploy path (2–4 short bullets)
 ## Tools and workflows
 - List ONLY tools that match Confirmed requirements and presets (cloud, orchestrator, CI).
-- Do NOT invent extra tools (SonarQube, Jenkins, CircleCI, EC2-only stacks, etc.) unless the client explicitly asked for them.
+- Do NOT invent extra tools (SonarQube, CircleCI, EC2-only stacks, etc.) unless the client explicitly asked for them.
+- Include the chosen CI exactly once: GitHub Actions → \`.github/workflows/\`; GitLab → \`.gitlab-ci.yml\`; Jenkins → \`Jenkinsfile\`; Azure DevOps → \`azure-pipelines.yml\`; AWS CodePipeline → \`buildspec.yml\`; Google Cloud Build → \`cloudbuild.yaml\`; OCI DevOps → \`build_spec.yaml\`. Never emit a second competing pipeline format.
 - For each tool, one line: what it does in this scaffold (e.g. GitHub Actions → build/push/deploy; Helm → K8s manifests; Terraform → cloud resources).
 ## Assumptions
 - Explicit assumptions the client can challenge (region, sizing, TLS, secrets placeholders)
@@ -558,9 +581,10 @@ Never stop after terraform/variables.tf alone. Incomplete EKS scaffolds are fail
     return `## Required artifact set (GCP Cloud Run — emit ALL)
 1. terraform/versions.tf — google provider pinned; google_project_service for APIs
 2. terraform/main.tf (+ network.tf/database.tf/iam.tf/secrets.tf as needed) + variables.tf + outputs.tf
+   — Do NOT also emit cloud_sql.tf that repeats resources from database.tf/network.tf
 3. Cloud Run + Artifact Registry; Cloud SQL only if requested (private networking complete; deletion_protection)
 4. .gitlab-ci.yml or matching CI — valid YAML, real tests, deploy + rollback, tools present in job image
-5. Dockerfile + app (requirements.txt/pyproject or go.mod/package.json as appropriate) — no DB connect at import
+5. Dockerfile (root or app/) + app stub — no DB connect at import
 6. README.md — reviewable scaffold disclaimer
 Apply PART B9 rules. Do NOT emit AWS ECS/EKS files for this stack.`;
   }

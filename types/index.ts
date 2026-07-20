@@ -10,7 +10,14 @@ export type Orchestrator =
   | 'serverless'
   | 'cloud-run'
   | 'container-apps';
-export type CIProvider = 'github-actions' | 'gitlab-ci' | 'jenkins' | 'azure-devops';
+export type CIProvider =
+  | 'github-actions'
+  | 'gitlab-ci'
+  | 'jenkins'
+  | 'azure-devops'
+  | 'aws-codepipeline'
+  | 'gcp-cloud-build'
+  | 'oci-devops';
 
 export interface Presets {
   cloud: CloudProvider;
@@ -112,8 +119,79 @@ export const ORCHESTRATOR_OPTIONS: Record<CloudProvider, PresetOption[]> = {
 };
 
 export const CI_OPTIONS: PresetOption[] = [
-  { value: 'github-actions', label: 'GitHub Actions', description: 'CI/CD with GitHub' },
-  { value: 'gitlab-ci', label: 'GitLab CI', description: 'CI/CD with GitLab' },
-  { value: 'jenkins', label: 'Jenkins', description: 'Traditional Jenkins pipelines' },
-  { value: 'azure-devops', label: 'Azure DevOps', description: 'Azure Pipelines YAML' },
+  {
+    value: 'github-actions',
+    label: 'GitHub Actions',
+    description: 'GitHub workflows — works with AWS, GCP, Azure, OCI',
+  },
+  {
+    value: 'gitlab-ci',
+    label: 'GitLab CI',
+    description: 'GitLab pipelines (.gitlab-ci.yml)',
+  },
+  {
+    value: 'jenkins',
+    label: 'Jenkins',
+    description: 'Jenkinsfile declarative pipelines',
+  },
+  {
+    value: 'azure-devops',
+    label: 'Azure DevOps',
+    description: 'Azure Pipelines YAML',
+  },
+  {
+    value: 'aws-codepipeline',
+    label: 'AWS CodePipeline',
+    description: 'CodeBuild buildspec + CodePipeline (AWS-native)',
+  },
+  {
+    value: 'gcp-cloud-build',
+    label: 'Google Cloud Build',
+    description: 'cloudbuild.yaml (GCP-native)',
+  },
+  {
+    value: 'oci-devops',
+    label: 'OCI DevOps',
+    description: 'Oracle DevOps build/deploy pipelines',
+  },
 ];
+
+/** Preferred CI order for setup / interview options per cloud (all still available). */
+export const CI_OPTIONS_BY_CLOUD: Record<CloudProvider, CIProvider[]> = {
+  aws: [
+    'github-actions',
+    'aws-codepipeline',
+    'gitlab-ci',
+    'jenkins',
+    'azure-devops',
+    'gcp-cloud-build',
+    'oci-devops',
+  ],
+  gcp: [
+    'gitlab-ci',
+    'gcp-cloud-build',
+    'github-actions',
+    'jenkins',
+    'azure-devops',
+    'aws-codepipeline',
+    'oci-devops',
+  ],
+  azure: [
+    'azure-devops',
+    'github-actions',
+    'gitlab-ci',
+    'jenkins',
+    'aws-codepipeline',
+    'gcp-cloud-build',
+    'oci-devops',
+  ],
+  oracle: [
+    'github-actions',
+    'oci-devops',
+    'gitlab-ci',
+    'jenkins',
+    'azure-devops',
+    'aws-codepipeline',
+    'gcp-cloud-build',
+  ],
+};

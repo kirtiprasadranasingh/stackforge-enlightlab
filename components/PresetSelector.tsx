@@ -1,6 +1,6 @@
 'use client';
 
-import { CloudProvider, Orchestrator, CIProvider, ORCHESTRATOR_OPTIONS, CI_OPTIONS, CLOUD_OPTIONS } from '@/types';
+import { CloudProvider, Orchestrator, CIProvider, ORCHESTRATOR_OPTIONS, CI_OPTIONS, CI_OPTIONS_BY_CLOUD, CLOUD_OPTIONS } from '@/types';
 
 interface PresetSelectorProps {
   presets: {
@@ -13,11 +13,15 @@ interface PresetSelectorProps {
 
 export function PresetSelector({ presets, onChange }: PresetSelectorProps) {
   const availableOrchestrators = ORCHESTRATOR_OPTIONS[presets.cloud] || [];
+  const availableCI = (CI_OPTIONS_BY_CLOUD[presets.cloud] || [])
+    .map((value) => CI_OPTIONS.find((opt) => opt.value === value))
+    .filter((opt): opt is (typeof CI_OPTIONS)[number] => Boolean(opt));
 
   const handleCloudChange = (cloud: CloudProvider) => {
     const orchestrators = ORCHESTRATOR_OPTIONS[cloud];
     const newOrchestrator = orchestrators?.[0]?.value as Orchestrator || 'oke';
-    onChange({ cloud, orchestrator: newOrchestrator, ci: presets.ci });
+    const preferredCi = CI_OPTIONS_BY_CLOUD[cloud]?.[0] || presets.ci;
+    onChange({ cloud, orchestrator: newOrchestrator, ci: preferredCi });
   };
 
   const handleOrchestratorChange = (orchestrator: Orchestrator) => {
@@ -71,7 +75,7 @@ export function PresetSelector({ presets, onChange }: PresetSelectorProps) {
           onChange={(e) => handleCIChange(e.target.value as CIProvider)}
           className="input text-sm"
         >
-          {CI_OPTIONS.map((option) => (
+          {availableCI.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

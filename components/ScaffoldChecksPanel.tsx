@@ -24,8 +24,17 @@ const BUTTONS: { id: ScaffoldCheckId; short: string }[] = [
   { id: 'actionlint', short: 'Workflows' },
 ];
 
+const HEIGHT_MIN = 96;
+const HEIGHT_MAX = 420;
+const HEIGHT_DEFAULT = 160;
+const HEIGHT_STEP = 56;
+
 function filesFingerprint(files: GeneratedFile[]): string {
   return files.map((f) => `${f.path}:${f.content.length}`).join('|');
+}
+
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
 export function ScaffoldChecksPanel({
@@ -37,15 +46,19 @@ export function ScaffoldChecksPanel({
   const [running, setRunning] = useState<ScaffoldCheckId | null>(null);
   const [lastResult, setLastResult] = useState<'ok' | 'fail' | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [height, setHeight] = useState(HEIGHT_DEFAULT);
   const abortRef = useRef<AbortController | null>(null);
   const lineIdRef = useRef(0);
   const autoRanForRef = useRef<string>('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const append = useCallback((text: string, kind: TermLine['kind'] = 'out') => {
     const id = ++lineIdRef.current;
+    const clean = stripAnsi(text);
     setLines((prev) => {
-      const next = [...prev, { id, text, kind }];
+      const next = [...prev, { id, text: clean, kind }];
       return next.length > 800 ? next.slice(-800) : next;
     });
   }, []);
@@ -64,6 +77,7 @@ export function ScaffoldChecksPanel({
       abortRef.current = ac;
       setRunning(check);
       setLastResult(null);
+      setDismissed(false);
       setCollapsed(false);
       append(`▸ ${CHECK_LABELS[check]}`, 'meta');
 
@@ -150,7 +164,6 @@ export function ScaffoldChecksPanel({
     [append, files, isGenerating]
   );
 
-  // Auto-run full suite once per generated file set after streaming completes.
   useEffect(() => {
     if (!autoRun || isGenerating || files.length === 0 || running) return;
     const fp = filesFingerprint(files);
@@ -169,7 +182,53 @@ export function ScaffoldChecksPanel({
     return () => abortRef.current?.abort();
   }, []);
 
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (!dragRef.current) return;
+      const delta = dragRef.current.startY - e.clientY;
+      const next = Math.min(
+        HEIGHT_MAX,
+        Math.max(HEIGHT_MIN, dragRef.current.startH + delta)
+      );
+      setHeight(next);
+      setCollapsed(false);
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, []);
+
   if (files.length === 0) return null;
+
+  if (dismissed) {
+    return (
+      <div className="shrink-0 flex items-center justify-between gap-2 rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5">
+        <span className="text-[11px] text-slate-600">
+          Scaffold checks hidden
+          {lastResult === 'fail' ? (
+            <span className="ml-2 text-rose-600 font-semibold">· last run failed</span>
+          ) : lastResult === 'ok' ? (
+            <span className="ml-2 text-emerald-600 font-semibold">· last run passed</span>
+          ) : null}
+        </span>
+        <button
+          type="button"
+          onClick={() => setDismissed(false)}
+          className="text-[10px] font-semibold px-2.5 py-1 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 cursor-pointer"
+        >
+          Show terminal
+        </button>
+      </div>
+    );
+  }
 
   const statusLabel =
     running != null
@@ -181,13 +240,30 @@ export function ScaffoldChecksPanel({
           : 'Ready';
 
   return (
-    <div className="shrink-0 flex flex-col border border-slate-800 rounded-lg overflow-hidden bg-[#0c0c0c] shadow-inner">
+    <div className="shrink-0 flex flex-col border border-slate-800 rounded-lg overflow-hidden bg-[#0c0c0c] shadow-inner relative">
+      {/* Drag handle — pull up to grow, down to shrink */}
+      <button
+        type="button"
+        aria-label="Resize scaffold checks panel"
+        title="Drag to resize"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          dragRef.current = { startY: e.clientY, startH: height };
+          document.body.style.cursor = 'ns-resize';
+          document.body.style.userSelect = 'none';
+        }}
+        className="h-2 w-full cursor-ns-resize bg-[#161616] hover:bg-slate-700 border-b border-slate-800 flex items-center justify-center"
+      >
+        <span className="block h-0.5 w-8 rounded-full bg-slate-600" aria-hidden />
+      </button>
+
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-slate-800 bg-[#161616]">
         <button
           type="button"
           onClick={() => setCollapsed((c) => !c)}
           className="text-[11px] font-semibold text-slate-200 hover:text-white cursor-pointer flex items-center gap-1.5"
           aria-expanded={!collapsed}
+          title={collapsed ? 'Expand' : 'Collapse'}
         >
           <span
             className={`inline-block transition-transform ${collapsed ? '-rotate-90' : ''}`}
@@ -211,6 +287,31 @@ export function ScaffoldChecksPanel({
           {statusLabel}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-1 justify-end">
+          <button
+            type="button"
+            aria-label="Make terminal smaller"
+            title="Smaller"
+            disabled={collapsed || height <= HEIGHT_MIN}
+            onClick={() =>
+              setHeight((h) => Math.max(HEIGHT_MIN, h - HEIGHT_STEP))
+            }
+            className="text-[11px] font-bold w-6 h-6 rounded border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="Make terminal larger"
+            title="Larger"
+            disabled={collapsed || height >= HEIGHT_MAX}
+            onClick={() => {
+              setCollapsed(false);
+              setHeight((h) => Math.min(HEIGHT_MAX, h + HEIGHT_STEP));
+            }}
+            className="text-[11px] font-bold w-6 h-6 rounded border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+          >
+            +
+          </button>
           {BUTTONS.map((b) => (
             <button
               key={b.id}
@@ -240,13 +341,26 @@ export function ScaffoldChecksPanel({
               Clear
             </button>
           )}
+          <button
+            type="button"
+            aria-label="Close scaffold checks"
+            title="Close"
+            onClick={() => {
+              abortRef.current?.abort();
+              setDismissed(true);
+            }}
+            className="text-[12px] font-bold w-6 h-6 rounded border border-slate-700 bg-slate-900 text-slate-400 hover:text-white hover:border-slate-500 cursor-pointer"
+          >
+            ×
+          </button>
         </div>
       </div>
 
       {!collapsed ? (
         <div
           ref={scrollRef}
-          className="h-40 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-300"
+          style={{ height }}
+          className="overflow-y-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-slate-300"
           role="log"
           aria-live="polite"
           aria-label="Scaffold check output"
@@ -254,7 +368,8 @@ export function ScaffoldChecksPanel({
           {lines.length === 0 ? (
             <p className="text-slate-600">
               Allowlisted checks only (terraform / helm / hadolint / actionlint). No
-              apply or destroy. Full suite runs automatically after generate.
+              apply or destroy. Full suite runs automatically after generate. Use − / +
+              or drag the top edge to resize; × closes the panel.
             </p>
           ) : (
             lines.map((l) => (

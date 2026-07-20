@@ -215,8 +215,12 @@ async function runHadolint(
   emit: CheckLineEmitter,
   budgetMs: number
 ): Promise<number> {
-  const dockerfile = path.join(scaffoldDir, 'Dockerfile');
-  if (!(await pathExists(dockerfile))) {
+  const rootDf = path.join(scaffoldDir, 'Dockerfile');
+  const appDf = path.join(scaffoldDir, 'app', 'Dockerfile');
+  let dockerfile = '';
+  if (await pathExists(rootDf)) dockerfile = rootDf;
+  else if (await pathExists(appDf)) dockerfile = appDf;
+  if (!dockerfile) {
     emit('INFO  - no Dockerfile found, skipping');
     return 0;
   }

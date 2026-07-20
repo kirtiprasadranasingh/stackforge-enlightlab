@@ -157,6 +157,147 @@ function patchTerraform(content: string): string {
   return out;
 }
 
+type TfResourceBlock = {
+  type: string;
+  name: string;
+  start: number;
+  end: number;
+};
+
+/** Parse top-level `resource "type" "name" { ... }` blocks (brace-balanced). */
+function findTerraformResourceBlocks(content: string): TfResourceBlock[] {
+  const blocks: TfResourceBlock[] = [];
+  const re = /resource\s+"([^"]+)"\s+"([^"]+)"\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(content)) !== null) {
+    let depth = 1;
+    let i = match.index + match[0].length;
+    while (i < content.length && depth > 0) {
+      const ch = content[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    // Swallow a single trailing newline so removals don't leave blank gaps messy
+    if (content[i] === '\r') i += 1;
+    if (content[i] === '\n') i += 1;
+    blocks.push({
+      type: match[1],
+      name: match[2],
+      start: match.index,
+      end: i,
+    });
+  }
+  return blocks;
+}
+
+/**
+ * Prefer a single owner file when the model emits the same resource twice
+ * (common GCP bug: cloud_sql.tf + database.tf / network.tf).
+ * Higher score wins and keeps the block; losers are stripped.
+ */
+function terraformResourceOwnerScore(path: string, type: string): number {
+  const base = path.split('/').pop() || path;
+  const isSql =
+    type === 'google_sql_database_instance' ||
+    type === 'google_sql_database' ||
+    type === 'google_sql_user';
+  const isPrivateNet =
+    type === 'google_compute_global_address' ||
+    type === 'google_service_networking_connection';
+
+  if (isSql) {
+    if (base === 'database.tf') return 100;
+    if (base === 'sql.tf' || base === 'db.tf') return 90;
+    if (base === 'cloud_sql.tf') return 40;
+    return 20;
+  }
+  if (isPrivateNet) {
+    if (base === 'network.tf' || base === 'networking.tf' || base === 'vpc.tf') {
+      return 100;
+    }
+    if (base === 'cloud_sql.tf') return 40;
+    return 20;
+  }
+  if (base === 'main.tf') return 30;
+  if (base === 'cloud_sql.tf') return 25;
+  return 20;
+}
+
+/**
+ * Drop duplicate Terraform resource declarations across files so
+ * `terraform init` / `validate` can succeed after generation.
+ */
+function dedupeTerraformResources(files: GeneratedFile[]): GeneratedFile[] {
+  const tfFiles = files.filter((f) => f.path.endsWith('.tf'));
+  if (tfFiles.length < 2) return files;
+
+  type Occ = {
+    path: string;
+    type: string;
+    name: string;
+    score: number;
+    order: number;
+  };
+  const occurrences: Occ[] = [];
+  let order = 0;
+  for (const file of tfFiles) {
+    for (const block of findTerraformResourceBlocks(file.content)) {
+      occurrences.push({
+        path: file.path,
+        type: block.type,
+        name: block.name,
+        score: terraformResourceOwnerScore(file.path, block.type),
+        order: order++,
+      });
+    }
+  }
+
+  const winners = new Map<string, Occ>();
+  for (const occ of occurrences) {
+    const key = `${occ.type}::${occ.name}`;
+    const prev = winners.get(key);
+    if (
+      !prev ||
+      occ.score > prev.score ||
+      (occ.score === prev.score && occ.order < prev.order)
+    ) {
+      winners.set(key, occ);
+    }
+  }
+
+  const hasDupes = occurrences.some((occ) => {
+    const key = `${occ.type}::${occ.name}`;
+    const win = winners.get(key);
+    return !win || win.path !== occ.path || win.order !== occ.order;
+  });
+  if (!hasDupes) return files;
+
+  return files.map((file) => {
+    if (!file.path.endsWith('.tf')) return file;
+
+    const blocks = findTerraformResourceBlocks(file.content);
+    const remove: TfResourceBlock[] = [];
+    const seenInFile = new Set<string>();
+    for (const block of blocks) {
+      const key = `${block.type}::${block.name}`;
+      const win = winners.get(key);
+      const firstInFile = !seenInFile.has(key);
+      seenInFile.add(key);
+      const keep = win?.path === file.path && firstInFile;
+      if (!keep) remove.push(block);
+    }
+
+    if (remove.length === 0) return file;
+    let content = file.content;
+    for (const block of [...remove].sort((a, b) => b.start - a.start)) {
+      content = content.slice(0, block.start) + content.slice(block.end);
+    }
+    content = content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+    return { ...file, content };
+  });
+}
+
 /**
  * If a non-root USER is declared before dependencies are installed, pip/npm
  * cannot write to system locations and the image build fails. Relocate a single
@@ -276,5 +417,5 @@ export function normalizeScaffoldFiles(files: GeneratedFile[]): GeneratedFile[] 
     }
   }
 
-  return Array.from(byPath.values());
+  return dedupeTerraformResources(Array.from(byPath.values()));
 }

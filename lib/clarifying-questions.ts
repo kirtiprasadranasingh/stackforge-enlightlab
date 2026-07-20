@@ -24,6 +24,49 @@ export const CI_LABELS: Record<Presets['ci'], string> = {
   'gitlab-ci': 'GitLab CI',
   jenkins: 'Jenkins',
   'azure-devops': 'Azure DevOps Pipelines',
+  'aws-codepipeline': 'AWS CodePipeline',
+  'gcp-cloud-build': 'Google Cloud Build',
+  'oci-devops': 'OCI DevOps',
+};
+
+/** Interview / Change-CI option labels ordered for the active cloud. */
+export const CI_OPTION_LABELS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
+  aws: [
+    'GitHub Actions',
+    'AWS CodePipeline',
+    'GitLab CI',
+    'Jenkins',
+    'Azure DevOps Pipelines',
+    'Google Cloud Build',
+    'OCI DevOps',
+  ],
+  gcp: [
+    'GitLab CI',
+    'Google Cloud Build',
+    'GitHub Actions',
+    'Jenkins',
+    'Azure DevOps Pipelines',
+    'AWS CodePipeline',
+    'OCI DevOps',
+  ],
+  azure: [
+    'Azure DevOps Pipelines',
+    'GitHub Actions',
+    'GitLab CI',
+    'Jenkins',
+    'AWS CodePipeline',
+    'Google Cloud Build',
+    'OCI DevOps',
+  ],
+  oracle: [
+    'GitHub Actions',
+    'OCI DevOps',
+    'GitLab CI',
+    'Jenkins',
+    'Azure DevOps Pipelines',
+    'AWS CodePipeline',
+    'Google Cloud Build',
+  ],
 };
 
 export const REGION_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
@@ -34,7 +77,7 @@ export const REGION_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
 };
 
 export const HOSTING_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
-  aws: ['Amazon EKS', 'Amazon ECS'],
+  aws: ['Amazon EKS', 'Amazon ECS (Fargate)'],
   azure: ['Azure Kubernetes Service (AKS)', 'Azure Container Apps'],
   gcp: ['Google Kubernetes Engine (GKE)', 'Google Cloud Run'],
   oracle: ['Oracle Kubernetes Engine (OKE)'],
@@ -97,7 +140,7 @@ export function cloudFromInterviewAnswer(
     ) {
       return 'azure';
     }
-    if (choice.includes('eks') || choice.includes('ecs') || choice.includes('amazon')) {
+    if (choice.includes('eks') || choice.includes('ecs') || choice.includes('fargate') || choice.includes('amazon')) {
       return 'aws';
     }
   }
@@ -145,12 +188,16 @@ export function adaptClarifyingQuestions(
 
   const regions = REGION_OPTIONS_BY_CLOUD[chosenCloud].join(' / ');
   const hosting = HOSTING_OPTIONS_BY_CLOUD[chosenCloud].join(' / ');
+  const ciOptions = CI_OPTION_LABELS_BY_CLOUD[chosenCloud].join(' / ');
   return questions.map((question) => {
     if (/^Where should we host it\?/i.test(question)) {
       return `Where should we host it? (options: ${regions})`;
     }
     if (/^Which hosting platform should we use\?/i.test(question)) {
       return `Which hosting platform should we use? (options: ${hosting})`;
+    }
+    if (/^Which CI\/CD system should we use\?/i.test(question)) {
+      return `Which CI/CD system should we use? (options: ${ciOptions})`;
     }
     return question;
   });
@@ -177,6 +224,11 @@ export function formatInterviewAnswerForPlan(rawAnswer: string): string {
   const knownHosting = Object.values(HOSTING_OPTIONS_BY_CLOUD).flat();
   if (knownHosting.some((h) => h.toLowerCase() === answer.toLowerCase())) {
     return `Hosting platform (client override): ${answer}. Use this instead of any default hosting platform.`;
+  }
+
+  const knownCI = Object.values(CI_OPTION_LABELS_BY_CLOUD).flat();
+  if (knownCI.some((c) => c.toLowerCase() === answer.toLowerCase())) {
+    return `CI/CD system (client override): ${answer}. Use this instead of any default CI/CD system.`;
   }
 
   if (answer.startsWith('Change the cloud:')) {
@@ -224,6 +276,22 @@ function detectRuntime(prompt: string): string | null {
   if (/\b(go|golang)\b/.test(text)) return 'Go';
   if (/\b(java|spring(?:\s+boot)?)\b/.test(text)) return 'Java';
   if (/\b(\.net|dotnet|c#)\b/.test(text)) return '.NET';
+  return null;
+}
+
+function detectNamedCI(prompt: string): string | null {
+  const text = prompt.toLowerCase();
+  if (/azure\s*devops|azure\s*pipelines|\bazdo\b/.test(text)) {
+    return 'Azure DevOps Pipelines';
+  }
+  if (/gitlab(\s*ci)?/.test(text)) return 'GitLab CI';
+  if (/\bjenkins\b/.test(text)) return 'Jenkins';
+  if (/github\s*actions|\.github\/workflows/.test(text)) return 'GitHub Actions';
+  if (/code\s*pipeline|codepipeline|code\s*build|codebuild/.test(text)) {
+    return 'AWS CodePipeline';
+  }
+  if (/cloud\s*build|cloudbuild/.test(text)) return 'Google Cloud Build';
+  if (/oci\s*devops|oracle\s*devops/.test(text)) return 'OCI DevOps';
   return null;
 }
 
@@ -340,6 +408,7 @@ export function buildClarifyingQuestions(
   presets: Presets
 ): string[] {
   const runtime = detectRuntime(prompt);
+  const namedCI = detectNamedCI(prompt);
   const noData = hasNoDataSignal(prompt);
   const database = detectDatabase(prompt);
   const environments = detectEnvironments(prompt);
@@ -352,6 +421,7 @@ export function buildClarifyingQuestions(
   ].filter(Boolean);
 
   const regionOptions = REGION_OPTIONS_BY_CLOUD[presets.cloud].join(' / ');
+  const ciOptions = CI_OPTION_LABELS_BY_CLOUD[presets.cloud].join(' / ');
   const namedCloud = promptNamesCloud(prompt);
 
   // When the user did not name a cloud, do NOT assert silent UI defaults (AWS/EKS).
@@ -376,14 +446,20 @@ export function buildClarifyingQuestions(
         'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
       ];
 
+  // If the prompt did not name a CI system, ask explicitly — include AWS / GCP / OCI native options.
+  if (!namedCI) {
+    questions.splice(
+      namedCloud ? 2 : 3,
+      0,
+      `Which CI/CD system should we use? (options: ${ciOptions})`
+    );
+  }
+
   if (database) {
     questions.push(
       `How should ${database} be configured? (options: Standard private database / High availability / Private database with 7-day automatic backups)`
     );
   } else if (!noData) {
-    // Only ask about data when the user hasn't already ruled it out. When the
-    // prompt says "no database", we skip this entirely so the scaffold stays
-    // stateless and Q1 never tacks on "and the database".
     questions.push(
       'Does the service need stored data or a cache? (options: No data service / PostgreSQL / MySQL / Redis cache / Another service)'
     );
@@ -399,5 +475,5 @@ export function buildClarifyingQuestions(
     );
   }
 
-  return questions.slice(0, 7);
+  return questions.slice(0, 8);
 }

@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import {
   HOSTING_OPTIONS_BY_CLOUD,
+  CI_OPTION_LABELS_BY_CLOUD,
   adaptClarifyingQuestions,
   baseCloudFromSetupQuestion,
   cloudFromInterviewAnswer,
@@ -34,13 +35,16 @@ const CLOUD_FOLLOW_UP: FollowUp = {
   ],
 };
 
-const CI_FOLLOW_UP: FollowUp = {
+const CI_FOLLOW_UP_DEFAULT: FollowUp = {
   prompt: 'Which CI/CD system do you want instead?',
   options: [
     'GitHub Actions',
+    'AWS CodePipeline',
     'GitLab CI',
+    'Google Cloud Build',
     'Jenkins',
     'Azure DevOps Pipelines',
+    'OCI DevOps',
   ],
 };
 
@@ -51,7 +55,7 @@ const DATA_FOLLOW_UP: FollowUp = {
 
 const ALL_HOSTING_OPTIONS = [
   'Amazon EKS',
-  'Amazon ECS',
+  'Amazon ECS (Fargate)',
   'Azure Kubernetes Service (AKS)',
   'Azure Container Apps',
   'Google Kubernetes Engine (GKE)',
@@ -231,6 +235,12 @@ export function ClarifyingInterview({
   const hostingChangeOptions = baseCloud
     ? HOSTING_OPTIONS_BY_CLOUD[baseCloud]
     : ALL_HOSTING_OPTIONS;
+  const ciFollowUp: FollowUp = {
+    prompt: CI_FOLLOW_UP_DEFAULT.prompt,
+    options: baseCloud
+      ? CI_OPTION_LABELS_BY_CLOUD[baseCloud]
+      : CI_FOLLOW_UP_DEFAULT.options,
+  };
 
   const cloudChoice = isCloudChange
     ? CLOUD_FOLLOW_UP.options.find((option) => option === followUpPrimary) ||
@@ -242,7 +252,7 @@ export function ClarifyingInterview({
       ? hostingChangeOptions.find((option) => option === followUpPrimary) || null
       : null;
   const ciChoice = isCiChange
-    ? CI_FOLLOW_UP.options.find((option) => option === followUpPrimary) || null
+    ? ciFollowUp.options.find((option) => option === followUpPrimary) || null
     : null;
   const dataChoice = isDataOther
     ? DATA_FOLLOW_UP.options.find((option) => option === followUpPrimary) ||
@@ -478,9 +488,9 @@ export function ClarifyingInterview({
 
           {isCiChange && (
             <FollowUpPanel
-              prompt={CI_FOLLOW_UP.prompt}
-              hint="Pick one option below, then continue."
-              options={CI_FOLLOW_UP.options}
+              prompt={ciFollowUp.prompt}
+              hint="Includes GitHub/GitLab/Jenkins/Azure DevOps plus AWS CodePipeline, Google Cloud Build, and OCI DevOps."
+              options={ciFollowUp.options}
               selected={ciChoice}
               disabled={disabled}
               onSelect={selectCiFollowUp}

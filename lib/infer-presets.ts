@@ -70,6 +70,12 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
     ci = 'jenkins';
   } else if (/github\s*actions|\.github\/workflows/.test(t)) {
     ci = 'github-actions';
+  } else if (/code\s*pipeline|codepipeline|code\s*build|codebuild/.test(t)) {
+    ci = 'aws-codepipeline';
+  } else if (/cloud\s*build|cloudbuild/.test(t)) {
+    ci = 'gcp-cloud-build';
+  } else if (/oci\s*devops|oracle\s*devops/.test(t)) {
+    ci = 'oci-devops';
   }
 
   return {

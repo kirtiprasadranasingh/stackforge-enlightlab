@@ -55,11 +55,17 @@ check_tf() {
 check_tf &
 PID_TF=$!
 
-# Job 2: Hadolint (Dockerfile)
+# Job 2: Hadolint (Dockerfile at root or app/)
 check_hado() {
+  local df=""
   if [ -f "$SCAFFOLD_DIR/Dockerfile" ]; then
+    df="$SCAFFOLD_DIR/Dockerfile"
+  elif [ -f "$SCAFFOLD_DIR/app/Dockerfile" ]; then
+    df="$SCAFFOLD_DIR/app/Dockerfile"
+  fi
+  if [ -n "$df" ]; then
     if command -v hadolint > /dev/null 2>&1; then
-      if hadolint "$SCAFFOLD_DIR/Dockerfile" > "$JOB_DIR/hado.log" 2>&1; then
+      if hadolint "$df" > "$JOB_DIR/hado.log" 2>&1; then
         echo "PASS" > "$JOB_DIR/hado_status"
       else
         echo "FAIL" > "$JOB_DIR/hado_status"

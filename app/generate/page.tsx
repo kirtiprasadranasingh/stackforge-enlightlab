@@ -14,6 +14,7 @@ import {
   CLOUD_OPTIONS,
   ORCHESTRATOR_OPTIONS,
   CI_OPTIONS,
+  CI_OPTIONS_BY_CLOUD,
 } from '@/types';
 import { LeadCapture } from '@/components/LeadCapture';
 import { FileViewer } from '@/components/FileViewer';
@@ -194,7 +195,13 @@ function deriveProviderLabel(files: GeneratedFile[], presets: Presets): string {
         ? 'GitLab CI'
         : presets.ci === 'jenkins'
           ? 'Jenkins'
-          : 'GitHub Actions';
+          : presets.ci === 'aws-codepipeline'
+            ? 'AWS CodePipeline'
+            : presets.ci === 'gcp-cloud-build'
+              ? 'Google Cloud Build'
+              : presets.ci === 'oci-devops'
+                ? 'OCI DevOps'
+                : 'GitHub Actions';
 
   return `${cloud}, ${orch}, ${ci}`;
 }
@@ -971,8 +978,14 @@ export default function GeneratePage() {
               <button type="button" className="text-sm text-[#64748B] mb-4 cursor-pointer hover:text-[#4F46E5]" onClick={() => setStep(2)}>← Back</button>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#60A5FA] mb-2">CI / CD · 3 of 3</p>
               <h1 className="text-3xl font-bold text-[#0F172A] mb-2 tracking-tight">Where does your pipeline live?</h1>
-              <div className="grid gap-3 mt-8">
-                {CI_OPTIONS.map((opt) => (
+              <p className="text-[#64748B] mb-2 text-sm">
+                Includes GitHub, GitLab, Jenkins, Azure DevOps, plus AWS CodePipeline, Google Cloud Build, and OCI DevOps.
+              </p>
+              <div className="grid gap-3 mt-6">
+                {(CI_OPTIONS_BY_CLOUD[presets.cloud] || [])
+                  .map((value) => CI_OPTIONS.find((opt) => opt.value === value))
+                  .filter((opt): opt is (typeof CI_OPTIONS)[number] => Boolean(opt))
+                  .map((opt) => (
                   <button
                     key={opt.value}
                     type="button"

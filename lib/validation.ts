@@ -13,7 +13,15 @@ export const PresetsSchema = z.object({
     'cloud-run',
     'container-apps',
   ]),
-  ci: z.enum(['github-actions', 'gitlab-ci', 'jenkins', 'azure-devops']),
+  ci: z.enum([
+    'github-actions',
+    'gitlab-ci',
+    'jenkins',
+    'azure-devops',
+    'aws-codepipeline',
+    'gcp-cloud-build',
+    'oci-devops',
+  ]),
 }) as z.ZodType<Presets>;
 
 const HistoryMessageSchema = z.object({
