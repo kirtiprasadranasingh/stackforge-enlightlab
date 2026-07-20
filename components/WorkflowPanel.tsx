@@ -23,12 +23,17 @@ const STEPS = [
   { id: 'validate', label: 'Validate' },
 ] as const;
 
-function stepIndex(phase: WorkflowPhase | 'idle', isGenerating: boolean, hasFiles: boolean, awaitingApproval: boolean): number {
+function stepIndex(
+  phase: WorkflowPhase | 'idle',
+  isGenerating: boolean,
+  hasFiles: boolean,
+  awaitingApproval: boolean
+): number {
   if (phase === 'clarify') return 0;
-  if (phase === 'plan' && isGenerating) return 1;
-  if (awaitingApproval) return 1;
-  if (phase === 'generate' && isGenerating && !hasFiles) return 2;
+  if (phase === 'plan' || awaitingApproval) return 1;
+  if (phase === 'generate' && isGenerating) return 2;
   if (hasFiles) return 3;
+  if (phase === 'generate') return 2;
   return 1;
 }
 
@@ -44,71 +49,136 @@ export function WorkflowPanel({
 }: WorkflowPanelProps) {
   const hasFiles = files.length > 0;
   const active = stepIndex(phase, isGenerating, hasFiles, awaitingApproval);
+  const draftingPlan = isGenerating && phase === 'plan';
+  const writingCode = isGenerating && phase === 'generate';
 
-  if (hasFiles) {
+  // Cursor-like: show the explorer as soon as the first file streams in
+  if (hasFiles && (phase === 'generate' || !draftingPlan)) {
+    const recent = files.slice(-6).reverse();
     return (
-      <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col justify-between gap-4">
+      <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col gap-3">
         <div className="shrink-0 space-y-2">
           <WorkflowStepper active={active} />
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-            Reviewable infrastructure scaffold — validate and review these files before provisioning. This is not drop-in production code.
-          </div>
-          {validationSummary ? (
+          {writingCode ? (
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50/80 px-3 py-2.5">
+              <div className="flex items-center gap-2 text-[11px] font-semibold text-indigo-800">
+                <span className="loading-dots" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                Writing files to the workspace…
+              </div>
+              <ul className="mt-2 space-y-1 max-h-24 overflow-y-auto">
+                {recent.map((f) => (
+                  <li
+                    key={f.path}
+                    className="flex items-center gap-2 text-[11px] font-mono text-slate-700 truncate"
+                  >
+                    <span className="text-emerald-600 shrink-0">+</span>
+                    <span className="truncate">{f.path}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+              Reviewable infrastructure scaffold — validate and review these files before provisioning. This is not drop-in production code.
+            </div>
+          )}
+          {validationSummary && !writingCode ? (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-700 font-mono whitespace-pre-wrap">
               {validationSummary}
             </div>
           ) : null}
         </div>
-        <FileViewer
-          files={files}
-          isGenerating={isGenerating}
-          promptText={promptText}
-          generationStatus={generationStatus}
-        />
+        <div className="flex-1 min-h-0">
+          <FileViewer
+            files={files}
+            isGenerating={isGenerating}
+            promptText={promptText}
+            generationStatus={generationStatus}
+          />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-3">
       <WorkflowStepper active={active} />
-      <div className="flex-1 min-h-0 rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-6 flex flex-col items-center justify-center text-center">
-        {isGenerating && phase === 'plan' ? (
-          <>
-            <span className="loading-dots scale-125 mb-4" aria-hidden>
+      <div className="flex-1 min-h-0 rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white overflow-hidden flex flex-col">
+        {draftingPlan ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <span className="loading-dots scale-125 mb-5" aria-hidden>
               <span />
               <span />
               <span />
             </span>
-            <p className="text-sm font-semibold text-slate-900">Drafting architecture plan</p>
-            <p className="mt-2 text-[12px] text-slate-500 max-w-md leading-relaxed">
-              Turning your confirmed requirements into Terraform, CI/CD, and Kubernetes layout. You&apos;ll approve before any files are generated.
+            <p className="text-sm font-semibold text-slate-900">
+              Drafting architecture plan
             </p>
-          </>
+            <p className="mt-2 text-[12px] text-slate-500 max-w-sm leading-relaxed">
+              Building the stack design from your confirmed choices. You&apos;ll review and approve it before any files are created.
+            </p>
+            <div className="mt-6 w-full max-w-md space-y-2 text-left">
+              {[
+                'Confirm cloud, region, and compute',
+                'Map networking, IAM, and data',
+                'Outline CI/CD and file manifest',
+              ].map((label, i) => (
+                <div
+                  key={label}
+                  className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-600"
+                >
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-50 text-[10px] font-bold text-indigo-600">
+                    {i + 1}
+                  </span>
+                  {label}
+                </div>
+              ))}
+            </div>
+          </div>
         ) : awaitingApproval && pendingPlan ? (
-          <>
-            <p className="text-sm font-semibold text-slate-900 mb-3">Architecture plan ready</p>
-            <div className="w-full max-h-[min(52vh,520px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm">
+          <div className="flex-1 min-h-0 flex flex-col p-4 sm:p-5">
+            <div className="shrink-0 mb-3">
+              <p className="text-sm font-semibold text-slate-900">
+                Architecture plan ready
+              </p>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Review below, then Approve &amp; Generate in chat — or reply with changes.
+              </p>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm">
               <FormattedMessage content={pendingPlan} className="text-slate-700" />
             </div>
-            <p className="mt-3 text-[12px] text-slate-500">
-              Approve in the chat to generate files, or reply with changes.
-            </p>
-          </>
-        ) : (
-          <>
-            <span className="loading-dots scale-125 mb-4" aria-hidden>
+          </div>
+        ) : writingCode ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <span className="loading-dots scale-125 mb-5" aria-hidden>
               <span />
               <span />
               <span />
             </span>
             <p className="text-sm font-semibold text-indigo-700">
-              {generationStatus || 'Generating infrastructure files…'}
+              Generating infrastructure files
             </p>
-            <p className="mt-2 text-[12px] text-slate-500 max-w-md leading-relaxed">
-              Terraform, CI/CD pipelines, Helm charts, and a minimal health-check stub will stream in here. Automated checks run terraform init, validate, and plan where possible.
+            <p className="mt-2 text-[12px] text-slate-500 max-w-sm leading-relaxed">
+              Terraform, CI/CD, Helm charts, and a minimal health stub will stream into the explorer as each file is ready.
             </p>
-          </>
+            <ul className="mt-6 w-full max-w-sm space-y-1.5 text-left text-[11px] font-mono text-slate-500">
+              <li className="flex gap-2"><span className="text-indigo-400">›</span> terraform/</li>
+              <li className="flex gap-2"><span className="text-indigo-400">›</span> .github/workflows/ or pipeline</li>
+              <li className="flex gap-2"><span className="text-indigo-400">›</span> charts/ + Dockerfile + health stub</li>
+            </ul>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <p className="text-sm font-semibold text-slate-700">Workspace ready</p>
+            <p className="mt-2 text-[12px] text-slate-500 max-w-sm">
+              Complete the interview in chat. The architecture plan and generated files will appear here.
+            </p>
+          </div>
         )}
       </div>
     </div>

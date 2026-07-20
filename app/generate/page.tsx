@@ -432,14 +432,16 @@ export default function GeneratePage() {
       setInput('');
       setIsGenerating(true);
       setWorkflowPhase(phase);
+      // Chat keeps a short status only — the right panel owns detailed progress copy
+      // so we don't show "architecture coming" in two places.
       setGenerationStatus(
         phase === 'clarify'
-          ? 'Asking a few requirements questions…'
+          ? 'Asking requirements…'
           : phase === 'plan'
             ? options?.priorPlan || awaitingApproval
-              ? 'Revising architecture plan…'
-              : 'Drafting a detailed architecture plan…'
-            : 'Generating infrastructure files…'
+              ? 'Revising plan…'
+              : 'Planning…'
+            : 'Writing files…'
       );
       setError(null);
       setWarnings([]);
@@ -448,11 +450,12 @@ export default function GeneratePage() {
       if (phase === 'plan' || phase === 'clarify') {
         setPendingQuestions([]);
         setQuestionAnswers({});
-        if (startFresh || !hasFiles) {
-          setFiles([]);
-          setHasGeneratedFiles(false);
-          setSummary('');
-        }
+        // Always clear prior scaffolds when planning — never show "N files generated"
+        // while the architecture is still being drafted.
+        setFiles([]);
+        setHasGeneratedFiles(false);
+        setSummary('');
+        setLastUpdateTime('—');
         // Keep the original stack request when answering questions or revising a plan
         if (phase === 'clarify' || !lastStackPromptRef.current) {
           lastStackPromptRef.current = text;
@@ -593,12 +596,26 @@ export default function GeneratePage() {
                 break;
               case 'status':
                 if (event.message) {
-                  setGenerationStatus(event.message);
+                  // Keep chat status short; detailed progress lives on the right panel.
+                  if (phase === 'plan') {
+                    setGenerationStatus('Planning…');
+                  } else if (phase === 'generate') {
+                    const msg = event.message;
+                    if (/validat|repair|auto-resolv/i.test(msg)) {
+                      setGenerationStatus(msg);
+                    } else if (/generat|writ|stream/i.test(msg)) {
+                      setGenerationStatus('Writing files…');
+                    } else {
+                      setGenerationStatus(msg.slice(0, 48));
+                    }
+                  } else {
+                    setGenerationStatus(event.message);
+                  }
                 }
                 break;
               case 'file':
                 if (event.file) {
-                  setGenerationStatus(`Generating ${event.file.path}…`);
+                  setGenerationStatus(`Writing ${event.file.path}`);
                   mergeFile(event.file);
                   setHasGeneratedFiles(true);
                 }
@@ -675,11 +692,11 @@ export default function GeneratePage() {
               'Choose one option for each requirement below, or type a custom answer.';
           }
           if (receivedPlan) {
-            // Prefer the structured plan body; keep summary as a short lead-in
-            content = receivedPlan;
-            if (assistantText?.trim()) {
-              content = `${assistantText.trim()}\n\n${receivedPlan}`;
-            }
+            // Full plan lives on the right panel (pendingPlan). Chat stays short
+            // so we don't duplicate "architecture coming / plan body" in two places.
+            content =
+              assistantText?.trim() ||
+              'Architecture plan is ready on the right. Review it, then Approve & Generate — or reply with changes.';
           }
           setMessages((prev) => [
             ...prev,
@@ -765,15 +782,7 @@ export default function GeneratePage() {
     const originalPrompt = lastStackPromptRef.current || lastStackPrompt;
     if (!pendingPlan || !originalPrompt || isGenerating) return;
     setWorkspaceOpen(true);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `approve-${Date.now()}`,
-        role: 'assistant',
-        content:
-          'Plan approved — generating Terraform, CI/CD, and a minimal health-check stub. Files will appear in the workspace as they are ready.',
-      },
-    ]);
+    setWorkflowPhase('generate');
     void sendMessage(originalPrompt, {
       phase: 'generate',
       approvedPlan: pendingPlan,
@@ -982,9 +991,26 @@ export default function GeneratePage() {
     );
   }
 
-  // Dynamic project name + provider from generated files / presets / prompt
-  const parsedProjName = deriveProjectName(files, promptVal || input, presets);
+  // Dynamic project name + provider — only claim files once they exist
+  const hasFiles = files.length > 0;
+  const parsedProjName = hasFiles
+    ? deriveProjectName(files, promptVal || input, presets)
+    : workflowPhase === 'plan' || awaitingApproval
+      ? 'Planning…'
+      : workflowPhase === 'generate' && isGenerating
+        ? 'Generating…'
+        : '—';
   const parsedProvider = deriveProviderLabel(files, presets);
+  const blueprintLabel = hasFiles
+    ? isGenerating
+      ? `${files.length} files writing…`
+      : `${files.length} files generated`
+    : workflowPhase === 'plan' || awaitingApproval
+      ? 'No files yet — planning'
+      : workflowPhase === 'generate' && isGenerating
+        ? 'Waiting for first file…'
+        : 'No files yet';
+  const canExport = hasFiles && !isGenerating;
 
   // ——— Workspace (MVP-matched empty state) ———
   return (
@@ -1264,7 +1290,7 @@ export default function GeneratePage() {
                   <div>
                     <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider leading-none">Workspace Blueprint</p>
                     <p className="text-xs font-bold text-gray-800 mt-1">
-                      {files.length} files generated
+                      {blueprintLabel}
                     </p>
                   </div>
                 </div>
@@ -1305,7 +1331,8 @@ export default function GeneratePage() {
                 <button
                   type="button"
                   onClick={handleDownloadZip}
-                  className="text-xs font-bold px-4 py-2.5 bg-white hover:bg-slate-50 text-[#4F46E5] hover:text-[#4338CA] border border-gray-250 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  disabled={!canExport}
+                  className="text-xs font-bold px-4 py-2.5 bg-white hover:bg-slate-50 text-[#4F46E5] hover:text-[#4338CA] border border-gray-250 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
@@ -1315,7 +1342,8 @@ export default function GeneratePage() {
                 <button
                   type="button"
                   onClick={handleCopyAllText}
-                  className="text-xs font-bold px-4 py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white shadow-md shadow-indigo-200/50 rounded-xl transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                  disabled={!canExport}
+                  className="text-xs font-bold px-4 py-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white shadow-md shadow-indigo-200/50 rounded-xl transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 disabled:opacity-40 disabled:pointer-events-none"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 7.5V6.108c0-1.135.845-2.098 1.976-2.192.373-.03.748-.057 1.123-.08M15.75 18H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08M15.75 18.75v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5A3.375 3.375 0 0 0 6.375 7.5H5.25m11.9-3.664A2.251 2.251 0 0 0 15 2.25h-1.5a2.251 2.251 0 0 0-2.15 1.586m5.8 0c.065.21.1.433.1.664v.75h-6V4.5c0-.231.035-.454.1-.664M6.75 7.5H4.875c-.621 0-1.125.504-1.125 1.125v12c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V16.5" />

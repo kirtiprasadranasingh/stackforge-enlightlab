@@ -416,6 +416,10 @@ Plan must use these headings exactly (markdown ## / ### / - bullets; no marker l
 - Cloud, region (assumed if needed), compute, CI, runtime stub, database
 ## Architecture approach
 - How pieces fit: network → compute → data → ingress → CI deploy path (2–4 short bullets)
+## Tools and workflows
+- List ONLY tools that match Confirmed requirements and presets (cloud, orchestrator, CI).
+- Do NOT invent extra tools (SonarQube, Jenkins, CircleCI, EC2-only stacks, etc.) unless the client explicitly asked for them.
+- For each tool, one line: what it does in this scaffold (e.g. GitHub Actions → build/push/deploy; Helm → K8s manifests; Terraform → cloud resources).
 ## Assumptions
 - Explicit assumptions the client can challenge (region, sizing, TLS, secrets placeholders)
 ## Resources to create
