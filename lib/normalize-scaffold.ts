@@ -18,30 +18,71 @@ const RENAME_MAP: Record<string, string> = {
   'go-backend/main.go': 'main.go',
   'go-backend/go.mod': 'go.mod',
   'go-backend/go.sum': 'go.sum',
-  'app/Dockerfile': 'Dockerfile',
-  'app/main.go': 'main.go',
-  'app/go.mod': 'go.mod',
-  'app/go.sum': 'go.sum',
+  // Do NOT map app/Dockerfile → Dockerfile: EKS/Node layouts keep the app/ tree.
+  // Only flatten go-backend/ (handled above). If the model emits a lone
+  // app/Dockerfile with no app sources, normalizeScaffoldFiles may promote it.
   'readme.md': 'README.md',
 };
 
 function canonicalPath(path: string): string {
   const normalized = path.replace(/\\/g, '/').trim();
-  return RENAME_MAP[normalized] || CANONICAL_PATH[normalized] || normalized;
+  if (RENAME_MAP[normalized]) return RENAME_MAP[normalized];
+  // Keep app/* paths in place so Node/EKS scaffolds are not flattened to root.
+  // PATH_ALIASES still treats Dockerfile ↔ app/Dockerfile as satisfying slots.
+  if (normalized.startsWith('app/')) return normalized;
+  return CANONICAL_PATH[normalized] || normalized;
 }
 
-/** Fix Dockerfile COPY paths when moving go-backend/ → root */
-function patchDockerfileForRoot(content: string): string {
-  return content
+/** Fix Dockerfile COPY paths when sources moved from a nested folder to root */
+function patchDockerfileForRoot(content: string, stripAppPrefix: boolean): string {
+  let out = content
     .replace(/COPY\s+go-backend\//g, 'COPY ')
     .replace(/WORKDIR\s+\/app\/go-backend/g, 'WORKDIR /app');
+  if (stripAppPrefix) {
+    out = out.replace(/COPY\s+app\//g, 'COPY ');
+  }
+  return out;
 }
 
-/** Fix pipeline build context when app was nested */
+/** Fix pipeline build context when Dockerfile lives at repo root */
 function patchPipelineForRoot(content: string): string {
   return content
     .replace(/go-backend\/Dockerfile/g, 'Dockerfile')
     .replace(/go-backend\//g, '');
+}
+
+/** Align CI docker build paths with where Dockerfile actually lives */
+function patchPipelineDockerContext(
+  content: string,
+  layout: 'root' | 'app'
+): string {
+  let out = patchPipelineForRoot(content);
+  if (layout === 'app') {
+    // Prefer building from app/ when that is where the Dockerfile + sources live
+    out = out.replace(
+      /docker\s+build(\s+[^\n]*?)\s+\.(?:\s|$)/gi,
+      'docker build$1 ./app '
+    );
+    out = out.replace(
+      /docker\s+build(?![^\n]*-f\s+)/gi,
+      (m) => m // leave alone if no -f; context rewrite above handles `.`
+    );
+    // If CI still points at root Dockerfile but we only have app/Dockerfile
+    out = out.replace(/-f\s+Dockerfile\b/g, '-f app/Dockerfile');
+    out = out.replace(
+      /context:\s*['"]?\.(?:\/)?['"]?/gi,
+      "context: 'app'"
+    );
+  } else {
+    out = out
+      .replace(
+        /docker\s+build(\s+[^\n]*?)(?:\s+-f\s+app\/Dockerfile)?\s+(?:\.\/)?app\b/gi,
+        'docker build$1 .'
+      )
+      .replace(/-f\s+app\/Dockerfile/g, '-f Dockerfile')
+      .replace(/context:\s*['"]?app['"]?/gi, "context: '.'");
+  }
+  return out;
 }
 
 /**
@@ -93,6 +134,26 @@ function patchTerraform(content: string): string {
         : block
   );
 
+  // 6. Cloud SQL MySQL-only flag accidentally set on PostgreSQL instances.
+  out = out.replace(
+    /resource\s+"google_sql_database_instance"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) =>
+      /database_version\s*=\s*"POSTGRES/i.test(block)
+        ? block.replace(/^[ \t]*binary_log_enabled\s*=.*\r?\n/gm, '')
+        : block
+  );
+
+  // 7. VPC Access connector: prefer subnet OR ip_cidr_range, not both.
+  out = out.replace(
+    /resource\s+"google_vpc_access_connector"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) => {
+      if (!/\bsubnet\s*\{/.test(block) || !/\bip_cidr_range\s*=/.test(block)) {
+        return block;
+      }
+      return block.replace(/^[ \t]*ip_cidr_range\s*=.*\r?\n/gm, '');
+    }
+  );
+
   return out;
 }
 
@@ -131,11 +192,20 @@ export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null
   if (!validateFilePath(path)) return null;
 
   let content = file.content;
-  if (path === 'Dockerfile') {
-    content = patchDockerfileForRoot(content);
+  if (path === 'Dockerfile' || /(^|\/)Dockerfile$/.test(path)) {
+    // Per-file pass: only strip go-backend; app/ COPY handled after we know layout
+    content = patchDockerfileForRoot(content, false);
+    if (path !== 'Dockerfile') {
+      // Nested Dockerfile: build context is usually that folder — drop COPY app/
+      content = content.replace(/COPY\s+app\//g, 'COPY ');
+    }
     content = patchDockerfileUser(content);
   }
-  if (path === 'azure-pipelines.yml') {
+  if (
+    path === 'azure-pipelines.yml' ||
+    path === '.gitlab-ci.yml' ||
+    path.startsWith('.github/workflows/')
+  ) {
     content = patchPipelineForRoot(content);
   }
   if (path.endsWith('.tf')) {
@@ -161,5 +231,50 @@ export function normalizeScaffoldFiles(files: GeneratedFile[]): GeneratedFile[] 
     if (!normalized) continue;
     byPath.set(normalized.path, normalized);
   }
+
+  const hasRootDocker = byPath.has('Dockerfile');
+  const appDocker = byPath.get('app/Dockerfile');
+  const appSources = [...byPath.keys()].filter(
+    (p) => p.startsWith('app/') && p !== 'app/Dockerfile'
+  );
+
+  // Promote lone app/Dockerfile → Dockerfile only when there are no other app/*
+  // sources (Go-at-root style). Keep app/Dockerfile for Node/EKS layouts.
+  if (!hasRootDocker && appDocker && appSources.length === 0) {
+    byPath.delete('app/Dockerfile');
+    byPath.set('Dockerfile', {
+      ...appDocker,
+      path: 'Dockerfile',
+      content: patchDockerfileUser(
+        patchDockerfileForRoot(appDocker.content, true)
+      ),
+    });
+  }
+
+  // Root Dockerfile with no app/ tree: strip erroneous COPY app/
+  const rootDocker = byPath.get('Dockerfile');
+  if (rootDocker && appSources.length === 0 && !byPath.has('app/Dockerfile')) {
+    byPath.set('Dockerfile', {
+      ...rootDocker,
+      content: patchDockerfileForRoot(rootDocker.content, true),
+    });
+  }
+
+  const layout: 'root' | 'app' =
+    byPath.has('app/Dockerfile') && !byPath.has('Dockerfile') ? 'app' : 'root';
+
+  for (const [path, file] of [...byPath.entries()]) {
+    if (
+      path === 'azure-pipelines.yml' ||
+      path === '.gitlab-ci.yml' ||
+      path.startsWith('.github/workflows/')
+    ) {
+      byPath.set(path, {
+        ...file,
+        content: patchPipelineDockerContext(file.content, layout),
+      });
+    }
+  }
+
   return Array.from(byPath.values());
 }

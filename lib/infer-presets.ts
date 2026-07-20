@@ -30,6 +30,10 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
     /\boci\b/.test(t) ||
     /\boke\b/.test(t);
 
+  /** True when the user named a cloud/orchestrator — not silent UI defaults. */
+  const namedCloud =
+    mentionsAzure || mentionsAws || mentionsGcp || mentionsOracle;
+
   if (mentionsAzure && !mentionsAws && !mentionsGcp && !mentionsOracle) {
     cloud = 'azure';
   } else if (mentionsAws && !mentionsAzure && !mentionsGcp && !mentionsOracle) {
@@ -40,7 +44,7 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
     cloud = 'oracle';
   }
 
-  if (cloud === 'azure') {
+  if (namedCloud && cloud === 'azure') {
     if (/container\s*apps?/.test(t) || /serverless\s*containers?/.test(t)) {
       orchestrator = 'container-apps';
     } else if (/\baks\b/.test(t) || /kubernetes/.test(t) || /\bk8s\b/.test(t)) {
@@ -48,13 +52,13 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
     } else if (orchestrator !== 'aks' && orchestrator !== 'container-apps') {
       orchestrator = 'container-apps';
     }
-  } else if (cloud === 'aws') {
+  } else if (namedCloud && cloud === 'aws') {
     if (/\becs\b/.test(t) || /\bfargate\b/.test(t)) orchestrator = 'ecs';
     else if (/\beks\b/.test(t) || /kubernetes/.test(t) || /\bk8s\b/.test(t)) orchestrator = 'eks';
-  } else if (cloud === 'gcp') {
+  } else if (namedCloud && cloud === 'gcp') {
     if (/cloud\s*run/.test(t)) orchestrator = 'cloud-run';
     else if (/\bgke\b/.test(t) || /kubernetes/.test(t)) orchestrator = 'gke';
-  } else if (cloud === 'oracle') {
+  } else if (namedCloud && cloud === 'oracle') {
     orchestrator = 'oke';
   }
 
@@ -73,4 +77,14 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
     orchestrator: orchestrator as Orchestrator,
     ci: ci as CIProvider,
   };
+}
+
+/** True when the prompt itself names a cloud/orchestrator (not UI defaults alone). */
+export function promptNamesCloud(prompt: string): boolean {
+  const t = prompt.toLowerCase();
+  return (
+    /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|google\s*cloud)\b/.test(
+      t
+    )
+  );
 }

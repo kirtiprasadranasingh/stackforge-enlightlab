@@ -1,4 +1,5 @@
 import type { Presets } from '@/types';
+import { promptNamesCloud } from '@/lib/infer-presets';
 
 export const CLOUD_LABELS: Record<Presets['cloud'], string> = {
   aws: 'AWS',
@@ -84,23 +85,33 @@ export function cloudFromInterviewAnswer(
     }
   }
 
-  return null;
+  // Direct pick from "Which cloud should we use?" (no Change the cloud: prefix)
+  return detectCloudLabel(text);
 }
 
 /**
  * Detect the cloud proposed in the first "Does this setup match…" question so
  * that a "Change the hosting platform" follow-up can stay within that cloud.
+ * Returns null for open "Which cloud should we use?" questions (all clouds listed).
  */
 export function baseCloudFromSetupQuestion(
   question: string | undefined
 ): Presets['cloud'] | null {
   if (!question) return null;
   const lower = question.toLowerCase();
-  // Order matters: check the more specific labels first.
-  if (lower.includes('oracle cloud infrastructure')) return 'oracle';
-  if (lower.includes('microsoft azure')) return 'azure';
-  if (lower.includes('google cloud')) return 'gcp';
-  if (lower.includes('aws')) return 'aws';
+  if (/^which cloud should we use\?/i.test(question.trim())) return null;
+  // Only trust the proposed target clause, not the options list.
+  const match = lower.match(
+    /does this setup match what you need:\s*(.+?)(?:\?|\(|$)/i
+  );
+  const target = match?.[1] || '';
+  if (!target) return null;
+  if (target.includes('oracle cloud infrastructure') || target.includes('oracle')) {
+    return 'oracle';
+  }
+  if (target.includes('microsoft azure') || target.includes('azure')) return 'azure';
+  if (target.includes('google cloud') || target.includes('gcp')) return 'gcp';
+  if (/\baws\b/.test(target) || target.includes('amazon')) return 'aws';
   return null;
 }
 
@@ -116,9 +127,13 @@ export function adaptClarifyingQuestions(
   if (!chosenCloud) return questions;
 
   const regions = REGION_OPTIONS_BY_CLOUD[chosenCloud].join(' / ');
+  const hosting = HOSTING_OPTIONS_BY_CLOUD[chosenCloud].join(' / ');
   return questions.map((question) => {
     if (/^Where should we host it\?/i.test(question)) {
       return `Where should we host it? (options: ${regions})`;
+    }
+    if (/^Which hosting platform should we use\?/i.test(question)) {
+      return `Which hosting platform should we use? (options: ${hosting})`;
     }
     return question;
   });
@@ -131,6 +146,20 @@ export function formatInterviewAnswerForPlan(rawAnswer: string): string {
 
   if (answer === 'Yes, use this setup') {
     return 'Keep the suggested cloud, hosting platform, and CI/CD as proposed.';
+  }
+
+  // Direct cloud pick from open "Which cloud should we use?"
+  const directCloud = detectCloudLabel(answer);
+  if (
+    directCloud &&
+    /^(AWS|Microsoft Azure|Google Cloud|Oracle Cloud Infrastructure)$/i.test(answer)
+  ) {
+    return `Cloud provider (client override): ${answer}. Use this instead of any default cloud.`;
+  }
+
+  const knownHosting = Object.values(HOSTING_OPTIONS_BY_CLOUD).flat();
+  if (knownHosting.some((h) => h.toLowerCase() === answer.toLowerCase())) {
+    return `Hosting platform (client override): ${answer}. Use this instead of any default hosting platform.`;
   }
 
   if (answer.startsWith('Change the cloud:')) {
@@ -203,14 +232,39 @@ function detectDatabase(prompt: string): string | null {
 
 function detectEnvironments(prompt: string): string[] {
   const text = prompt.toLowerCase();
-  return ['development', 'dev', 'staging', 'production', 'prod']
-    .filter((environment) => new RegExp(`\\b${environment}\\b`).test(text))
-    .map((environment) => {
-      if (environment === 'dev') return 'development';
-      if (environment === 'prod') return 'production';
-      return environment;
-    })
+  const canon = (environment: string) =>
+    environment === 'dev'
+      ? 'development'
+      : environment === 'prod'
+        ? 'production'
+        : environment;
+
+  // Drop any environment the prompt explicitly rules out, e.g. "no staging",
+  // "no phantom staging", "without a staging environment". Without this, the
+  // word inside a negation gets detected and the interview asks for it anyway.
+  const isNegated = (environment: string) =>
+    new RegExp(
+      `\\b(no|without|not|skip|exclude|drop|remove)\\s+(?:\\w+\\s+){0,3}${environment}\\b`
+    ).test(text);
+
+  let found = ['development', 'dev', 'staging', 'production', 'prod']
+    .filter(
+      (environment) =>
+        new RegExp(`\\b${environment}\\b`).test(text) && !isNegated(environment)
+    )
+    .map(canon)
     .filter((environment, index, all) => all.indexOf(environment) === index);
+
+  // "only a production environment" / "production only" / "single environment"
+  // collapses to the one named environment so we don't invent extra stages.
+  const onlyMatch = text.match(
+    /\bonly\s+(?:a\s+|an\s+)?(?:\w+\s+){0,2}(development|dev|staging|production|prod)\b/
+  );
+  if (onlyMatch) {
+    found = [canon(onlyMatch[1])];
+  }
+
+  return found;
 }
 
 /**
@@ -276,15 +330,29 @@ export function buildClarifyingQuestions(
   ].filter(Boolean);
 
   const regionOptions = REGION_OPTIONS_BY_CLOUD[presets.cloud].join(' / ');
+  const namedCloud = promptNamesCloud(prompt);
 
-  const questions = [
-    `Does this setup match what you need: ${target}${
-      details.length ? `, using ${details.join(' and ')}` : ''
-    }? (options: Yes, use this setup / Change the cloud / Change the hosting platform / Change CI/CD)`,
-    `Where should we host it? (options: ${regionOptions})`,
-    buildEnvironmentsQuestion(environments),
-    'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
-  ];
+  // When the user did not name a cloud, do NOT assert silent UI defaults (AWS/EKS).
+  const setupQuestion = namedCloud
+    ? `Does this setup match what you need: ${target}${
+        details.length ? `, using ${details.join(' and ')}` : ''
+      }? (options: Yes, use this setup / Change the cloud / Change the hosting platform / Change CI/CD)`
+    : `Which cloud should we use? (options: AWS / Microsoft Azure / Google Cloud / Oracle Cloud Infrastructure)`;
+
+  const questions = namedCloud
+    ? [
+        setupQuestion,
+        `Where should we host it? (options: ${regionOptions})`,
+        buildEnvironmentsQuestion(environments),
+        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
+      ]
+    : [
+        setupQuestion,
+        'Which hosting platform should we use? (options: Managed Kubernetes / Serverless containers)',
+        `Where should we host it? (options: ${regionOptions})`,
+        buildEnvironmentsQuestion(environments),
+        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
+      ];
 
   if (database) {
     questions.push(

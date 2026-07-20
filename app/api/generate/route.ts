@@ -27,6 +27,7 @@ import {
   isIterativeEditPrompt,
   requiresPlanApproval,
   isConversationalPrompt,
+  isOutOfScopeOpsPrompt,
 } from '@/lib/stack-intent';
 import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import {
@@ -497,6 +498,34 @@ export async function POST(request: NextRequest) {
         'Rate limit exceeded. Please try again later.',
         rateLimitResult.remaining
       );
+    }
+
+    if (isOutOfScopeOpsPrompt(prompt)) {
+      const stream = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(sse({ type: 'status', message: 'Checking scope…' }));
+          await new Promise((r) => setTimeout(r, 300));
+          controller.enqueue(
+            sse({
+              type: 'summary',
+              summary:
+                "I'm a generator only — I produce reviewable Terraform, CI/CD, and Kubernetes/Helm scaffolds (plus a minimal health stub). I don't provision cloud resources, manage DNS, pay bills, or install CMS products like WordPress.\n\nDescribe the stack you want as infrastructure code (cloud, compute, CI, database if any), and I'll interview you, draft a plan, then generate files.",
+            })
+          );
+          controller.enqueue(sse({ type: 'warnings', warnings: [] }));
+          controller.enqueue(sse({ type: 'done' }));
+          controller.close();
+        },
+      });
+      return new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+          ...cors,
+        },
+      });
     }
 
     if (isConversationalPrompt(prompt)) {
