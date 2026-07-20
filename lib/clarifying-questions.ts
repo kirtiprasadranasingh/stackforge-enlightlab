@@ -40,6 +40,23 @@ export const HOSTING_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
   oracle: ['Oracle Kubernetes Engine (OKE)'],
 };
 
+/** Parse "Question text? (options: A / B / C)" into prompt + options. */
+export function parseClarifyingQuestion(raw: string): {
+  prompt: string;
+  options: string[];
+} {
+  const match = raw.match(/^([\s\S]*?)\s*\(options:\s*([\s\S]*?)\)\s*$/i);
+  if (!match) return { prompt: raw, options: [] };
+
+  return {
+    prompt: match[1].trim(),
+    options: match[2]
+      .split(/\s+\/\s+/)
+      .map((option) => option.trim())
+      .filter(Boolean),
+  };
+}
+
 function detectCloudLabel(text: string): Presets['cloud'] | null {
   const value = text.toLowerCase();
   if (value.includes('oracle')) return 'oracle';

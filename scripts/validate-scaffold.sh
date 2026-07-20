@@ -25,13 +25,23 @@ echo "----------------------------------------"
 # Create a unique temporary directory for this validation run's parallel logs
 JOB_DIR=$(mktemp -d /tmp/scaffold-jobs-XXXXXX)
 
-# Job 1: Terraform init + validate
+# Job 1: Terraform init + validate + plan (plan is non-blocking when creds/vars missing)
 check_tf() {
   if [ -d "$SCAFFOLD_DIR/terraform" ]; then
     cd "$SCAFFOLD_DIR/terraform" || exit 1
     if terraform init -backend=false -input=false > "$JOB_DIR/tf_init.log" 2>&1; then
       if terraform validate -json > "$JOB_DIR/tf_validate.json" 2>"$JOB_DIR/tf_validate.log"; then
-        echo "PASS" > "$JOB_DIR/tf_status"
+        set +e
+        terraform plan -input=false -refresh=false -lock=false -no-color > "$JOB_DIR/tf_plan.log" 2>&1
+        PLAN_EXIT=$?
+        set -e
+        if [ "$PLAN_EXIT" -eq 0 ] || [ "$PLAN_EXIT" -eq 2 ]; then
+          echo "PASS" > "$JOB_DIR/tf_status"
+        elif grep -qiE 'credential|auth|access denied|unauthorized|no valid credential|could not load credentials|account.*not found|invalid provider configuration|missing required argument|required variable' "$JOB_DIR/tf_plan.log" 2>/dev/null; then
+          echo "PASS_VALIDATE_ONLY" > "$JOB_DIR/tf_status"
+        else
+          echo "WARN_PLAN" > "$JOB_DIR/tf_status"
+        fi
       else
         echo "FAIL_VALIDATE" > "$JOB_DIR/tf_status"
       fi
@@ -134,8 +144,10 @@ wait $PID_TF $PID_HADO $PID_HELM $PID_ACTION
 if [ -f "$JOB_DIR/tf_status" ]; then
   TF_RES=$(cat "$JOB_DIR/tf_status")
   case "$TF_RES" in
-    PASS) log_pass "terraform validate" ;;
-    FAIL_VALIDATE) log_fail "terraform validate -- $(tail -c 1500 "$JOB_DIR/tf_validate.log" "$JOB_DIR/tf_validate.json" 2>/dev/null | tr '\n' ' ')" ;;
+    PASS) log_pass "terraform init"; log_pass "terraform validate"; log_pass "terraform plan" ;;
+    PASS_VALIDATE_ONLY) log_pass "terraform init"; log_pass "terraform validate"; log_warn "terraform plan skipped — cloud credentials or required variables not available (expected in generator QA)" ;;
+    WARN_PLAN) log_pass "terraform init"; log_pass "terraform validate"; log_warn "terraform plan -- $(tail -c 1200 "$JOB_DIR/tf_plan.log" 2>/dev/null | tr '\n' ' ')" ;;
+    FAIL_VALIDATE) log_pass "terraform init"; log_fail "terraform validate -- $(tail -c 1500 "$JOB_DIR/tf_validate.log" "$JOB_DIR/tf_validate.json" 2>/dev/null | tr '\n' ' ')" ;;
     FAIL_INIT) log_fail "terraform init -- $(tail -c 1500 "$JOB_DIR/tf_init.log" | tr '\n' ' ')" ;;
     SKIP) log_info "no terraform/ directory found, skipping" ;;
   esac

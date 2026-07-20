@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
 import Link from 'next/link';
 import type {
   Presets,
@@ -20,14 +20,14 @@ import { FileViewer } from '@/components/FileViewer';
 import { BrandLockup } from '@/components/BrandLockup';
 import { copyToClipboard } from '@/lib/clipboard';
 import { FormattedMessage } from '@/components/FormattedMessage';
+import { ClarifyingInterview } from '@/components/ClarifyingInterview';
 import {
-  ClarifyingInterview,
-  parseClarifyingQuestion,
-} from '@/components/ClarifyingInterview';
-import {
-  adaptClarifyingQuestions,
-  formatInterviewAnswerForPlan,
-} from '@/lib/clarifying-questions';
+  buildInterviewChoiceItems,
+  formatInterviewAnswersForPlan,
+  type InterviewChoiceItem,
+} from '@/lib/interview-choices';
+import { ConfirmedChoicesCard } from '@/components/ConfirmedChoicesCard';
+import { WorkflowPanel } from '@/components/WorkflowPanel';
 import { inferPresetsFromPrompt } from '@/lib/infer-presets';
 import {
   isFullStackPrompt,
@@ -42,6 +42,8 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  kind?: 'text' | 'confirmed-choices';
+  choices?: InterviewChoiceItem[];
 }
 
 interface SendOptions {
@@ -50,31 +52,19 @@ interface SendOptions {
   priorPlan?: string;
   /** Skip adding a user bubble (e.g. Approve button) */
   skipUserBubble?: boolean;
+  interviewChoices?: InterviewChoiceItem[];
 }
 
 const MIN_WORKFLOW_THINKING_MS = 2000;
 
-function formatInterviewAnswers(
-  questions: string[],
-  answers: Record<number, string>
-): string {
-  const effective = adaptClarifyingQuestions(questions, answers);
-  const lines: string[] = ['Confirmed choices:'];
-  effective.forEach((question, index) => {
-    const prompt = parseClarifyingQuestion(question).prompt.replace(/\?$/, '');
-    const raw = (answers[index] || '').trim();
-    if (!raw) return;
-    const pretty = formatInterviewAnswerForPlan(raw)
-      .replace(/^Keep the suggested cloud, hosting platform, and CI\/CD as proposed\.$/, 'Yes — keep the suggested setup')
-      .replace(/^Cloud provider \(client override\):\s*/i, 'Cloud: ')
-      .replace(/^Hosting platform \(client override\):\s*/i, 'Hosting: ')
-      .replace(/^CI\/CD system \(client override\):\s*/i, 'CI/CD: ')
-      .replace(/\s*Use this instead of[^.]*\./gi, '')
-      .trim();
-    lines.push(`${index + 1}. ${prompt}`);
-    lines.push(`   → ${pretty}`);
-  });
-  return lines.join('\n');
+function renderChatMessage(
+  m: ChatMessage,
+  roleClass: string
+): ReactNode {
+  if (m.kind === 'confirmed-choices' && m.choices?.length) {
+    return <ConfirmedChoicesCard items={m.choices} compact />;
+  }
+  return <FormattedMessage content={m.content} className={roleClass} />;
 }
 
 function titleCase(s: string): string {
@@ -248,6 +238,7 @@ export default function GeneratePage() {
   const [hasGeneratedFiles, setHasGeneratedFiles] = useState(false);
   /** Open split workspace as soon as Approve starts — avoid chat jumping when first file arrives. */
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [workflowPhase, setWorkflowPhase] = useState<WorkflowPhase | 'idle'>('idle');
   const [summary, setSummary] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -432,12 +423,15 @@ export default function GeneratePage() {
           {
             id: `u-${Date.now()}`,
             role: 'user',
-            content: text,
+            content: options?.interviewChoices?.length ? '' : text,
+            kind: options?.interviewChoices?.length ? 'confirmed-choices' : 'text',
+            choices: options?.interviewChoices,
           },
         ]);
       }
       setInput('');
       setIsGenerating(true);
+      setWorkflowPhase(phase);
       setGenerationStatus(
         phase === 'clarify'
           ? 'Asking a few requirements questions…'
@@ -470,6 +464,10 @@ export default function GeneratePage() {
         ) {
           setLastStackPrompt(text);
         }
+      }
+
+      if (phase === 'plan' || (phase === 'generate' && (startFresh || options?.approvedPlan))) {
+        setWorkspaceOpen(true);
       }
 
       if (phase === 'generate' && (startFresh || options?.approvedPlan)) {
@@ -805,11 +803,12 @@ export default function GeneratePage() {
     });
     if (incomplete) return;
 
-    const formattedAnswers = formatInterviewAnswers(
+    const choices = buildInterviewChoiceItems(pendingQuestions, questionAnswers);
+    const formattedAnswers = formatInterviewAnswersForPlan(
       pendingQuestions,
       questionAnswers
     );
-    void sendMessage(formattedAnswers, { phase: 'plan' });
+    void sendMessage(formattedAnswers, { phase: 'plan', interviewChoices: choices });
   }, [isGenerating, pendingQuestions, questionAnswers, sendMessage]);
 
   const handleStop = () => {
@@ -832,6 +831,7 @@ export default function GeneratePage() {
     setFiles([]);
     setHasGeneratedFiles(false);
     setWorkspaceOpen(false);
+    setWorkflowPhase('idle');
     setSummary('');
     setWarnings([]);
     setError(null);
@@ -1082,20 +1082,24 @@ export default function GeneratePage() {
                       </div>
                     )}
                     <div className={`min-w-0 flex flex-col ${m.role === 'user' ? 'max-w-[88%] items-end' : 'max-w-[88%]'}`}>
-                      <div
-                        className={`rounded-2xl px-3.5 py-2.5 leading-relaxed min-w-0 max-w-full overflow-hidden ${
-                          m.role === 'user'
-                            ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40 font-medium'
-                              : m.role === 'system'
-                              ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
-                                ? 'bg-rose-50 border border-rose-200/80 text-rose-800 rounded-xl shadow-sm'
-                                : 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl shadow-sm'
-                              : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'
-                        }`}
-                      >
-                        <FormattedMessage
-                          content={m.content}
-                          className={
+                      {m.kind === 'confirmed-choices' && m.choices?.length ? (
+                        <div className="w-full max-w-md">
+                          {renderChatMessage(m, '')}
+                        </div>
+                      ) : (
+                        <div
+                          className={`rounded-2xl px-3.5 py-2.5 leading-relaxed min-w-0 max-w-full overflow-hidden ${
+                            m.role === 'user'
+                              ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40 font-medium'
+                                : m.role === 'system'
+                                ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
+                                  ? 'bg-rose-50 border border-rose-200/80 text-rose-800 rounded-xl shadow-sm'
+                                  : 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl shadow-sm'
+                                : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'
+                          }`}
+                        >
+                          {renderChatMessage(
+                            m,
                             m.role === 'user'
                               ? 'text-white'
                               : m.role === 'system'
@@ -1103,9 +1107,9 @@ export default function GeneratePage() {
                                   ? 'text-rose-800'
                                   : 'text-amber-900'
                                 : 'text-slate-700'
-                          }
-                        />
-                      </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1322,15 +1326,15 @@ export default function GeneratePage() {
             </div>
 
             {/* Split View Editor Workspace */}
-            <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col justify-between gap-4">
-              <div className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-                Reviewable infrastructure scaffold — validate and review these files before provisioning. This is not drop-in production code.
-              </div>
-              <FileViewer
+            <div className="flex-1 min-h-0 overflow-hidden bg-white flex flex-col justify-between gap-4 transition-opacity duration-300">
+              <WorkflowPanel
+                phase={workflowPhase}
                 files={files}
                 isGenerating={isGenerating}
-                promptText={promptVal}
                 generationStatus={generationStatus}
+                promptText={promptVal}
+                pendingPlan={pendingPlan}
+                awaitingApproval={awaitingApproval}
               />
             </div>
           </section>
@@ -1352,20 +1356,26 @@ export default function GeneratePage() {
                     </div>
                   )}
                   <div className={`min-w-0 max-w-[85%] flex flex-col ${m.role === 'user' ? 'items-end' : ''}`}>
-                    <div
-                      className={`rounded-2xl px-4 py-2.5 min-w-0 max-w-full overflow-hidden ${
-                        m.role === 'user'
-                          ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40'
-                          : m.role === 'system'
-                            ? 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl'
-                            : 'bg-white border border-[#E2E8F0] text-[#0F172A] rounded-tl-sm shadow-sm'
-                      }`}
-                    >
-                      <FormattedMessage
-                        content={m.content}
-                        className={m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-amber-900' : 'text-slate-700'}
-                      />
-                    </div>
+                    {m.kind === 'confirmed-choices' && m.choices?.length ? (
+                      <div className="w-full max-w-md">
+                        {renderChatMessage(m, '')}
+                      </div>
+                    ) : (
+                      <div
+                        className={`rounded-2xl px-4 py-2.5 min-w-0 max-w-full overflow-hidden ${
+                          m.role === 'user'
+                            ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40'
+                            : m.role === 'system'
+                              ? 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl'
+                              : 'bg-white border border-[#E2E8F0] text-[#0F172A] rounded-tl-sm shadow-sm'
+                        }`}
+                      >
+                        {renderChatMessage(
+                          m,
+                          m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-amber-900' : 'text-slate-700'
+                        )}
+                      </div>
+                    )}
                   </div>
                   {m.role === 'user' && (
                     <div className="w-7 h-7 rounded-full bg-[#4F46E5] flex items-center justify-center text-white shrink-0 shadow-sm text-[10px] font-extrabold font-sans tracking-wide select-none">

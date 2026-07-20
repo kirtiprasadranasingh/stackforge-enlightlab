@@ -6,7 +6,10 @@ import {
   adaptClarifyingQuestions,
   baseCloudFromSetupQuestion,
   cloudFromInterviewAnswer,
+  parseClarifyingQuestion,
 } from '@/lib/clarifying-questions';
+
+export { parseClarifyingQuestion };
 
 interface ClarifyingInterviewProps {
   questions: string[];
@@ -62,22 +65,6 @@ function hostingOptionsForCloud(cloudLabel: string | null): string[] {
   );
   if (cloud) return HOSTING_OPTIONS_BY_CLOUD[cloud];
   return ALL_HOSTING_OPTIONS;
-}
-
-export function parseClarifyingQuestion(raw: string): {
-  prompt: string;
-  options: string[];
-} {
-  const match = raw.match(/^([\s\S]*?)\s*\(options:\s*([\s\S]*?)\)\s*$/i);
-  if (!match) return { prompt: raw, options: [] };
-
-  return {
-    prompt: match[1].trim(),
-    options: match[2]
-      .split(/\s+\/\s+/)
-      .map((option) => option.trim())
-      .filter(Boolean),
-  };
 }
 
 function parseStructuredAnswer(
