@@ -55,7 +55,7 @@ interface SendOptions {
   interviewChoices?: InterviewChoiceItem[];
 }
 
-const MIN_WORKFLOW_THINKING_MS = 2000;
+const MIN_WORKFLOW_THINKING_MS = 2800;
 
 function renderChatMessage(
   m: ChatMessage,
@@ -993,24 +993,41 @@ export default function GeneratePage() {
 
   // Dynamic project name + provider — only claim files once they exist
   const hasFiles = files.length > 0;
+  const planReady = awaitingApproval && Boolean(pendingPlan) && !isGenerating;
+  const draftingPlan = workflowPhase === 'plan' && isGenerating;
   const parsedProjName = hasFiles
     ? deriveProjectName(files, promptVal || input, presets)
-    : workflowPhase === 'plan' || awaitingApproval
-      ? 'Planning…'
-      : workflowPhase === 'generate' && isGenerating
-        ? 'Generating…'
-        : '—';
+    : planReady
+      ? 'Plan ready'
+      : draftingPlan
+        ? 'Planning…'
+        : workflowPhase === 'generate' && isGenerating
+          ? 'Generating…'
+          : '—';
   const parsedProvider = deriveProviderLabel(files, presets);
   const blueprintLabel = hasFiles
     ? isGenerating
       ? `${files.length} files writing…`
       : `${files.length} files generated`
-    : workflowPhase === 'plan' || awaitingApproval
-      ? 'No files yet — planning'
-      : workflowPhase === 'generate' && isGenerating
-        ? 'Waiting for first file…'
-        : 'No files yet';
+    : planReady
+      ? 'No files yet — awaiting approval'
+      : draftingPlan
+        ? 'No files yet — planning'
+        : workflowPhase === 'generate' && isGenerating
+          ? 'Waiting for first file…'
+          : 'No files yet';
   const canExport = hasFiles && !isGenerating;
+
+  const discardPlan = () => {
+    setAwaitingApproval(false);
+    setPendingPlan(null);
+    setPendingQuestions([]);
+    setQuestionAnswers({});
+    setLastStackPrompt('');
+    lastStackPromptRef.current = '';
+    setWorkspaceOpen(false);
+    setWorkflowPhase('idle');
+  };
 
   // ——— Workspace (MVP-matched empty state) ———
   return (
@@ -1157,32 +1174,25 @@ export default function GeneratePage() {
                   </div>
                 )}
                 {awaitingApproval && pendingPlan && !isGenerating && (
-                  <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5 shadow-sm">
+                  <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3.5 space-y-2.5 shadow-md shadow-indigo-100/50 animate-approve-slide">
                     <p className="text-[12px] font-semibold text-slate-900">
                       Do you want to go forward with this plan?
                     </p>
                     <p className="text-[11px] text-slate-600 leading-relaxed">
-                      Approve to generate infrastructure files (Terraform, CI/CD, manifests + a minimal health stub). Or reply with changes to revise.
+                      The full plan is on the right. Approve here or there to generate files — or reply with changes.
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={approvePlan}
-                        className="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                        className="text-[11px] font-bold px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer shadow-sm"
                       >
                         Yes — Approve &amp; Generate
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setAwaitingApproval(false);
-                          setPendingPlan(null);
-                          setPendingQuestions([]);
-                          setQuestionAnswers({});
-                          setLastStackPrompt('');
-                          lastStackPromptRef.current = '';
-                        }}
-                        className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                        onClick={discardPlan}
+                        className="text-[11px] font-semibold px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
                       >
                         Discard plan
                       </button>
@@ -1363,6 +1373,8 @@ export default function GeneratePage() {
                 promptText={promptVal}
                 pendingPlan={pendingPlan}
                 awaitingApproval={awaitingApproval}
+                onApprove={approvePlan}
+                onDiscard={discardPlan}
               />
             </div>
           </section>
@@ -1430,32 +1442,25 @@ export default function GeneratePage() {
                 </div>
               )}
               {awaitingApproval && pendingPlan && !isGenerating && (
-                <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-2.5 shadow-sm">
+                <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-3.5 space-y-2.5 shadow-md shadow-indigo-100/50 animate-approve-slide">
                   <p className="text-xs font-semibold text-slate-900">
                     Do you want to go forward with this plan?
                   </p>
                   <p className="text-[11px] text-slate-600 leading-relaxed">
-                    Approve to generate infrastructure files (Terraform, CI/CD, manifests + a minimal health stub). Or reply with changes to revise.
+                    Approve to generate infrastructure files, or reply with changes to revise.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={approvePlan}
-                      className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
+                      className="text-xs font-bold px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer shadow-sm"
                     >
                       Yes — Approve &amp; Generate
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setAwaitingApproval(false);
-                        setPendingPlan(null);
-                        setPendingQuestions([]);
-                        setQuestionAnswers({});
-                        setLastStackPrompt('');
-                        lastStackPromptRef.current = '';
-                      }}
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                      onClick={discardPlan}
+                      className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
                     >
                       Discard plan
                     </button>

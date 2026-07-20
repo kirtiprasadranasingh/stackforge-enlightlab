@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { WorkflowPhase } from '@/types';
 import { FileViewer } from '@/components/FileViewer';
 import type { GeneratedFile } from '@/types';
@@ -14,6 +15,8 @@ interface WorkflowPanelProps {
   pendingPlan: string | null;
   awaitingApproval: boolean;
   validationSummary?: string;
+  onApprove?: () => void;
+  onDiscard?: () => void;
 }
 
 const STEPS = [
@@ -22,6 +25,8 @@ const STEPS = [
   { id: 'generate', label: 'Generate code' },
   { id: 'validate', label: 'Validate' },
 ] as const;
+
+const PLAN_REVEAL_MS = 1200;
 
 function stepIndex(
   phase: WorkflowPhase | 'idle',
@@ -46,11 +51,29 @@ export function WorkflowPanel({
   pendingPlan,
   awaitingApproval,
   validationSummary,
+  onApprove,
+  onDiscard,
 }: WorkflowPanelProps) {
   const hasFiles = files.length > 0;
   const active = stepIndex(phase, isGenerating, hasFiles, awaitingApproval);
   const draftingPlan = isGenerating && phase === 'plan';
   const writingCode = isGenerating && phase === 'generate';
+  const planReady = Boolean(awaitingApproval && pendingPlan && !isGenerating);
+
+  // Brief beat after the model finishes so the plan slides in — doesn't pop instantly.
+  const [planReveal, setPlanReveal] = useState<'idle' | 'settling' | 'shown'>(
+    'idle'
+  );
+
+  useEffect(() => {
+    if (!planReady || !pendingPlan) {
+      setPlanReveal('idle');
+      return;
+    }
+    setPlanReveal('settling');
+    const timer = window.setTimeout(() => setPlanReveal('shown'), PLAN_REVEAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [planReady, pendingPlan]);
 
   // Cursor-like: show the explorer as soon as the first file streams in
   if (hasFiles && (phase === 'generate' || !draftingPlan)) {
@@ -107,9 +130,9 @@ export function WorkflowPanel({
   return (
     <div className="flex-1 min-h-0 flex flex-col gap-3">
       <WorkflowStepper active={active} />
-      <div className="flex-1 min-h-0 rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white overflow-hidden flex flex-col">
+      <div className="flex-1 min-h-0 rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white overflow-hidden flex flex-col relative">
         {draftingPlan ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center animate-fade-slide-up">
             <span className="loading-dots scale-125 mb-5" aria-hidden>
               <span />
               <span />
@@ -129,7 +152,8 @@ export function WorkflowPanel({
               ].map((label, i) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-600"
+                  className="flex items-center gap-2.5 rounded-lg border border-slate-100 bg-white px-3 py-2 text-[11px] text-slate-600 animate-pop-item"
+                  style={{ animationDelay: `${i * 120}ms` }}
                 >
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-50 text-[10px] font-bold text-indigo-600">
                     {i + 1}
@@ -139,19 +163,72 @@ export function WorkflowPanel({
               ))}
             </div>
           </div>
-        ) : awaitingApproval && pendingPlan ? (
-          <div className="flex-1 min-h-0 flex flex-col p-4 sm:p-5">
-            <div className="shrink-0 mb-3">
-              <p className="text-sm font-semibold text-slate-900">
-                Architecture plan ready
-              </p>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Review below, then Approve &amp; Generate in chat — or reply with changes.
-              </p>
+        ) : planReady && planReveal !== 'shown' ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <span className="loading-dots scale-125 mb-5" aria-hidden>
+              <span />
+              <span />
+              <span />
+            </span>
+            <p className="text-sm font-semibold text-slate-900">
+              Assembling your architecture plan
+            </p>
+            <p className="mt-2 text-[12px] text-slate-500 max-w-sm leading-relaxed">
+              Almost ready — laying out the blueprint on this screen…
+            </p>
+          </div>
+        ) : planReady && pendingPlan ? (
+          <div className="flex-1 min-h-0 flex flex-col animate-plan-reveal">
+            <div className="shrink-0 px-4 sm:px-5 pt-4 pb-2">
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100">
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                  </svg>
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Architecture plan ready
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Review the blueprint, then approve to generate files.
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm">
+            <div className="flex-1 min-h-0 overflow-y-auto mx-4 sm:mx-5 mb-3 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm">
               <FormattedMessage content={pendingPlan} className="text-slate-700" />
             </div>
+            {(onApprove || onDiscard) && (
+              <div className="shrink-0 border-t border-indigo-100 bg-gradient-to-r from-indigo-50 via-white to-violet-50 px-4 sm:px-5 py-3.5 animate-approve-slide">
+                <p className="text-[12px] font-semibold text-slate-900 mb-0.5">
+                  Ready to go forward with this plan?
+                </p>
+                <p className="text-[11px] text-slate-500 mb-3 leading-relaxed">
+                  Approve to generate Terraform, CI/CD, Helm, and a minimal health stub — or discard and revise.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {onApprove ? (
+                    <button
+                      type="button"
+                      onClick={onApprove}
+                      className="text-[12px] font-bold px-4 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-200/60 cursor-pointer active:scale-[0.98] transition-all"
+                    >
+                      Yes — Approve &amp; Generate
+                    </button>
+                  ) : null}
+                  {onDiscard ? (
+                    <button
+                      type="button"
+                      onClick={onDiscard}
+                      className="text-[12px] font-semibold px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      Discard plan
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            )}
           </div>
         ) : writingCode ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
@@ -166,11 +243,6 @@ export function WorkflowPanel({
             <p className="mt-2 text-[12px] text-slate-500 max-w-sm leading-relaxed">
               Terraform, CI/CD, Helm charts, and a minimal health stub will stream into the explorer as each file is ready.
             </p>
-            <ul className="mt-6 w-full max-w-sm space-y-1.5 text-left text-[11px] font-mono text-slate-500">
-              <li className="flex gap-2"><span className="text-indigo-400">›</span> terraform/</li>
-              <li className="flex gap-2"><span className="text-indigo-400">›</span> .github/workflows/ or pipeline</li>
-              <li className="flex gap-2"><span className="text-indigo-400">›</span> charts/ + Dockerfile + health stub</li>
-            </ul>
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
