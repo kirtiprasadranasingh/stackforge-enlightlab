@@ -100,6 +100,23 @@ export function FormattedMessage({ content, className }: FormattedMessageProps) 
           );
         }
 
+        const answerArrow = trimmed.match(/^(→|->)\s+(.*)$/);
+        if (answerArrow) {
+          return (
+            <div
+              key={idx}
+              className={`pl-5 text-[12px] ${
+                isUserBubble ? 'text-indigo-100' : 'text-slate-600'
+              }`}
+            >
+              <span className={isUserBubble ? 'text-white/80' : 'text-indigo-500'}>
+                →{' '}
+              </span>
+              {parseInlineParts(answerArrow[2], isUserBubble)}
+            </div>
+          );
+        }
+
         return (
           <p key={idx} className="min-w-0">
             {parseInlineParts(trimmed, isUserBubble)}

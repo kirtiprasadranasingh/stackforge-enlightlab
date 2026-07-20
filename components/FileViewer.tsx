@@ -578,17 +578,36 @@ export function FileViewer({
                   theme={editorTheme}
                 />
               </div>
+            ) : isGenerating ? (
+              <div
+                className={`h-full flex flex-col items-center justify-center gap-3 px-8 text-center ${
+                  isDark ? 'text-[#cccccc] bg-[#1e1e1e]' : 'text-slate-600 bg-slate-50/80'
+                }`}
+                role="status"
+                aria-live="polite"
+              >
+                <span className="loading-dots scale-125" aria-hidden>
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <p className="text-sm font-semibold text-indigo-700">
+                  {generationStatus || 'Generating infrastructure files…'}
+                </p>
+                <p className="text-[12px] max-w-sm leading-relaxed opacity-80">
+                  Terraform, CI/CD, and a minimal health-check stub will appear here as they stream in. Please wait — editing is available after generation finishes.
+                </p>
+              </div>
             ) : (
               <div
                 className={`h-full flex items-center justify-center text-[13px] px-6 text-center ${
                   isDark ? 'text-[#858585]' : 'text-[#616161]'
                 }`}
               >
-                Open a file from Explorer. Tabs stay closed until you select a file
-                {isGenerating ? ' (preview follows the latest generated file).' : '.'}
+                Open a file from Explorer. Tabs stay closed until you select a file.
               </div>
             )}
-            {isGenerating && (
+            {isGenerating && files.length > 0 && (
               <div className="absolute bottom-3 right-3 text-[11px] px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white shadow flex items-center gap-2 max-w-[320px]">
                 <span className="loading-dots" aria-hidden>
                   <span />

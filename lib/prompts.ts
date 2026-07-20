@@ -64,6 +64,9 @@ Instead:
 - Give the user clear options to choose from (e.g., cloud provider AWS/GCP/Azure/OCI, orchestrator Kubernetes/Serverless/Containers) and ask for confirmation.
 - Only generate the infrastructure configuration files once you have received the required clear details from the client chat conversation.
 - **Scope**: generate Terraform + CI/CD + container/orchestration + a *minimal* health-check app stub for build consistency. Do not invent a full business application.
+- The health stub is **build/probe glue only**: one entry file (e.g. \`server.js\` / \`main.go\` / \`main.py\`) exposing \`GET /health\`, plus Dockerfile and the smallest lockfile/manifest needed to build. No CRUD, auth, UI pages, frameworks beyond the HTTP listener, multi-module apps, or product features.
+- Match the **runtime named in the approved plan / user prompt** (Next.js → Node health stub, not .NET). Never swap languages.
+- Helm may include a small \`_helpers.tpl\` for naming — that is orchestration scaffolding, not an application. Keep chart templates lean (deployment, service, ingress, hpa).
 
 ### A3. Required output artifacts
 
@@ -466,6 +469,8 @@ ${planBlock}## Scope boundary (hard)
 - Emit Terraform + CI/CD + Dockerfile + orchestration manifests that fit together.
 - App sources may only be a **minimal stub** so the image builds and \`/health\` works (e.g. tiny
   Express/Go/FastAPI entry + lockfiles). Do **not** invent a full product/application
+  (no Next.js app router tree, no .NET Controllers/Services, no Spring Boot layers).
+- Prefer the language from the plan. If the user asked for Next.js/Node, emit a Node \`/health\` stub — not .NET/Java/Python unless they chose that runtime.
   (no auth systems, CRUD domains, UI apps, or business features).
 - Label the result as a reviewable starting scaffold — not drop-in production.
 

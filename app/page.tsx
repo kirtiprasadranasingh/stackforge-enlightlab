@@ -13,10 +13,10 @@ export default function HomePage() {
             FREE · 30 SECONDS · NO ACCOUNT NEEDED
           </span>
           <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-gray-900 leading-tight mb-4">
-            How cloud-ready is <span className="text-indigo-600">your stack?</span>
+            Create your <span className="text-indigo-600">Terraform scripts</span> in minutes.
           </h1>
           <p className="text-sm sm:text-base text-gray-500 max-w-xl mx-auto mb-8 leading-relaxed">
-            Describe your infrastructure in plain English and get an instant, copyable scaffold: Terraform, CI/CD, and container/orchestration manifests — plus a minimal health stub. Reviewable starting point, not drop-in production.
+            Describe your infrastructure in plain English. StackForge interviews you like a consultant, drafts a plan for approval, then generates Terraform, CI/CD, and container manifests — plus a minimal health-check stub. Reviewable starting point, not a full application.
           </p>
           <div className="flex justify-center mb-12">
             <Link

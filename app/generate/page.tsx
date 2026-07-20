@@ -59,13 +59,22 @@ function formatInterviewAnswers(
   answers: Record<number, string>
 ): string {
   const effective = adaptClarifyingQuestions(questions, answers);
-  return effective
-    .map((question, index) => {
-      const prompt = parseClarifyingQuestion(question).prompt;
-      const raw = answers[index] || '';
-      return `${index + 1}. ${prompt}\nSelected answer: ${formatInterviewAnswerForPlan(raw)}`;
-    })
-    .join('\n\n');
+  const lines: string[] = ['Confirmed choices:'];
+  effective.forEach((question, index) => {
+    const prompt = parseClarifyingQuestion(question).prompt.replace(/\?$/, '');
+    const raw = (answers[index] || '').trim();
+    if (!raw) return;
+    const pretty = formatInterviewAnswerForPlan(raw)
+      .replace(/^Keep the suggested cloud, hosting platform, and CI\/CD as proposed\.$/, 'Yes — keep the suggested setup')
+      .replace(/^Cloud provider \(client override\):\s*/i, 'Cloud: ')
+      .replace(/^Hosting platform \(client override\):\s*/i, 'Hosting: ')
+      .replace(/^CI\/CD system \(client override\):\s*/i, 'CI/CD: ')
+      .replace(/\s*Use this instead of[^.]*\./gi, '')
+      .trim();
+    lines.push(`${index + 1}. ${prompt}`);
+    lines.push(`   → ${pretty}`);
+  });
+  return lines.join('\n');
 }
 
 function titleCase(s: string): string {
@@ -237,6 +246,8 @@ export default function GeneratePage() {
   const [generationStatus, setGenerationStatus] = useState('');
   const [files, setFiles] = useState<GeneratedFile[]>([]);
   const [hasGeneratedFiles, setHasGeneratedFiles] = useState(false);
+  /** Open split workspace as soon as Approve starts — avoid chat jumping when first file arrives. */
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [summary, setSummary] = useState('');
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -310,9 +321,14 @@ export default function GeneratePage() {
   }, [messages]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isGenerating]);
+    // Keep the latest chat turn in view, including after the centered→split layout swap.
+    const id = window.requestAnimationFrame(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [messages, isGenerating, workspaceOpen]);
 
+  const showWorkspace = workspaceOpen || hasGeneratedFiles;
   const orchOptions = ORCHESTRATOR_OPTIONS[presets.cloud] || [];
 
   const pickCloud = (cloud: CloudProvider) => {
@@ -459,6 +475,7 @@ export default function GeneratePage() {
       if (phase === 'generate' && (startFresh || options?.approvedPlan)) {
         setFiles([]);
         setHasGeneratedFiles(false);
+        setWorkspaceOpen(true);
         setSummary('');
         setAwaitingApproval(false);
         setPendingQuestions([]);
@@ -749,6 +766,16 @@ export default function GeneratePage() {
   const approvePlan = useCallback(() => {
     const originalPrompt = lastStackPromptRef.current || lastStackPrompt;
     if (!pendingPlan || !originalPrompt || isGenerating) return;
+    setWorkspaceOpen(true);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `approve-${Date.now()}`,
+        role: 'assistant',
+        content:
+          'Plan approved — generating Terraform, CI/CD, and a minimal health-check stub. Files will appear in the workspace as they are ready.',
+      },
+    ]);
     void sendMessage(originalPrompt, {
       phase: 'generate',
       approvedPlan: pendingPlan,
@@ -804,6 +831,7 @@ export default function GeneratePage() {
     ]);
     setFiles([]);
     setHasGeneratedFiles(false);
+    setWorkspaceOpen(false);
     setSummary('');
     setWarnings([]);
     setError(null);
@@ -961,7 +989,7 @@ export default function GeneratePage() {
   // ——— Workspace (MVP-matched empty state) ———
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-white bg-[linear-gradient(to_right,#80808006_1px,transparent_1px),linear-gradient(to_bottom,#80808006_1px,transparent_1px)] bg-[size:24px_24px]">
-      {hasGeneratedFiles && (
+      {showWorkspace && (
         <header className="border-b border-gray-200 sticky top-0 bg-white z-50 shrink-0 select-none">
           <div className="px-6 h-14 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
@@ -1001,13 +1029,13 @@ export default function GeneratePage() {
         </header>
       )}
 
-      {!hasGeneratedFiles && (
+      {!showWorkspace && (
         <div className="absolute top-6 left-8 z-50">
           <BrandLockup />
         </div>
       )}
 
-      {hasGeneratedFiles ? (
+      {showWorkspace ? (
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 gap-4 bg-white relative overflow-hidden before:absolute before:inset-0 before:bg-[radial-gradient(circle_900px_at_50%_80px,#eeeffc,transparent_72%)] before:pointer-events-none">
           {/* LEFT — AI Assistant Sidebar */}
           <aside
@@ -1470,13 +1498,13 @@ export default function GeneratePage() {
               </div>
 
               <h1 className="text-[40px] sm:text-[44px] font-extrabold text-gray-900 tracking-tight leading-tight font-sans">
-                Shape your cloud stack in minutes.
+                Create your Terraform scripts in minutes.
               </h1>
 
               {/* Subtitle + input share the same width (one-line subtitle drives the box length) */}
               <div className="mt-4 inline-flex flex-col items-stretch max-w-full">
                 <p className="text-[15px] sm:text-[16px] text-gray-500 leading-relaxed font-normal whitespace-nowrap text-center">
-                  Tell me your cloud, workload, database, and pipelines. I&apos;ll turn it into a blueprint-ready stack in minutes.
+                  Describe the stack — I&apos;ll interview you, draft a plan, then generate Terraform, CI/CD, and a minimal health stub.
                 </p>
 
                 <form

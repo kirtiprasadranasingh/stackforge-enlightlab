@@ -197,7 +197,12 @@ export function formatInterviewAnswerForPlan(rawAnswer: string): string {
 
 function detectRuntime(prompt: string): string | null {
   const text = prompt.toLowerCase();
-  if (/\b(node(?:\.js)?|express|nestjs)\b/.test(text)) return 'Node.js';
+  // Next.js / Nest / Express are Node runtimes — never fall through to a language question.
+  if (
+    /\b(next\.?js|nextjs|node(?:\.js)?|express|nestjs|react)\b/.test(text)
+  ) {
+    return 'Node.js';
+  }
   if (/\b(python|fastapi|django|flask)\b/.test(text)) return 'Python';
   if (/\b(go|golang)\b/.test(text)) return 'Go';
   if (/\b(java|spring(?:\s+boot)?)\b/.test(text)) return 'Java';
@@ -377,5 +382,5 @@ export function buildClarifyingQuestions(
     );
   }
 
-  return questions.slice(0, 6);
+  return questions.slice(0, 7);
 }
