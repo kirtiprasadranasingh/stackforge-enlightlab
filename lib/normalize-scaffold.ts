@@ -154,6 +154,20 @@ function patchTerraform(content: string): string {
     }
   );
 
+  // 8. Cloud SQL maintenance_window only accepts day / hour / update_track.
+  //    Models invent update_period and day_of_week (invalid).
+  out = out.replace(/maintenance_window\s*\{[\s\S]*?\}/g, (block) =>
+    block
+      .replace(/^[ \t]*update_period\s*=.*\r?\n/gm, '')
+      .replace(/\bday_of_week(\s*=)/g, 'day$1')
+  );
+
+  // 9. kubernetes_service_account: correct attribute name (provider schema).
+  out = out.replace(
+    /\bautomount_token(\s*=)/g,
+    'automount_service_account_token$1'
+  );
+
   return out;
 }
 
@@ -328,6 +342,84 @@ function patchDockerfileUser(content: string): string {
   return remaining.join('\n');
 }
 
+/** Minimal lockfile so validators/Docker COPY package*.json succeed when the model omits it. */
+function buildMinimalPackageLock(packageJsonContent: string): string {
+  let name = 'app';
+  let version = '1.0.0';
+  let dependencies: Record<string, string> = {};
+  try {
+    const parsed = JSON.parse(packageJsonContent) as {
+      name?: string;
+      version?: string;
+      dependencies?: Record<string, string>;
+    };
+    if (parsed.name) name = parsed.name;
+    if (parsed.version) version = parsed.version;
+    if (parsed.dependencies) dependencies = parsed.dependencies;
+  } catch {
+    // keep defaults
+  }
+  return `${JSON.stringify(
+    {
+      name,
+      version,
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name,
+          version,
+          dependencies,
+        },
+      },
+    },
+    null,
+    2
+  )}\n`;
+}
+
+/**
+ * If package.json exists without a lockfile, add a minimal package-lock.json
+ * and prefer `npm install` over `npm ci` in nearby Dockerfiles.
+ */
+function ensureNodeLockfiles(
+  byPath: Map<string, GeneratedFile>
+): void {
+  const pkgPaths = ['app/package.json', 'package.json'].filter((p) =>
+    byPath.has(p)
+  );
+  for (const pkgPath of pkgPaths) {
+    const dir = pkgPath.includes('/')
+      ? pkgPath.slice(0, pkgPath.lastIndexOf('/'))
+      : '';
+    const lockPath = dir ? `${dir}/package-lock.json` : 'package-lock.json';
+    const yarnPath = dir ? `${dir}/yarn.lock` : 'yarn.lock';
+    if (byPath.has(lockPath) || byPath.has(yarnPath)) continue;
+
+    const pkg = byPath.get(pkgPath)!;
+    byPath.set(lockPath, {
+      path: lockPath,
+      language: 'json',
+      content: buildMinimalPackageLock(pkg.content),
+      description: 'Minimal lockfile (auto-added for build consistency)',
+    });
+
+    for (const dockerPath of [
+      dir ? `${dir}/Dockerfile` : 'Dockerfile',
+      'Dockerfile',
+      'app/Dockerfile',
+    ]) {
+      const docker = byPath.get(dockerPath);
+      if (!docker) continue;
+      if (!/\bnpm\s+ci\b/.test(docker.content)) continue;
+      byPath.set(dockerPath, {
+        ...docker,
+        content: docker.content.replace(/\bnpm\s+ci\b/g, 'npm install'),
+      });
+    }
+  }
+}
+
 export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null {
   let path = canonicalPath(file.path);
   if (!validateFilePath(path)) return null;
@@ -416,6 +508,8 @@ export function normalizeScaffoldFiles(files: GeneratedFile[]): GeneratedFile[] 
       });
     }
   }
+
+  ensureNodeLockfiles(byPath);
 
   return dedupeTerraformResources(Array.from(byPath.values()));
 }

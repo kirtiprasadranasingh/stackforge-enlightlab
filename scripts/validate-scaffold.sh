@@ -153,7 +153,14 @@ if [ -f "$JOB_DIR/tf_status" ]; then
     PASS) log_pass "terraform init"; log_pass "terraform validate"; log_pass "terraform plan" ;;
     PASS_VALIDATE_ONLY) log_pass "terraform init"; log_pass "terraform validate"; log_warn "terraform plan skipped — cloud credentials or required variables not available (expected in generator QA)" ;;
     WARN_PLAN) log_pass "terraform init"; log_pass "terraform validate"; log_warn "terraform plan -- $(tail -c 1200 "$JOB_DIR/tf_plan.log" 2>/dev/null | tr '\n' ' ')" ;;
-    FAIL_VALIDATE) log_pass "terraform init"; log_fail "terraform validate -- $(tail -c 1500 "$JOB_DIR/tf_validate.log" "$JOB_DIR/tf_validate.json" 2>/dev/null | tr '\n' ' ')" ;;
+    FAIL_VALIDATE)
+      log_pass "terraform init"
+      VAL_MSG=$(grep -oE '"summary": "[^"]+"|"detail": "[^"]+"' "$JOB_DIR/tf_validate.json" 2>/dev/null | tr '\n' ' ' | tr -d '\r')
+      if [ -z "$VAL_MSG" ]; then
+        VAL_MSG=$(tail -c 1200 "$JOB_DIR/tf_validate.log" 2>/dev/null | tr '\n' ' ')
+      fi
+      log_fail "terraform validate -- ${VAL_MSG:0:1500}"
+      ;;
     FAIL_INIT) log_fail "terraform init -- $(tail -c 1500 "$JOB_DIR/tf_init.log" | tr '\n' ' ')" ;;
     SKIP) log_info "no terraform/ directory found, skipping" ;;
   esac

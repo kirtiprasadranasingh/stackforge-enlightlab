@@ -219,6 +219,8 @@ instead.
 
 ### B9. GCP Cloud Run + Cloud SQL + Artifact Registry + GitLab CI (recurring real bugs)
 - **Terraform schema**: Use real arguments only — Cloud SQL uses \`deletion_protection\` (not \`deletion_protection_enabled\`). Artifact Registry image URLs must be constructed from location/project/repository_id (do not invent a nonexistent \`repository_url\` attribute unless it exists on that resource type).
+- **Cloud SQL maintenance_window**: Only \`day\`, \`hour\`, and optional \`update_track\` are valid. Never emit \`update_period\` or \`day_of_week\`.
+- **kubernetes_service_account**: Use \`automount_service_account_token\` — never \`automount_token\`.
 - **One resource, one file**: Never declare the same \`resource "TYPE" "NAME"\` in two Terraform files. Common failure: duplicating \`google_sql_database\`, \`google_sql_user\`, or \`google_compute_global_address\` across \`cloud_sql.tf\` + \`database.tf\` / \`network.tf\`. Prefer \`database.tf\` for Cloud SQL instance/db/user and \`network.tf\` for private IP allocation + service networking; do **not** also emit those in \`cloud_sql.tf\`. If you use \`cloud_sql.tf\`, put *all* SQL there and omit the same resources from \`database.tf\`.
 - **Private Cloud SQL**: If using private IP, emit \`google_compute_global_address\` (VPC peering range) + \`google_service_networking_connection\` **once** (in \`network.tf\`) and \`depends_on\` them from the SQL instance. Incomplete private networking is a blocking failure.
 - **Secrets**: Never embed Secret Manager *resource names/IDs* inside a DATABASE_URL string as if they were passwords. Inject secret *values* via Cloud Run secret env/volumes, or use the connector socket + discrete user/password secret refs.
