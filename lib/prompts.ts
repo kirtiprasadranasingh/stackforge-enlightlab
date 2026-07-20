@@ -215,7 +215,7 @@ instead.
 - **Non-root container**: Run as a non-root USER in the Dockerfile (create user/group; do not leave USER commented out).
 - **Auth**: Prefer GitHub OIDC (\`permissions: id-token: write\` + \`role-to-assume\`) over long-lived \`AWS_ACCESS_KEY_ID\`/\`SECRET\`. If showing keys, mark them as temporary placeholders only.
 - **IAM**: Task role policies must not grant unused APIs with \`Resource = "*"\` (e.g. do not add \`ssm:GetParameters\` on \`*\` unless the app actually reads SSM). Scope ARNs or omit the statement.
-- **workflow_dispatch inputs**: Every \`github.event.inputs.X\` must be declared under \`workflow_dispatch.inputs\` or have a safe fallback. Do not reference undeclared \`aws_region\` inputs.
+- **workflow_dispatch inputs**: Every \`github.event.inputs.X\` must be declared under \`workflow_dispatch.inputs\` or have a safe fallback. Do not reference undeclared \`aws_region\` inputs. Each input must be a mapping (\`name:\` then \`description\`/\`required\`/\`type\` on nested lines) — never \`name: 'Description'\` with \`required\` indented under a scalar.
 
 ### B9. GCP Cloud Run + Cloud SQL + Artifact Registry + GitLab CI (recurring real bugs)
 - **Terraform schema**: Use real arguments only — Cloud SQL uses \`deletion_protection\` (not \`deletion_protection_enabled\`). Artifact Registry image URLs must be constructed from location/project/repository_id (do not invent a nonexistent \`repository_url\` attribute unless it exists on that resource type).
@@ -367,11 +367,12 @@ export function getCIProviderPrompt(ci: string): string {
 - Do NOT also emit GitHub Actions / GitLab / Jenkins files unless the user asked for them`;
     case 'gcp-cloud-build':
       return `Google Cloud Build:
-- Path: cloudbuild.yaml at repo root
+- Path: cloudbuild.yaml at repo root (PRIMARY and usually ONLY pipeline file)
 - Steps: test → build/push to Artifact Registry → deploy Cloud Run or GKE → onFailure rollback where possible
 - Prefer Workload Identity Federation / service account placeholders — never embed JSON keys
 - Substitutions and image URLs must match Terraform (location/project/repository_id)
-- Do NOT also emit GitHub Actions / GitLab / Jenkins files unless the user asked for them`;
+- Do NOT also emit \`.github/workflows/\`, GitLab, or Jenkins files unless the user explicitly asked for GitHub Actions alongside Cloud Build
+- If you must emit a GitHub Actions helper for Terraform only, every workflow_dispatch input must be a nested mapping (\`description\`/\`required\`), never a scalar description with indented \`required\``;
     case 'oci-devops':
       return `OCI DevOps:
 - Path: build_spec.yaml (or .devops/build_spec.yaml) plus README wiring to OCI DevOps project/pipeline

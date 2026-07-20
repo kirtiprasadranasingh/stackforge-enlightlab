@@ -107,16 +107,28 @@ async function runShell(
   args: string[],
   cwd: string,
   emit: CheckLineEmitter,
-  timeoutMs: number
+  timeoutMs: number,
+  extraEnv?: Record<string, string | undefined>
 ): Promise<number> {
   emit(`$ ${command} ${args.join(' ')}`);
   const child = spawn(command, args, {
     cwd,
-    env: { ...process.env, CI: 'true', TF_IN_AUTOMATION: '1' },
+    env: {
+      ...process.env,
+      CI: 'true',
+      TF_IN_AUTOMATION: '1',
+      ...extraEnv,
+    },
     shell: false,
     windowsHide: true,
   });
   return streamProcess(child, emit, timeoutMs);
+}
+
+async function writableTfPluginCache(): Promise<string> {
+  const dir = path.join(os.tmpdir(), 'stackforge-tf-plugin-cache');
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -140,17 +152,20 @@ async function runTerraformChecks(
   }
   const started = Date.now();
   const left = () => Math.max(5_000, budgetMs - (Date.now() - started));
+  const cacheDir = await writableTfPluginCache();
+  const tfEnv = { TF_PLUGIN_CACHE_DIR: cacheDir };
 
   let code = await runShell(
     'terraform',
     ['init', '-backend=false', '-input=false'],
     tfDir,
     emit,
-    left()
+    left(),
+    tfEnv
   );
   if (code !== 0) return code;
 
-  code = await runShell('terraform', ['validate'], tfDir, emit, left());
+  code = await runShell('terraform', ['validate'], tfDir, emit, left(), tfEnv);
   if (code !== 0) return code;
 
   try {
@@ -159,7 +174,8 @@ async function runTerraformChecks(
       ['plan', '-input=false', '-refresh=false', '-lock=false', '-no-color'],
       tfDir,
       emit,
-      left()
+      left(),
+      tfEnv
     );
     if (code === 0 || code === 2) return 0;
     emit(
@@ -258,8 +274,19 @@ async function runAllViaScript(
     emit('WARN  - scripts/validate-scaffold.sh not found — falling back to built-in checks');
     return null;
   }
+  const cacheDir = await writableTfPluginCache();
   try {
-    return await runShell('bash', [scriptPath, scaffoldDir], scaffoldDir, emit, budgetMs);
+    return await runShell(
+      'bash',
+      [scriptPath, scaffoldDir],
+      scaffoldDir,
+      emit,
+      budgetMs,
+      {
+        TF_PLUGIN_CACHE_DIR: cacheDir,
+        STACKFORGE_TF_PLUGIN_CACHE: cacheDir,
+      }
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/ENOENT|not found|bash/i.test(msg)) {

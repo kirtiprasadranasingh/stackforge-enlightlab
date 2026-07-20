@@ -22,6 +22,16 @@ log_warn() { REPORT+=("WARN  - $1"); }
 echo "Validating scaffold at: $SCAFFOLD_DIR"
 echo "----------------------------------------"
 
+# Writable plugin cache for the non-root app user. The image may set
+# TF_PLUGIN_CACHE_DIR to a shared path where chmod on new providers fails
+# ("operation not permitted"). Always prefer a /tmp cache for validate runs.
+export TF_PLUGIN_CACHE_DIR="${STACKFORGE_TF_PLUGIN_CACHE:-/tmp/stackforge-tf-plugin-cache}"
+mkdir -p "$TF_PLUGIN_CACHE_DIR"
+# Best-effort seed from the image cache when present (speeds init; never required).
+if [ -d /usr/share/terraform/plugin-cache ] && [ -z "$(ls -A "$TF_PLUGIN_CACHE_DIR" 2>/dev/null)" ]; then
+  cp -a /usr/share/terraform/plugin-cache/. "$TF_PLUGIN_CACHE_DIR/" 2>/dev/null || true
+fi
+
 # Create a unique temporary directory for this validation run's parallel logs
 JOB_DIR=$(mktemp -d /tmp/scaffold-jobs-XXXXXX)
 

@@ -12,6 +12,7 @@ import {
   writeScaffoldTemp,
   type ScaffoldCheckId,
 } from '@/lib/scaffold-checks';
+import { normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
 
   const { check, files } = parsed.data;
   const checkId = check as ScaffoldCheckId;
+  const normalizedFiles = normalizeScaffoldFiles(files);
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -75,7 +77,7 @@ export async function POST(request: NextRequest) {
         controller.enqueue(
           sse({ type: 'status', message: `Preparing scaffold for ${checkId}…` })
         );
-        tempDir = await writeScaffoldTemp(files);
+        tempDir = await writeScaffoldTemp(normalizedFiles);
         const exitCode = await runScaffoldCheck(checkId, tempDir, (line) => {
           controller.enqueue(sse({ type: 'line', text: line }));
         });

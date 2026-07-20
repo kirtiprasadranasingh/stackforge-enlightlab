@@ -38,14 +38,19 @@ RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/1
   && unzip /tmp/terraform.zip -d /usr/local/bin/ \
   && rm /tmp/terraform.zip
 
-# Pre-cache common Terraform providers to speed up runtime validate checks and prevent network downloads
+# Pre-cache common Terraform providers (image build). Runtime validate uses a
+# writable /tmp cache so the nextjs user can install additional provider versions.
 ENV TF_PLUGIN_CACHE_DIR=/usr/share/terraform/plugin-cache
-RUN mkdir -p /usr/share/terraform/plugin-cache \
+RUN mkdir -p /usr/share/terraform/plugin-cache /tmp/stackforge-tf-plugin-cache \
   && cd /tmp \
-  && printf 'terraform {\n  required_providers {\n    aws = {\n      source = "hashicorp/aws"\n      version = "~> 5.84.0"\n    }\n    google = {\n      source = "hashicorp/google"\n      version = "~> 6.0"\n    }\n    azurerm = {\n      source = "hashicorp/azurerm"\n      version = "~> 4.0"\n    }\n    kubernetes = {\n      source = "hashicorp/kubernetes"\n      version = "~> 2.30"\n    }\n    helm = {\n      source = "hashicorp/helm"\n      version = "~> 2.15"\n    }\n  }\n}\n' > prep.tf \
+  && printf 'terraform {\n  required_providers {\n    aws = {\n      source = "hashicorp/aws"\n      version = "~> 5.84.0"\n    }\n    google = {\n      source = "hashicorp/google"\n      version = "~> 5.0"\n    }\n    azurerm = {\n      source = "hashicorp/azurerm"\n      version = "~> 4.0"\n    }\n    kubernetes = {\n      source = "hashicorp/kubernetes"\n      version = "~> 2.23"\n    }\n    helm = {\n      source = "hashicorp/helm"\n      version = "~> 2.11"\n    }\n  }\n}\n' > prep.tf \
   && terraform init \
   && rm -f prep.tf \
-  && chmod -R 777 /usr/share/terraform/plugin-cache
+  && chmod -R 777 /usr/share/terraform/plugin-cache /tmp/stackforge-tf-plugin-cache
+
+# Runtime default: writable cache (avoids chmod EPERM on the shared image cache)
+ENV TF_PLUGIN_CACHE_DIR=/tmp/stackforge-tf-plugin-cache
+ENV STACKFORGE_TF_PLUGIN_CACHE=/tmp/stackforge-tf-plugin-cache
 
 # Install Helm (official script)
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash

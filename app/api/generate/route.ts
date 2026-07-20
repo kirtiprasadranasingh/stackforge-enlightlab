@@ -889,7 +889,22 @@ Always format your response by wrapping the chat reply in the following markers:
                   let code = 0;
                   let output = "";
                   try {
-                    const { stdout, stderr } = await execAsync(`bash "${scriptPath}" "${tempDir}"`, { timeout: validateTimeout });
+                    const tfCache =
+                      process.env.STACKFORGE_TF_PLUGIN_CACHE ||
+                      path.join(os.tmpdir(), 'stackforge-tf-plugin-cache');
+                    await fs.mkdir(tfCache, { recursive: true });
+                    const { stdout, stderr } = await execAsync(
+                      `bash "${scriptPath}" "${tempDir}"`,
+                      {
+                        timeout: validateTimeout,
+                        env: {
+                          ...process.env,
+                          TF_IN_AUTOMATION: '1',
+                          TF_PLUGIN_CACHE_DIR: tfCache,
+                          STACKFORGE_TF_PLUGIN_CACHE: tfCache,
+                        },
+                      }
+                    );
                     code = 0;
                     output = stdout + stderr;
                   } catch (err: unknown) {

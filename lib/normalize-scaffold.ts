@@ -44,6 +44,30 @@ function patchDockerfileForRoot(content: string, stripAppPrefix: boolean): strin
   return out;
 }
 
+/** Fix common invalid workflow_dispatch input shapes that break actionlint/YAML. */
+function patchGithubWorkflow(content: string): string {
+  // Bad:
+  //   gcp_project_id: 'GCP Project ID'
+  //     required: true
+  // Good:
+  //   gcp_project_id:
+  //     description: 'GCP Project ID'
+  //     required: true
+  return content.replace(
+    /^([ \t]*)([A-Za-z_][\w]*)\s*:\s*(['"])([^'"]*)\3\s*\r?\n(\1[ \t]+)required:\s*(true|false)/gm,
+    (
+      _full,
+      ind: string,
+      key: string,
+      quote: string,
+      desc: string,
+      _reqInd: string,
+      reqVal: string
+    ) =>
+      `${ind}${key}:\n${ind}  description: ${quote}${desc}${quote}\n${ind}  required: ${reqVal}`
+  );
+}
+
 /** Fix pipeline build context when Dockerfile lives at repo root */
 function patchPipelineForRoot(content: string): string {
   return content
@@ -420,7 +444,9 @@ function ensureNodeLockfiles(
   }
 }
 
-export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null {
+export function normalizeScaffoldFile(
+  file: Pick<GeneratedFile, 'path' | 'content'> & Partial<GeneratedFile>
+): GeneratedFile | null {
   let path = canonicalPath(file.path);
   if (!validateFilePath(path)) return null;
 
@@ -440,6 +466,9 @@ export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null
     path.startsWith('.github/workflows/')
   ) {
     content = patchPipelineForRoot(content);
+    if (path.startsWith('.github/workflows/')) {
+      content = patchGithubWorkflow(content);
+    }
   }
   if (path.endsWith('.tf')) {
     content = patchTerraform(content);
@@ -457,7 +486,9 @@ export function normalizeScaffoldFile(file: GeneratedFile): GeneratedFile | null
 }
 
 /** Merge duplicates — later canonical path wins */
-export function normalizeScaffoldFiles(files: GeneratedFile[]): GeneratedFile[] {
+export function normalizeScaffoldFiles(
+  files: Array<Pick<GeneratedFile, 'path' | 'content'> & Partial<GeneratedFile>>
+): GeneratedFile[] {
   const byPath = new Map<string, GeneratedFile>();
   for (const raw of files) {
     const normalized = normalizeScaffoldFile(raw);
@@ -502,10 +533,11 @@ export function normalizeScaffoldFiles(files: GeneratedFile[]): GeneratedFile[] 
       path === '.gitlab-ci.yml' ||
       path.startsWith('.github/workflows/')
     ) {
-      byPath.set(path, {
-        ...file,
-        content: patchPipelineDockerContext(file.content, layout),
-      });
+      let content = patchPipelineDockerContext(file.content, layout);
+      if (path.startsWith('.github/workflows/')) {
+        content = patchGithubWorkflow(content);
+      }
+      byPath.set(path, { ...file, content });
     }
   }
 
