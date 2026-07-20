@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { WorkflowPhase } from '@/types';
 import { FileViewer } from '@/components/FileViewer';
+import { ScaffoldChecksPanel } from '@/components/ScaffoldChecksPanel';
 import type { GeneratedFile } from '@/types';
 import { FormattedMessage } from '@/components/FormattedMessage';
 
@@ -115,13 +116,22 @@ export function WorkflowPanel({
             </div>
           ) : null}
         </div>
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          <FileViewer
-            files={files}
-            isGenerating={isGenerating}
-            promptText={promptText}
-            generationStatus={generationStatus}
-          />
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden gap-2">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <FileViewer
+              files={files}
+              isGenerating={isGenerating}
+              promptText={promptText}
+              generationStatus={generationStatus}
+            />
+          </div>
+          {!writingCode ? (
+            <ScaffoldChecksPanel
+              files={files}
+              isGenerating={isGenerating}
+              autoRun
+            />
+          ) : null}
         </div>
       </div>
     );
