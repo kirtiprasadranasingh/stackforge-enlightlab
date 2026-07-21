@@ -770,6 +770,8 @@ function patchTerraform(content: string): string {
 
   // 0. IAM condition keys with colons must be quoted HCL strings
   out = patchIamConditionKeys(out);
+  // 0b. ECS CI ownership
+  out = patchEcsServiceIgnoreChanges(out);
 
   // 1. depends_on cannot contain indexed/expression references. Strip
   //    [each.key] / [each.value] / [count.index] used inside a depends_on list.
@@ -1552,11 +1554,44 @@ export function normalizeScaffoldFiles(
   ensureHelmHelpers(byPath);
   ensureRequiredProviders(byPath);
   ensureEcsScaffoldCompleteness(byPath);
+  stripEksWorkflowEcsBleed(byPath);
   stripAlbAnnotationsWithoutController(byPath);
   stripCrossCloudBleed(byPath);
   ensureMinimalAppStubs(byPath);
 
   return dedupeTerraformResources(Array.from(byPath.values()));
+}
+
+/**
+ * EKS + Helm scaffolds must not keep ECS update-service steps in deploy.yml
+ * (false-fails services-stable / wrong target).
+ */
+function stripEksWorkflowEcsBleed(byPath: Map<string, GeneratedFile>): void {
+  const hasCharts = [...byPath.keys()].some((p) => p.startsWith('charts/'));
+  const tfBlob = [...byPath.entries()]
+    .filter(([p]) => p.endsWith('.tf'))
+    .map(([, f]) => f.content)
+    .join('\n');
+  const isEks =
+    hasCharts || /aws_eks_cluster|aws_eks_node_group|aws_eks_fargate/.test(tfBlob);
+  if (!isEks) return;
+
+  for (const [path, file] of [...byPath.entries()]) {
+    if (!path.startsWith('.github/workflows/') || !path.endsWith('.yml')) continue;
+    if (!/aws\s+ecs\s+update-service/.test(file.content)) continue;
+    // Drop ECS deploy/wait steps; keep helm/kubeconfig path if present.
+    let content = file.content.replace(
+      /^[ \t]*-[ \t]+name:.*\r?\n(?:[ \t]+(?!-).*\r?\n)*[ \t]+run:\s*\|?\s*\r?\n(?:[ \t]+.*aws\s+ecs[\s\S]*?)(?=^[ \t]*-[ \t]+name:|^[ \t]*[a-zA-Z_][\w-]*:|\Z)/gm,
+      ''
+    );
+    // Simpler fallback: remove update-service + wait lines
+    content = content
+      .replace(/^[ \t]*aws\s+ecs\s+update-service[\s\S]*?(?=^[ \t]*aws\s+ecs\s+wait|^[ \t]*-[ \t]+name:|^[ \t]*[a-z_][\w-]*:)/gm, '')
+      .replace(/^[ \t]*aws\s+ecs\s+wait\s+services-stable[\s\S]*?(?=^[ \t]*-[ \t]+name:|^[ \t]*[a-z_][\w-]*:)/gm, '');
+    if (content !== file.content) {
+      byPath.set(path, { ...file, content });
+    }
+  }
 }
 
 function stripAlbAnnotationsWithoutController(
@@ -1802,6 +1837,34 @@ function ensureCurlInDockerfile(content: string): string {
   return content;
 }
 
+/**
+ * When CI owns the image/task definition, ECS services must ignore those attrs
+ * or validate fails the ownership check.
+ */
+function patchEcsServiceIgnoreChanges(content: string): string {
+  if (!/resource\s+"aws_ecs_service"/.test(content)) return content;
+  if (/resource\s+"aws_ecs_service"[\s\S]*?ignore_changes/.test(content)) {
+    return content;
+  }
+  return content.replace(
+    /resource\s+"aws_ecs_service"\s+"([^"]+)"\s*\{([\s\S]*?)\n\}/g,
+    (full, name: string, body: string) => {
+      if (/lifecycle\s*\{/.test(body)) {
+        if (/ignore_changes/.test(body)) return full;
+        return full.replace(
+          /lifecycle\s*\{/,
+          'lifecycle {\n    ignore_changes = [task_definition, desired_count]'
+        );
+      }
+      return `resource "aws_ecs_service" "${name}" {${body}
+  lifecycle {
+    ignore_changes = [task_definition, desired_count]
+  }
+}`;
+    }
+  );
+}
+
 /** ECS Fargate: Dockerfile present + curl/healthCheck aligned; accept app/Dockerfile layout. */
 function ensureEcsScaffoldCompleteness(byPath: Map<string, GeneratedFile>): void {
   const tfEntries = [...byPath.entries()].filter(([p]) => p.endsWith('.tf'));
@@ -1810,7 +1873,8 @@ function ensureEcsScaffoldCompleteness(byPath: Map<string, GeneratedFile>): void
 
   // Re-apply curl→node rewrite across the full TF tree (covers split files).
   for (const [p, f] of tfEntries) {
-    const next = patchEcsCurlHealthCheckToNode(f.content);
+    let next = patchEcsCurlHealthCheckToNode(f.content);
+    next = patchEcsServiceIgnoreChanges(next);
     if (next !== f.content) {
       byPath.set(p, { ...f, content: next });
     }

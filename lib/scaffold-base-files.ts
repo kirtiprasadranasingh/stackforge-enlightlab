@@ -742,6 +742,13 @@ export const FORCE_STUB_PATHS = new Set([
   'main.go',
   'go.mod',
   'Dockerfile',
+  // CI skeletons — model often invents actionlint/ECS bleed failures
+  '.github/workflows/deploy.yml',
+  '.gitlab-ci.yml',
+  'azure-pipelines.yml',
+  // Helm helpers — missing templates fail helm lint/template
+  'charts/app/templates/_helpers.tpl',
+  'charts/app/Chart.yaml',
 ]);
 
 function awsEcsBase(): BaseFileMap {
