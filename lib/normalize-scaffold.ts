@@ -128,24 +128,56 @@ function promoteOrphanRollbackSteps(content: string): string {
   );
 }
 
+/** Ensure any step that writes image_uri= to GITHUB_OUTPUT has id: set-image-uri. */
+function ensureStepIdForImageUriWriter(content: string): string {
+  const lines = content.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^\s*-\s+name:/.test(lines[i])) {
+      const stepLines: string[] = [lines[i]];
+      let j = i + 1;
+      let writesImageUri = false;
+      let hasId = false;
+      while (j < lines.length) {
+        const l = lines[j];
+        if (j > i + 1 && /^\s*-\s+name:/.test(l)) break;
+        if (/^\s*id:\s/.test(l)) hasId = true;
+        if (
+          /echo\s+["']?image_uri=/.test(l) ||
+          (/image_uri=/.test(l) && />>\s*\$GITHUB_OUTPUT/.test(l))
+        ) {
+          writesImageUri = true;
+        }
+        stepLines.push(l);
+        j++;
+      }
+      if (writesImageUri && !hasId) {
+        const indent = (lines[i].match(/^(\s*)/)?.[1] ?? '') + '  ';
+        out.push(lines[i]);
+        out.push(`${indent}id: set-image-uri`);
+        for (let k = 1; k < stepLines.length; k++) out.push(stepLines[k]);
+      } else {
+        out.push(...stepLines);
+      }
+      i = j;
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return out.join('\n');
+}
+
 /** Ensure image_uri job outputs are produced by a real GITHUB_OUTPUT step. */
 function patchImageUriOutput(content: string): string {
-  let out = content;
+  let out = ensureStepIdForImageUriWriter(content);
 
-  out = out.replace(
-    /image_uri:\s*\$\{\{\s*steps\.(?:build-and-push|build_and_push)\.outputs\.image_uri\s*\}\}/g,
-    'image_uri: ${{ steps.set-image-uri.outputs.image_uri }}'
-  );
+  const hasWriter =
+    /^\s*id:\s*set-image-uri\s*$/m.test(out) &&
+    (/echo\s+["']?image_uri=/.test(out) || /image_uri=\$\{\{/.test(out));
 
-  // Give "Extract image URI" an id when it writes image_uri=
-  out = out.replace(
-    /(^[ \t]*- name:\s*Extract image URI\s*\r?\n)(?![ \t]*id:)/gm,
-    '$1        id: set-image-uri\n'
-  );
-
-  const refsImageUri = /outputs\.image_uri|image_uri:\s*\$\{\{/.test(out);
-  const writesImageUri = /echo\s+["']?image_uri=/.test(out);
-  if (refsImageUri && !writesImageUri && /id:\s*login-ecr/.test(out)) {
+  if (!hasWriter && /outputs\.image_uri|image_uri:\s*\$\{\{/.test(out) && /id:\s*login-ecr/.test(out)) {
     const insert = [
       '      - name: Set image URI output',
       '        id: set-image-uri',
@@ -158,52 +190,46 @@ function patchImageUriOutput(content: string): string {
     const marker = /id:\s*(build-and-push|build_and_push|login-ecr)\s*\r?\n/;
     const m = marker.exec(out);
     if (m) {
-      // Insert after the step that owns the marker: skip until next list item at same indent or less
       const start = m.index + m[0].length;
-      const stepInd = '        '; // typical for `id:` under a step
-      let i = start;
       const lines = out.slice(start).split('\n');
       let consumed = 0;
       for (let li = 0; li < lines.length; li++) {
         const line = lines[li];
-        if (li === 0 && !line.trim()) {
-          consumed += line.length + 1;
-          continue;
-        }
-        const ind = /^([ \t]*)/.exec(line)?.[1] ?? '';
-        if (
-          li > 0 &&
-          line.trim() &&
-          (line.trimStart().startsWith('- ') || ind.length < stepInd.length) &&
-          !line.trimStart().startsWith('#')
-        ) {
-          break;
-        }
-        // stop at next `- name:` / `- uses:` at 6 spaces
-        if (li > 0 && /^[ \t]{0,6}-\s/.test(line) && ind.length <= 6) {
-          break;
-        }
+        if (li > 0 && /^\s{0,6}-\s/.test(line) && line.trim()) break;
         consumed += line.length + 1;
       }
       const at = start + consumed;
       out = out.slice(0, at) + insert + out.slice(at);
     }
-
-    out = out.replace(
-      /image_uri:\s*\$\{\{\s*steps\.[A-Za-z0-9_-]+\.outputs\.image_uri\s*\}\}/g,
-      'image_uri: ${{ steps.set-image-uri.outputs.image_uri }}'
-    );
   }
 
-  // If we added id: set-image-uri to Extract but job still points elsewhere
-  if (/id:\s*set-image-uri/.test(out) && /echo\s+["']?image_uri=/.test(out)) {
+  if (/^\s*id:\s*set-image-uri\s*$/m.test(out)) {
     out = out.replace(
-      /image_uri:\s*\$\{\{\s*steps\.(?!set-image-uri)[A-Za-z0-9_-]+\.outputs\.image_uri\s*\}\}/g,
+      /image_uri:\s*\$\{\{\s*steps\.(?:build-and-push|build_and_push)\.outputs\.image_uri\s*\}\}/g,
       'image_uri: ${{ steps.set-image-uri.outputs.image_uri }}'
     );
+    if (/echo\s+["']?image_uri=/.test(out)) {
+      out = out.replace(
+        /image_uri:\s*\$\{\{\s*steps\.(?!set-image-uri)[A-Za-z0-9_-]+\.outputs\.image_uri\s*\}\}/g,
+        'image_uri: ${{ steps.set-image-uri.outputs.image_uri }}'
+      );
+    }
   }
 
   return out;
+}
+
+/** Terraform ${var.xxx} must not appear in GitHub Actions — map to env or github context. */
+function stripTerraformLeaksFromWorkflow(content: string): string {
+  const varToEnv = (name: string) =>
+    name
+      .replace(/([a-z])([A-Z])/g, '$1_$2')
+      .replace(/-/g, '_')
+      .toUpperCase();
+
+  return content
+    .replace(/\$\{var\.([a-zA-Z0-9_-]+)\}/g, (_, name) => `\${{ env.${varToEnv(name)} }}`)
+    .replace(/\$\{terraform\.[^}]+\}/g, '${{ env.TF_OUTPUT_PLACEHOLDER }}');
 }
 
 /** After `aws ecs update-service`, wait for stability (blocking check in validate-scaffold). */
@@ -227,6 +253,7 @@ function patchGithubWorkflow(content: string): string {
   let out = patchWorkflowDispatchInputs(content);
   out = promoteOrphanRollbackSteps(out);
   out = stripOrphanWithBlocks(out);
+  out = stripTerraformLeaksFromWorkflow(out);
   out = patchImageUriOutput(out);
   out = patchEcsServicesStable(out);
   return out;
@@ -605,6 +632,45 @@ function patchTerraform(content: string): string {
     'automount_service_account_token$1'
   );
 
+  // 10. ECS tasks must not ingress-reference Redis SG (causes validate cycle with redis→ecs).
+  out = patchSecurityGroupCycles(out);
+
+  return out;
+}
+
+/** Hadolint: COPY must have source and destination (e.g. `COPY . .` not bare `COPY .`). */
+function patchDockerfileCopy(content: string): string {
+  let out = content;
+  out = out.replace(/^(\s*)COPY\s*$/gm, '$1COPY package*.json ./');
+  out = out.replace(/^(\s*)COPY\s+(\S+)\s*$/gm, (_m, ind: string, src: string) => {
+    if (src === '.') return `${ind}COPY . .`;
+    return `${ind}COPY ${src} .`;
+  });
+  return out;
+}
+
+/**
+ * Break aws_security_group cycles (ecs_tasks ↔ redis) that block terraform validate.
+ * ECS tasks should receive from ALB only; Redis receives from ECS on 6379 — never mutual ingress.
+ */
+function patchSecurityGroupCycles(content: string): string {
+  let out = content;
+  for (const block of findTerraformResourceBlocks(out)) {
+    if (block.type !== 'aws_security_group') continue;
+    const body = out.slice(block.start, block.end);
+    const isEcsLike = /ecs|task|fargate/i.test(block.name);
+    if (!isEcsLike) continue;
+    if (!/aws_security_group\.[a-zA-Z0-9_]*(?:redis|elasticache|cache)/i.test(body)) {
+      continue;
+    }
+    const cleaned = body.replace(
+      /\r?\n[ \t]*ingress\s*\{[^{}]*security_groups\s*=\s*\[[^\]]*(?:redis|elasticache|cache)[^\]]*\][^{}]*\}/gi,
+      ''
+    );
+    if (cleaned !== body) {
+      out = out.slice(0, block.start) + cleaned + out.slice(block.end);
+    }
+  }
   return out;
 }
 
@@ -871,6 +937,7 @@ export function normalizeScaffoldFile(
       // Nested Dockerfile: build context is usually that folder — drop COPY app/
       content = content.replace(/COPY\s+app\//g, 'COPY ');
     }
+    content = patchDockerfileCopy(content);
     content = patchDockerfileUser(content);
   }
   if (

@@ -217,6 +217,10 @@ instead.
 - **Auth**: Prefer GitHub OIDC (\`permissions: id-token: write\` + \`role-to-assume\`) over long-lived \`AWS_ACCESS_KEY_ID\`/\`SECRET\`. If showing keys, mark them as temporary placeholders only.
 - **IAM**: Task role policies must not grant unused APIs with \`Resource = "*"\` (e.g. do not add \`ssm:GetParameters\` on \`*\` unless the app actually reads SSM). Scope ARNs or omit the statement.
 - **workflow_dispatch inputs**: Every \`github.event.inputs.X\` must be declared under \`workflow_dispatch.inputs\` or have a safe fallback. Do not reference undeclared \`aws_region\` inputs. Each input must be a mapping (\`name:\` then \`description\`/\`required\`/\`type\` on nested lines) — never \`name: 'Description'\` with \`required\` indented under a scalar.
+- **Security groups + Redis/ElastiCache**: NEVER create circular \`aws_security_group\` ingress (ecs_tasks ↔ redis). ECS task SGs receive from the ALB SG only. Redis/ElastiCache SGs may allow inbound **from** the ECS task SG on port 6379 — use ONE direction only, or separate \`aws_security_group_rule\` resources after both SGs exist.
+- **Private/internal ALB**: When the user chose private/internal access, set \`internal = true\` on \`aws_lb\` and restrict ALB SG ingress to VPC CIDR (not 0.0.0.0/0).
+- **Dev + staging**: Use \`var.environment\` (or separate workspaces) for distinct ECS services, target groups, and Redis clusters — do not hardcode a single environment when both were requested.
+- **GitHub Actions syntax**: Use \`\${{ env.NAME }}\` or \`\${{ vars.NAME }}\` — NEVER Terraform \`\${var.xxx}\` in workflow YAML.
 
 ### B9. GCP Cloud Run + Cloud SQL + Artifact Registry + GitLab CI (recurring real bugs)
 - **Terraform schema**: Use real arguments only — Cloud SQL uses \`deletion_protection\` (not \`deletion_protection_enabled\`). Artifact Registry image URLs must be constructed from location/project/repository_id (do not invent a nonexistent \`repository_url\` attribute unless it exists on that resource type).
@@ -278,7 +282,7 @@ export function getCloudPrompt(cloud: string, orchestrator: string): string {
         return `AWS + ECS Fargate:
 - Terraform: hashicorp/aws provider — pin a real 5.x version (e.g. 5.84.0) in required_providers; include provider "aws" { region = ... }
 - Prefer local state or documented -backend-config; do not leave only placeholder S3 backend bucket names as the sole versions.tf content
-- VPC public+private subnets, ALB in public, Fargate tasks in private, SG: ALB→tasks on container_port only
+- VPC public+private subnets, **internal** ALB in private subnets when access is private/internal, Fargate tasks in private, SG: ALB→tasks on container_port only; Redis/ElastiCache in private subnets with ingress from ECS task SG on 6379 (no SG cycles)
 - ECR + CloudWatch log group; ecs task execution role + least-privilege task role (no unused SSM on Resource *)
 - aws_ecs_service: deployment_circuit_breaker { enable = true, rollback = true }; lifecycle ignore_changes = [task_definition] when CI owns deploys
 - Container healthCheck must match Dockerfile capabilities (install curl if used); ALB target group path must match app /health
@@ -486,7 +490,11 @@ export function formatPrompt(
   approvedPlan?: string
 ): string {
   const sanitized = userPrompt.trim();
-  const profile = detectScaffoldProfile(sanitized, presets as Presets);
+  const planText = approvedPlan?.trim() || '';
+  const profile = detectScaffoldProfile(
+    planText.length > 80 ? planText : sanitized,
+    presets as Presets
+  );
   const artifactSet = buildArtifactSet(presets, profile);
   const planBlock = approvedPlan?.trim()
     ? `## APPROVED PLAN (mandatory — generate exactly this stack; do not invent a different architecture)
@@ -559,13 +567,14 @@ Do NOT invent EKS/Helm/AWS files for this stack.`;
 
   if (presets.cloud === 'aws' && presets.orchestrator === 'ecs') {
     return `## Required artifact set (AWS ECS Fargate — emit ALL)
-1. terraform/versions.tf — required_providers aws pinned + provider "aws"; avoid placeholder-only S3 backend
-2. terraform/variables.tf, terraform/main.tf (or split network/ecs/alb), terraform/iam.tf, terraform/security_groups.tf, terraform/outputs.tf
-3. VPC, ALB, target group /health, ECS cluster/service/task, ECR, CloudWatch log group, circuit breaker
-4. .github/workflows/deploy.yml — image_uri = registry/repo:tag via GITHUB_OUTPUT; services-stable wait; rollback
-5. Dockerfile (non-root) + app sources (e.g. app/index.js, app/package.json, app/package-lock.json)
-6. README.md — reviewable scaffold disclaimer
-Apply PART B8 rules. Do NOT emit Azure/GCP-only files for this stack.`;
+1. terraform/versions.tf — required_providers aws pinned + provider "aws" { region = var.aws_region }; avoid placeholder-only S3 backend
+2. terraform/variables.tf, terraform/vpc.tf, terraform/ecs.tf, terraform/alb.tf, terraform/iam.tf, terraform/security_groups.tf, terraform/redis.tf (when Redis requested), terraform/cloudwatch.tf, terraform/outputs.tf
+3. Internal ALB when access is private; VPC public+private subnets; ECS cluster/service/task with autoscaling; ECR; CloudWatch log group; ElastiCache Redis in private subnets; circuit breaker + lifecycle ignore_changes on task_definition when CI deploys
+4. Security groups: ALB→ECS on container_port; Redis allows inbound from ECS task SG on 6379 only — NEVER mutual SG ingress (no ecs_tasks↔redis cycle)
+5. .github/workflows/deploy.yml — step id set-image-uri writes image_uri to GITHUB_OUTPUT; services-stable wait; rollback; use \${{ env.* }} never \${var.*}
+6. app/Dockerfile (COPY must be two-arg e.g. COPY . .), app/server.js or app/index.js, app/package.json, app/package-lock.json — non-root USER, /health on PORT
+7. README.md — reviewable scaffold disclaimer
+Apply PART B8 rules. Do NOT emit Helm charts or Azure/GCP-only files for this stack.`;
   }
 
   if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {

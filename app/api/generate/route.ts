@@ -857,7 +857,26 @@ Always format your response by wrapping the chat reply in the following markers:
             );
           } else {
             if (collectedFiles.length > 0) {
-              const currentFiles = [...collectedFiles];
+              // Cross-file repairs (Helm helpers, provider pins, SG cycles) need the full tree.
+              const finalized = normalizeScaffoldFiles(collectedFiles);
+              for (const file of finalized) {
+                const prev = collectedFiles.find((f) => f.path === file.path);
+                if (!prev || prev.content !== file.content) {
+                  const idx = collectedFiles.findIndex((f) => f.path === file.path);
+                  if (idx === -1) collectedFiles.push(file);
+                  else collectedFiles[idx] = file;
+                  controller.enqueue(sse({ type: 'file', file }));
+                }
+              }
+              // Drop paths removed by normalization (e.g. duplicate aliases)
+              const finalPaths = new Set(finalized.map((f) => f.path));
+              for (let i = collectedFiles.length - 1; i >= 0; i--) {
+                if (!finalPaths.has(collectedFiles[i].path)) {
+                  collectedFiles.splice(i, 1);
+                }
+              }
+
+              const currentFiles = [...finalized];
               const MAX_VALIDATION_ATTEMPTS = 3; // 1 validate + up to 2 auto-repair passes (bounded by the wall-clock budget below)
               let attempts = 0;
               let passed = false;
@@ -874,7 +893,8 @@ Always format your response by wrapping the chat reply in the following markers:
                 let tempDir = "";
                 try {
                   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stackforge-val-'));
-                  for (const file of currentFiles) {
+                  const filesForValidate = normalizeScaffoldFiles(currentFiles);
+                  for (const file of filesForValidate) {
                     const filePath = path.join(tempDir, file.path);
                     await fs.mkdir(path.dirname(filePath), { recursive: true });
                     await fs.writeFile(filePath, file.content, 'utf8');

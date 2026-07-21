@@ -24,14 +24,19 @@ export const AWS_ECS_EXPRESS_FILES = [
   'terraform/versions.tf',
   'terraform/variables.tf',
   'terraform/main.tf',
+  'terraform/vpc.tf',
+  'terraform/ecs.tf',
+  'terraform/alb.tf',
   'terraform/iam.tf',
   'terraform/security_groups.tf',
+  'terraform/redis.tf',
+  'terraform/cloudwatch.tf',
   'terraform/outputs.tf',
   '.github/workflows/deploy.yml',
-  'Dockerfile',
+  'app/Dockerfile',
   'app/package.json',
   'app/package-lock.json',
-  'app/index.js',
+  'app/server.js',
   'README.md',
 ] as const;
 
@@ -77,6 +82,11 @@ export const PATH_ALIASES: Record<string, string[]> = {
   'terraform/variables.tf': ['terraform/vars.tf'],
   'terraform/versions.tf': ['terraform/providers.tf'],
   'terraform/main.tf': ['terraform/ecs.tf', 'terraform/cloudrun.tf', 'terraform/eks.tf'],
+  'terraform/vpc.tf': ['terraform/network.tf', 'terraform/networking.tf'],
+  'terraform/ecs.tf': ['terraform/main.tf'],
+  'terraform/alb.tf': ['terraform/load_balancer.tf'],
+  'terraform/redis.tf': ['terraform/elasticache.tf', 'terraform/cache.tf'],
+  'terraform/cloudwatch.tf': ['terraform/logging.tf'],
   'terraform/iam.tf': ['terraform/identity.tf'],
   'terraform/network.tf': ['terraform/networking.tf', 'terraform/vpc.tf'],
   'terraform/database.tf': ['terraform/db.tf', 'terraform/sql.tf', 'terraform/rds.tf'],
@@ -157,7 +167,7 @@ export function detectScaffoldProfile(
   const isGha =
     presets.ci === 'github-actions' || /github\s*actions/.test(t);
 
-  if (isAwsEcs && isExpress && isGha) {
+  if (isAwsEcs && isGha && (isExpress || /\bnode\.?js\b|\bexpress\b/i.test(t))) {
     return AWS_ECS_EXPRESS_PROFILE;
   }
 
