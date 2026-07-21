@@ -545,6 +545,12 @@ const PROVIDER_PINS: Array<{
     version: '~> 4.0',
   },
   {
+    detect: /\b(resource|data|provider)\s+"oci[_"]/,
+    name: 'oci',
+    source: 'oracle/oci',
+    version: '~> 6.0',
+  },
+  {
     detect: /\b(resource|data|provider)\s+"kubernetes[_"]/,
     name: 'kubernetes',
     source: 'hashicorp/kubernetes',

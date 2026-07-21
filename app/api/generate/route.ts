@@ -37,6 +37,7 @@ import {
   getMissingPaths,
   parseFileManifestFromPlan,
 } from '@/lib/scaffold-spec';
+import { mergeLockedBaseFiles } from '@/lib/scaffold-base-files';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
 import path from 'path';
@@ -754,7 +755,12 @@ Always format your response by wrapping the chat reply in the following markers:
           }
 
           if (!isFollowUp) {
-            const profile = detectScaffoldProfile(prompt, presets);
+            // Prefer plan text for profile detection (same signal formatPrompt uses).
+            const profileDetectText =
+              (approvedPlan || '').trim().length > 80
+                ? approvedPlan || prompt
+                : prompt;
+            const profile = detectScaffoldProfile(profileDetectText, presets);
             const planPaths = parseFileManifestFromPlan(approvedPlan || '');
             const requiredPaths =
               planPaths.length >= 4
@@ -762,6 +768,32 @@ Always format your response by wrapping the chat reply in the following markers:
                 : profile
                   ? [...profile.requiredPaths]
                   : [];
+
+            // Profile-first: seed locked stubs / missing required paths before
+            // asking the model to complete — QA stability across clouds.
+            if (profile) {
+              const merged = mergeLockedBaseFiles(collectedFiles, profile, {
+                fillMissing: true,
+                forceStubs: true,
+              });
+              if (merged.seeded.length > 0) {
+                controller.enqueue(
+                  sse({
+                    type: 'status',
+                    message: `Seeding ${merged.seeded.length} locked profile base file(s)…`,
+                  })
+                );
+                for (const path of merged.seeded) {
+                  const file = merged.files.find((f) => f.path === path);
+                  if (!file) continue;
+                  const idx = collectedFiles.findIndex((f) => f.path === path);
+                  if (idx >= 0) collectedFiles[idx] = file;
+                  else collectedFiles.push(file);
+                  anyOutput = true;
+                  controller.enqueue(sse({ type: 'file', file }));
+                }
+              }
+            }
 
             if (requiredPaths.length > 0) {
               let missing = getMissingPaths(collectedFiles, requiredPaths);
@@ -795,6 +827,22 @@ Always format your response by wrapping the chat reply in the following markers:
                       })
                     ) {
                       added += 1;
+                    }
+                  }
+                  // Re-apply locked stubs after completion so the model cannot
+                  // reintroduce CRUD/ORM stubs on force paths.
+                  if (profile) {
+                    const rem = mergeLockedBaseFiles(collectedFiles, profile, {
+                      fillMissing: false,
+                      forceStubs: true,
+                    });
+                    for (const path of rem.seeded) {
+                      const file = rem.files.find((f) => f.path === path);
+                      if (!file) continue;
+                      const idx = collectedFiles.findIndex((f) => f.path === path);
+                      if (idx >= 0) collectedFiles[idx] = file;
+                      else collectedFiles.push(file);
+                      controller.enqueue(sse({ type: 'file', file }));
                     }
                   }
                   const nextMissing = getMissingPaths(collectedFiles, requiredPaths);
@@ -875,7 +923,20 @@ Always format your response by wrapping the chat reply in the following markers:
           } else {
             if (collectedFiles.length > 0) {
               // Cross-file repairs (Helm helpers, provider pins, SG cycles) need the full tree.
-              const finalized = normalizeScaffoldFiles(collectedFiles);
+              let finalized = normalizeScaffoldFiles(collectedFiles);
+              const postNormProfile = detectScaffoldProfile(
+                (approvedPlan || '').trim().length > 80
+                  ? approvedPlan || prompt
+                  : prompt,
+                presets
+              );
+              if (postNormProfile) {
+                finalized = mergeLockedBaseFiles(finalized, postNormProfile, {
+                  fillMissing: true,
+                  forceStubs: true,
+                }).files;
+                finalized = normalizeScaffoldFiles(finalized);
+              }
               for (const file of finalized) {
                 const prev = collectedFiles.find((f) => f.path === file.path);
                 if (!prev || prev.content !== file.content) {

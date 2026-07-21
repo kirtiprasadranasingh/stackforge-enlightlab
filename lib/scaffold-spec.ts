@@ -76,6 +76,27 @@ export const AWS_EKS_HELM_FILES = [
   'README.md',
 ] as const;
 
+/** Common Oracle OKE + Helm + GitHub Actions layout */
+export const ORACLE_OKE_HELM_FILES = [
+  'terraform/versions.tf',
+  'terraform/variables.tf',
+  'terraform/main.tf',
+  'terraform/network.tf',
+  'terraform/iam.tf',
+  'terraform/outputs.tf',
+  '.github/workflows/deploy.yml',
+  'app/Dockerfile',
+  'app/package.json',
+  'app/server.js',
+  'charts/app/Chart.yaml',
+  'charts/app/values.yaml',
+  'charts/app/templates/deployment.yaml',
+  'charts/app/templates/service.yaml',
+  'charts/app/templates/ingress.yaml',
+  'charts/app/templates/hpa.yaml',
+  'README.md',
+] as const;
+
 /** Alternate paths that satisfy a required slot */
 export const PATH_ALIASES: Record<string, string[]> = {
   'terraform/key_vault.tf': ['terraform/keyvault.tf', 'terraform/key-vault.tf'],
@@ -113,7 +134,8 @@ export type ScaffoldProfileId =
   | 'azure-go-container-apps'
   | 'aws-ecs-express'
   | 'gcp-fastapi-cloudrun'
-  | 'aws-eks-helm';
+  | 'aws-eks-helm'
+  | 'oracle-oke-helm';
 
 export interface ScaffoldProfile {
   id: ScaffoldProfileId;
@@ -140,6 +162,11 @@ export const AWS_EKS_HELM_PROFILE: ScaffoldProfile = {
   requiredPaths: AWS_EKS_HELM_FILES,
 };
 
+export const ORACLE_OKE_HELM_PROFILE: ScaffoldProfile = {
+  id: 'oracle-oke-helm',
+  requiredPaths: ORACLE_OKE_HELM_FILES,
+};
+
 export function detectScaffoldProfile(
   prompt: string,
   presets: Presets
@@ -156,7 +183,11 @@ export function detectScaffoldProfile(
   const isAzdo =
     presets.ci === 'azure-devops' || /azure\s*devops|azure\s*pipelines/.test(t);
 
-  if (isAzureCa && isGo && isPostgres && isAzdo) {
+  // Azure Container Apps: prefer Go+Postgres+AzDO lock; fall back when presets alone match
+  if (isAzureCa && ((isGo && isPostgres && isAzdo) || (isAzdo && isGo))) {
+    return AZURE_GO_CONTAINER_APPS_PROFILE;
+  }
+  if (isAzureCa && isAzdo) {
     return AZURE_GO_CONTAINER_APPS_PROFILE;
   }
 
@@ -167,7 +198,10 @@ export function detectScaffoldProfile(
   const isGha =
     presets.ci === 'github-actions' || /github\s*actions/.test(t);
 
-  if (isAwsEcs && isGha && (isExpress || /\bnode\.?js\b|\bexpress\b/i.test(t))) {
+  if (isAwsEcs && isGha && (isExpress || /\bnode\.?js\b|\bexpress\b/i.test(t) || /\bnode\b/.test(t))) {
+    return AWS_ECS_EXPRESS_PROFILE;
+  }
+  if (isAwsEcs && isGha) {
     return AWS_ECS_EXPRESS_PROFILE;
   }
 
@@ -176,11 +210,19 @@ export function detectScaffoldProfile(
     (presets.orchestrator === 'cloud-run' ||
       presets.orchestrator === 'serverless' ||
       /cloud\s*run/.test(t));
-  const isFastapi = /fastapi|fast\s*api/.test(t);
+  const isFastapi = /fastapi|fast\s*api|python/.test(t);
   const isGitlab = presets.ci === 'gitlab-ci' || /gitlab/.test(t);
 
-  if (isGcpRun && isFastapi && isPostgres && isGitlab) {
+  // Cloud Run: lock when presets say so; language/CI hints preferred but not mandatory
+  if (isGcpRun && (isFastapi || isGitlab || presets.orchestrator === 'cloud-run')) {
     return GCP_FASTAPI_CLOUDRUN_PROFILE;
+  }
+
+  const isOracleOke =
+    (presets.cloud === 'oracle' || /\b(oci|oracle|oke)\b/.test(t)) &&
+    (presets.orchestrator === 'oke' || /\boke\b/.test(t) || presets.cloud === 'oracle');
+  if (isOracleOke) {
+    return ORACLE_OKE_HELM_PROFILE;
   }
 
   const isAwsEks =
@@ -280,13 +322,14 @@ export function buildLockedManifestPrompt(profile: ScaffoldProfile): string {
       ? 'Use these **exact** paths at the repository root (Go app at root — NOT go-backend/ or app/).'
       : profile.id === 'aws-ecs-express'
         ? 'Use these paths (Express under app/; Terraform under terraform/; workflow under .github/workflows/).'
-        : profile.id === 'aws-eks-helm'
+        : profile.id === 'aws-eks-helm' || profile.id === 'oracle-oke-helm'
           ? 'Use these paths (Node stub under app/; Helm under charts/app/; Terraform under terraform/; workflow under .github/workflows/).'
           : 'Use these paths (Python app at repo root unless noted; Terraform under terraform/).';
 
   return `## LOCKED FILE MANIFEST (mandatory — PRD)
 Emit a complete <<<FILE path="..." language="...">>> ... <<<END_FILE>>> block for **every** path below.
 ${pathHint}
+Fragile stub paths (app entrypoints, Dockerfiles, package manifests) may already be seeded by StackForge — overwrite them only with an equally minimal /health stub, never a full business app.
 
 ${list}
 
@@ -295,7 +338,7 @@ Rules:
 - Application-source paths in this manifest are minimal build/health-check stubs only. Do not add CRUD, authentication, UI, or business-domain behavior.
 - README content belongs in README.md only — <<<SUMMARY>>> must be 2–3 sentences listing what was created.
 - End SUMMARY with: "This is a reviewable starting scaffold — review before provisioning; it is not drop-in production code."
-- Apply the PART B rules for this profile (B6 Azure / B8 ECS / B9 GCP / B for EKS Helm).`;
+- Apply the PART B rules for this profile (B6 Azure / B8 ECS / B9 GCP / EKS-OKE Helm).`;
 }
 
 export function buildCompletionPrompt(
@@ -315,7 +358,9 @@ export function buildCompletionPrompt(
           ? 'AWS EKS + Helm + ALB Controller + RDS PostgreSQL + GitHub Actions'
           : profile?.id === 'gcp-fastapi-cloudrun'
             ? 'GCP Cloud Run + FastAPI + Cloud SQL + GitLab CI'
-            : 'the already-approved infrastructure architecture';
+            : profile?.id === 'oracle-oke-helm'
+              ? 'Oracle OKE + Helm + OCIR + GitHub Actions'
+              : 'the already-approved infrastructure architecture';
 
   const rules =
     profile?.id === 'azure-go-container-apps'
@@ -326,7 +371,9 @@ export function buildCompletionPrompt(
           ? 'Apply EKS rules: IRSA for ALB controller separate from app SA, HPA enabled by default, private RDS, probes on /health, GitHub OIDC, complete Helm chart.'
           : profile?.id === 'gcp-fastapi-cloudrun'
             ? 'Apply PART B9 (deletion_protection, private SQL networking, secret value injection, Cloud SQL attach, no create_all at import, valid GitLab YAML, real tests, WIF).'
-            : 'Apply PART B mechanical rules for the chosen cloud/CI. Keep app sources as a minimal /health stub only.';
+            : profile?.id === 'oracle-oke-helm'
+              ? 'Apply OCI/OKE rules: real OCI provider pins, NSG least privilege, OCIR image refs, Helm probes on /health, GitHub Actions deploy notes.'
+              : 'Apply PART B mechanical rules for the chosen cloud/CI. Keep app sources as a minimal /health stub only.';
 
   return `## Completion pass — missing required files
 ${profile ? `Profile: ${profile.id}\n` : ''}Already emitted: ${existingList || '(none)'}
