@@ -125,10 +125,9 @@ async function runShell(
   return streamProcess(child, emit, timeoutMs);
 }
 
+/** Per-run cache — shared dirs race on concurrent provider installs ("text file busy"). */
 async function writableTfPluginCache(): Promise<string> {
-  const dir = path.join(os.tmpdir(), 'stackforge-tf-plugin-cache');
-  await fs.mkdir(dir, { recursive: true });
-  return dir;
+  return fs.mkdtemp(path.join(os.tmpdir(), 'stackforge-tf-cache-'));
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -153,19 +152,32 @@ async function runTerraformChecks(
   const started = Date.now();
   const left = () => Math.max(5_000, budgetMs - (Date.now() - started));
   const cacheDir = await writableTfPluginCache();
-  const tfEnv = { TF_PLUGIN_CACHE_DIR: cacheDir };
+  const tfEnv = {
+    TF_PLUGIN_CACHE_DIR: cacheDir,
+    STACKFORGE_TF_PLUGIN_CACHE: cacheDir,
+  };
+  // Reserve floor budgets so a slow init cannot leave validate with ~30s.
+  const initBudget = Math.min(120_000, Math.max(60_000, Math.floor(budgetMs * 0.55)));
+  const validateBudget = Math.min(60_000, Math.max(45_000, left()));
 
   let code = await runShell(
     'terraform',
     ['init', '-backend=false', '-input=false'],
     tfDir,
     emit,
-    left(),
+    Math.min(initBudget, left()),
     tfEnv
   );
   if (code !== 0) return code;
 
-  code = await runShell('terraform', ['validate'], tfDir, emit, left(), tfEnv);
+  code = await runShell(
+    'terraform',
+    ['validate'],
+    tfDir,
+    emit,
+    Math.min(validateBudget, left()),
+    tfEnv
+  );
   if (code !== 0) return code;
 
   try {

@@ -45,7 +45,7 @@ function patchDockerfileForRoot(content: string, stripAppPrefix: boolean): strin
 }
 
 /** Fix common invalid workflow_dispatch input shapes that break actionlint/YAML. */
-function patchGithubWorkflow(content: string): string {
+function patchWorkflowDispatchInputs(content: string): string {
   // Bad:
   //   gcp_project_id: 'GCP Project ID'
   //     required: true
@@ -66,6 +66,419 @@ function patchGithubWorkflow(content: string): string {
     ) =>
       `${ind}${key}:\n${ind}  description: ${quote}${desc}${quote}\n${ind}  required: ${reqVal}`
   );
+}
+
+/** Drop `with:` blocks that sit under a `run:` step (invalid YAML / actionlint). */
+function stripOrphanWithBlocks(content: string): string {
+  const lines = content.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const withMatch = /^([ \t]*)with:\s*$/.exec(line);
+    if (withMatch) {
+      const ind = withMatch[1];
+      let sawUses = false;
+      let sawRun = false;
+      for (let j = out.length - 1; j >= 0; j--) {
+        const prev = out[j];
+        if (!prev.trim()) continue;
+        const pInd = /^([ \t]*)/.exec(prev)?.[1] ?? '';
+        if (/^[ \t]*-\s/.test(prev) && pInd.length < ind.length) break;
+        const rest = prev.slice(pInd.length);
+        if (pInd === ind && /^uses:\s/.test(rest)) {
+          sawUses = true;
+          break;
+        }
+        if (pInd === ind && /^run:\s/.test(rest)) {
+          sawRun = true;
+          break;
+        }
+      }
+      if (sawRun && !sawUses) {
+        i += 1;
+        while (i < lines.length) {
+          const next = lines[i];
+          if (!next.trim()) {
+            i += 1;
+            continue;
+          }
+          const nInd = /^([ \t]*)/.exec(next)?.[1] ?? '';
+          if (nInd.length <= ind.length) break;
+          i += 1;
+        }
+        continue;
+      }
+    }
+    out.push(line);
+    i += 1;
+  }
+  return out.join('\n');
+}
+
+/**
+ * Promote orphaned job-level `if: failure()` + second `steps:` (common after deploy)
+ * into a real `scaffold_rollback` job so YAML/actionlint can parse.
+ */
+function promoteOrphanRollbackSteps(content: string): string {
+  return content.replace(
+    /\n([ \t]{4})(?:#.*\r?\n\1)*(?:#.*[Rr]ollback.*\r?\n\1)?if:\s*(failure\(\)[^\n]*)\r?\n\1steps:\r?\n/g,
+    (_m, _ind: string, cond: string) =>
+      `\n  scaffold_rollback:\n    if: ${cond}\n    runs-on: ubuntu-latest\n    steps:\n`
+  );
+}
+
+/** Ensure image_uri job outputs are produced by a real GITHUB_OUTPUT step. */
+function patchImageUriOutput(content: string): string {
+  let out = content;
+
+  out = out.replace(
+    /image_uri:\s*\$\{\{\s*steps\.(?:build-and-push|build_and_push)\.outputs\.image_uri\s*\}\}/g,
+    'image_uri: ${{ steps.set-image-uri.outputs.image_uri }}'
+  );
+
+  // Give "Extract image URI" an id when it writes image_uri=
+  out = out.replace(
+    /(^[ \t]*- name:\s*Extract image URI\s*\r?\n)(?![ \t]*id:)/gm,
+    '$1        id: set-image-uri\n'
+  );
+
+  const refsImageUri = /outputs\.image_uri|image_uri:\s*\$\{\{/.test(out);
+  const writesImageUri = /echo\s+["']?image_uri=/.test(out);
+  if (refsImageUri && !writesImageUri && /id:\s*login-ecr/.test(out)) {
+    const insert = [
+      '      - name: Set image URI output',
+      '        id: set-image-uri',
+      '        run: |',
+      '          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY_NAME || env.ECR_REPOSITORY }}:${{ github.sha }}"',
+      '          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT',
+      '',
+    ].join('\n');
+
+    const marker = /id:\s*(build-and-push|build_and_push|login-ecr)\s*\r?\n/;
+    const m = marker.exec(out);
+    if (m) {
+      // Insert after the step that owns the marker: skip until next list item at same indent or less
+      const start = m.index + m[0].length;
+      const stepInd = '        '; // typical for `id:` under a step
+      let i = start;
+      const lines = out.slice(start).split('\n');
+      let consumed = 0;
+      for (let li = 0; li < lines.length; li++) {
+        const line = lines[li];
+        if (li === 0 && !line.trim()) {
+          consumed += line.length + 1;
+          continue;
+        }
+        const ind = /^([ \t]*)/.exec(line)?.[1] ?? '';
+        if (
+          li > 0 &&
+          line.trim() &&
+          (line.trimStart().startsWith('- ') || ind.length < stepInd.length) &&
+          !line.trimStart().startsWith('#')
+        ) {
+          break;
+        }
+        // stop at next `- name:` / `- uses:` at 6 spaces
+        if (li > 0 && /^[ \t]{0,6}-\s/.test(line) && ind.length <= 6) {
+          break;
+        }
+        consumed += line.length + 1;
+      }
+      const at = start + consumed;
+      out = out.slice(0, at) + insert + out.slice(at);
+    }
+
+    out = out.replace(
+      /image_uri:\s*\$\{\{\s*steps\.[A-Za-z0-9_-]+\.outputs\.image_uri\s*\}\}/g,
+      'image_uri: ${{ steps.set-image-uri.outputs.image_uri }}'
+    );
+  }
+
+  // If we added id: set-image-uri to Extract but job still points elsewhere
+  if (/id:\s*set-image-uri/.test(out) && /echo\s+["']?image_uri=/.test(out)) {
+    out = out.replace(
+      /image_uri:\s*\$\{\{\s*steps\.(?!set-image-uri)[A-Za-z0-9_-]+\.outputs\.image_uri\s*\}\}/g,
+      'image_uri: ${{ steps.set-image-uri.outputs.image_uri }}'
+    );
+  }
+
+  return out;
+}
+
+/** After `aws ecs update-service`, wait for stability (blocking check in validate-scaffold). */
+function patchEcsServicesStable(content: string): string {
+  if (!/aws\s+ecs\s+update-service/.test(content)) return content;
+  if (/services-stable|service-stable|deployments-stable/.test(content)) {
+    return content;
+  }
+  return content.replace(
+    /(aws\s+ecs\s+update-service\b[\s\S]*?--force-new-deployment[^\n]*)(\r?\n)/,
+    `$1$2
+          echo "Waiting for ECS service to stabilize..."
+          aws ecs wait services-stable \\
+            --cluster \${{ env.ECS_CLUSTER_NAME }} \\
+            --services \${{ env.ECS_SERVICE_NAME }}
+`
+  );
+}
+
+function patchGithubWorkflow(content: string): string {
+  let out = patchWorkflowDispatchInputs(content);
+  out = promoteOrphanRollbackSteps(out);
+  out = stripOrphanWithBlocks(out);
+  out = patchImageUriOutput(out);
+  out = patchEcsServicesStable(out);
+  return out;
+}
+
+/** Standard Helm helper defines for a chart name prefix (e.g. app, nodeapp). */
+function standardHelmHelpers(prefix: string): string {
+  return `{{/*
+Expand the name of the chart.
+*/}}
+{{- define "${prefix}.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
+Create a default fully qualified app name.
+*/}}
+{{- define "${prefix}.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Create chart name and version as part of the label.
+*/}}
+{{- define "${prefix}.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "${prefix}.labels" -}}
+helm.sh/chart: {{ include "${prefix}.chart" . }}
+{{ include "${prefix}.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "${prefix}.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "${prefix}.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "${prefix}.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "${prefix}.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+`;
+}
+
+/**
+ * Ensure every include "PREFIX.*" used in chart templates has matching define
+ * blocks in _helpers.tpl (fixes "no template app.fullname associated with gotpl").
+ */
+function ensureHelmHelpers(
+  byPath: Map<string, GeneratedFile>
+): void {
+  const chartDirs = new Set<string>();
+  for (const p of byPath.keys()) {
+    const m = /^charts\/([^/]+)\//.exec(p);
+    if (m) chartDirs.add(m[1]);
+  }
+
+  for (const chart of chartDirs) {
+    const prefix = `charts/${chart}/templates/`;
+    const templateFiles = [...byPath.entries()].filter(
+      ([p]) => p.startsWith(prefix) && (p.endsWith('.yaml') || p.endsWith('.yml') || p.endsWith('.tpl'))
+    );
+    if (templateFiles.length === 0) continue;
+
+    const includes = new Set<string>();
+    for (const [, file] of templateFiles) {
+      const re = /include\s+"([A-Za-z0-9_-]+)\.[^"]+"/g;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(file.content)) !== null) {
+        includes.add(match[1]);
+      }
+    }
+
+    const chartYaml = byPath.get(`charts/${chart}/Chart.yaml`);
+    const chartName =
+      chartYaml?.content.match(/^\s*name:\s*["']?([A-Za-z0-9_-]+)/m)?.[1] ??
+      chart;
+
+    if (includes.size === 0) {
+      // Templates may hardcode names; still ensure helpers for Chart.yaml name
+      includes.add(chartName);
+      includes.add('app');
+    }
+
+    const helpersPath = `charts/${chart}/templates/_helpers.tpl`;
+    let helpers = byPath.get(helpersPath)?.content ?? '';
+
+    for (const name of includes) {
+      if (new RegExp(`define\\s+"${name}\\.fullname"`).test(helpers)) continue;
+      helpers = `${helpers.trimEnd()}\n\n${standardHelmHelpers(name)}`.trimStart();
+    }
+
+    // Prefer defining helpers for chart name even if unused (lint nicety)
+    if (!new RegExp(`define\\s+"${chartName}\\.fullname"`).test(helpers)) {
+      helpers = `${helpers.trimEnd()}\n\n${standardHelmHelpers(chartName)}`.trimStart();
+    }
+
+    byPath.set(helpersPath, {
+      path: helpersPath,
+      language: 'plaintext',
+      content: helpers.endsWith('\n') ? helpers : `${helpers}\n`,
+      description: byPath.get(helpersPath)?.description,
+    });
+  }
+}
+
+const PROVIDER_PINS: Array<{
+  detect: RegExp;
+  name: string;
+  source: string;
+  version: string;
+}> = [
+  {
+    detect: /\b(resource|data|provider)\s+"aws[_"]/,
+    name: 'aws',
+    source: 'hashicorp/aws',
+    version: '~> 5.84',
+  },
+  {
+    detect: /\b(resource|data|provider)\s+"google[_"]/,
+    name: 'google',
+    source: 'hashicorp/google',
+    version: '~> 5.0',
+  },
+  {
+    detect: /\b(resource|data|provider)\s+"azurerm[_"]/,
+    name: 'azurerm',
+    source: 'hashicorp/azurerm',
+    version: '~> 4.0',
+  },
+  {
+    detect: /\b(resource|data|provider)\s+"kubernetes[_"]/,
+    name: 'kubernetes',
+    source: 'hashicorp/kubernetes',
+    version: '~> 2.23',
+  },
+  {
+    detect: /\b(resource|data|provider)\s+"helm[_"]/,
+    name: 'helm',
+    source: 'hashicorp/helm',
+    version: '~> 2.17',
+  },
+  {
+    detect: /\b(resource|data|provider)\s+"local[_"]/,
+    name: 'local',
+    source: 'hashicorp/local',
+    version: '~> 2.5',
+  },
+  {
+    detect: /\b(resource|data|provider)\s+"tls[_"]/,
+    name: 'tls',
+    source: 'hashicorp/tls',
+    version: '~> 4.0',
+  },
+  {
+    detect: /\b(resource|data|provider)\s+"random[_"]/,
+    name: 'random',
+    source: 'hashicorp/random',
+    version: '~> 3.6',
+  },
+];
+
+/**
+ * Pin required_providers so init does not pull latest aws v6 / helm v3 (slow + breaking).
+ */
+function ensureRequiredProviders(
+  byPath: Map<string, GeneratedFile>
+): void {
+  const tfEntries = [...byPath.entries()].filter(([p]) => p.endsWith('.tf'));
+  if (tfEntries.length === 0) return;
+
+  const all = tfEntries.map(([, f]) => f.content).join('\n');
+  const needed = PROVIDER_PINS.filter((p) => p.detect.test(all));
+  if (needed.length === 0) return;
+
+  const declared = new Set<string>();
+  for (const [, f] of tfEntries) {
+    const re = /^\s*([A-Za-z0-9_-]+)\s*=\s*\{\s*[\s\S]*?source\s*=/gm;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(f.content)) !== null) {
+      // Only count inside required_providers-ish contexts — heuristic: name matches known providers
+      if (PROVIDER_PINS.some((p) => p.name === m![1])) declared.add(m[1]);
+    }
+  }
+
+  const missing = needed.filter((p) => !declared.has(p.name));
+  if (missing.length === 0) return;
+
+  const block = missing
+    .map(
+      (p) =>
+        `    ${p.name} = {\n      source  = "${p.source}"\n      version = "${p.version}"\n    }`
+    )
+    .join('\n');
+
+  const versionsPath =
+    [...byPath.keys()].find((p) => p === 'terraform/versions.tf') ||
+    [...byPath.keys()].find((p) => p.endsWith('/versions.tf')) ||
+    'terraform/versions.tf';
+
+  const existing = byPath.get(versionsPath);
+  if (!existing) {
+    byPath.set(versionsPath, {
+      path: versionsPath,
+      language: 'hcl',
+      content: `terraform {\n  required_version = ">= 1.5.0"\n  required_providers {\n${block}\n  }\n}\n`,
+    });
+    return;
+  }
+
+  let content = existing.content;
+  if (/required_providers\s*\{/.test(content)) {
+    content = content.replace(
+      /required_providers\s*\{/,
+      `required_providers {\n${block}`
+    );
+  } else if (/terraform\s*\{/.test(content)) {
+    content = content.replace(
+      /terraform\s*\{/,
+      `terraform {\n  required_providers {\n${block}\n  }`
+    );
+  } else {
+    content = `terraform {\n  required_providers {\n${block}\n  }\n}\n\n${content}`;
+  }
+
+  byPath.set(versionsPath, { ...existing, content });
 }
 
 /** Fix pipeline build context when Dockerfile lives at repo root */
@@ -542,6 +955,8 @@ export function normalizeScaffoldFiles(
   }
 
   ensureNodeLockfiles(byPath);
+  ensureHelmHelpers(byPath);
+  ensureRequiredProviders(byPath);
 
   return dedupeTerraformResources(Array.from(byPath.values()));
 }

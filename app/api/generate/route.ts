@@ -881,18 +881,17 @@ Always format your response by wrapping the chat reply in the following markers:
                   }
 
                   const scriptPath = path.join(process.cwd(), 'scripts', 'validate-scaffold.sh');
-                  // Cap the validator so it can't run past our remaining budget.
+                  // Prefer a real floor so init+validate are not starved to ~32s.
                   const validateTimeout = Math.min(
-                    60000,
-                    Math.max(15000, timeLeftMs() - 20000)
+                    180000,
+                    Math.max(90000, timeLeftMs() - 15000)
                   );
                   let code = 0;
                   let output = "";
                   try {
-                    const tfCache =
-                      process.env.STACKFORGE_TF_PLUGIN_CACHE ||
-                      path.join(os.tmpdir(), 'stackforge-tf-plugin-cache');
-                    await fs.mkdir(tfCache, { recursive: true });
+                    const tfCache = await fs.mkdtemp(
+                      path.join(os.tmpdir(), 'stackforge-tf-cache-')
+                    );
                     const { stdout, stderr } = await execAsync(
                       `bash "${scriptPath}" "${tempDir}"`,
                       {

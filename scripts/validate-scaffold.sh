@@ -22,11 +22,14 @@ log_warn() { REPORT+=("WARN  - $1"); }
 echo "Validating scaffold at: $SCAFFOLD_DIR"
 echo "----------------------------------------"
 
-# Writable plugin cache for the non-root app user. The image may set
-# TF_PLUGIN_CACHE_DIR to a shared path where chmod on new providers fails
-# ("operation not permitted"). Always prefer a /tmp cache for validate runs.
-export TF_PLUGIN_CACHE_DIR="${STACKFORGE_TF_PLUGIN_CACHE:-/tmp/stackforge-tf-plugin-cache}"
-mkdir -p "$TF_PLUGIN_CACHE_DIR"
+# Writable per-run plugin cache. A shared path races under concurrent checks
+# ("text file busy" / chmod EPERM). Callers may set STACKFORGE_TF_PLUGIN_CACHE.
+if [ -z "${STACKFORGE_TF_PLUGIN_CACHE:-}" ]; then
+  export TF_PLUGIN_CACHE_DIR="$(mktemp -d /tmp/stackforge-tf-cache-XXXXXX)"
+else
+  export TF_PLUGIN_CACHE_DIR="$STACKFORGE_TF_PLUGIN_CACHE"
+  mkdir -p "$TF_PLUGIN_CACHE_DIR"
+fi
 # Best-effort seed from the image cache when present (speeds init; never required).
 if [ -d /usr/share/terraform/plugin-cache ] && [ -z "$(ls -A "$TF_PLUGIN_CACHE_DIR" 2>/dev/null)" ]; then
   cp -a /usr/share/terraform/plugin-cache/. "$TF_PLUGIN_CACHE_DIR/" 2>/dev/null || true
@@ -39,7 +42,17 @@ JOB_DIR=$(mktemp -d /tmp/scaffold-jobs-XXXXXX)
 check_tf() {
   if [ -d "$SCAFFOLD_DIR/terraform" ]; then
     cd "$SCAFFOLD_DIR/terraform" || exit 1
-    if terraform init -backend=false -input=false > "$JOB_DIR/tf_init.log" 2>&1; then
+    set +e
+    terraform init -backend=false -input=false > "$JOB_DIR/tf_init.log" 2>&1
+    INIT_EXIT=$?
+    # One retry with a fresh cache on plugin install races
+    if [ "$INIT_EXIT" -ne 0 ] && grep -qiE 'text file busy|operation not permitted' "$JOB_DIR/tf_init.log" 2>/dev/null; then
+      export TF_PLUGIN_CACHE_DIR="$(mktemp -d /tmp/stackforge-tf-cache-XXXXXX)"
+      terraform init -backend=false -input=false > "$JOB_DIR/tf_init.log" 2>&1
+      INIT_EXIT=$?
+    fi
+    set -e
+    if [ "$INIT_EXIT" -eq 0 ]; then
       if terraform validate -json > "$JOB_DIR/tf_validate.json" 2>"$JOB_DIR/tf_validate.log"; then
         set +e
         terraform plan -input=false -refresh=false -lock=false -no-color > "$JOB_DIR/tf_plan.log" 2>&1

@@ -17,7 +17,7 @@ import { normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 /** OKE / long-running node — terraform init can take a while */
-export const maxDuration = 120;
+export const maxDuration = 240;
 
 function sse(data: unknown): Uint8Array {
   const encoder = new TextEncoder();

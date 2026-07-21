@@ -67,6 +67,7 @@ Instead:
 - The health stub is **build/probe glue only**: one entry file (e.g. \`server.js\` / \`main.go\` / \`main.py\`) exposing \`GET /health\`, plus Dockerfile and the smallest lockfile/manifest needed to build. No CRUD, auth, UI pages, frameworks beyond the HTTP listener, multi-module apps, or product features.
 - Match the **runtime named in the approved plan / user prompt** (Next.js → Node health stub, not .NET). Never swap languages.
 - Helm may include a small \`_helpers.tpl\` for naming — that is orchestration scaffolding, not an application. Keep chart templates lean (deployment, service, ingress, hpa).
+- **Helm helper contract (blocking)**: Chart.yaml \`name\`, every \`{{- define "NAME...." -}}\` in \`_helpers.tpl\`, and every \`include "NAME...."\` in templates MUST share the same NAME (prefer \`app\`). Emitting \`include "app.fullname"\` without \`define "app.fullname"\` is a blocking failure.
 
 ### A3. Required output artifacts
 
@@ -235,8 +236,9 @@ instead.
 ### B10. Cross-cutting app + Docker + Terraform hygiene
 - Health/readiness paths in Terraform, CI smoke tests, and the application code must use the **same** path and port.
 - Never claim rollback/quality gates in README unless the pipeline implements them.
-- Pin \`required_providers\` versions in every Terraform stack; \`terraform validate\` must be able to succeed with \`-backend=false\`.
+- Pin \`required_providers\` versions in every Terraform stack (\`aws ~> 5.84\`, \`helm ~> 2.17\`, \`kubernetes ~> 2.23\`, \`google ~> 5.0\` as applicable). Never leave providers unpinned so \`terraform init\` grabs latest major (aws v6 / helm v3). \`terraform validate\` must succeed with \`-backend=false\`.
 - Prefer constructing deploy image URIs as \`\$REGISTRY/\$REPO:\$TAG\` consistently across cloud providers.
+- GitHub Actions YAML: never put \`with:\` under a \`run:\` step; never emit a second job-level \`steps:\` without a new job id (rollback must be its own job).
 
 ### B7. Final self-verification pass
 Before returning any response, re-read every file specifically hunting for:

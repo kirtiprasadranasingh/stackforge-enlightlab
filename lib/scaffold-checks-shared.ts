@@ -20,9 +20,10 @@ export const CHECK_LABELS: Record<ScaffoldCheckId, string> = {
 };
 
 export const CHECK_TIMEOUT_MS: Record<ScaffoldCheckId, number> = {
-  all: 90_000,
-  terraform: 75_000,
-  helm: 45_000,
+  // Terraform init can download large providers; keep validate from being starved.
+  all: 210_000,
+  terraform: 180_000,
+  helm: 60_000,
   hadolint: 20_000,
   actionlint: 20_000,
 };
