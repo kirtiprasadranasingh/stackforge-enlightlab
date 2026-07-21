@@ -34,6 +34,7 @@ import {
   isFullStackPrompt,
   isIterativeEditPrompt,
   requiresPlanApproval,
+  buildValidationFixPrompt,
 } from '@/lib/stack-intent';
 import { getLanguageFromPath } from '@/lib/utils';
 
@@ -53,6 +54,8 @@ interface SendOptions {
   priorPlan?: string;
   /** Skip adding a user bubble (e.g. Approve button) */
   skipUserBubble?: boolean;
+  /** Short text shown in the chat bubble while `rawText` is sent to the API */
+  displayContent?: string;
   interviewChoices?: InterviewChoiceItem[];
 }
 
@@ -430,7 +433,9 @@ export default function GeneratePage() {
           {
             id: `u-${Date.now()}`,
             role: 'user',
-            content: options?.interviewChoices?.length ? '' : text,
+            content: options?.interviewChoices?.length
+              ? ''
+              : options?.displayContent?.trim() || text,
             kind: options?.interviewChoices?.length ? 'confirmed-choices' : 'text',
             choices: options?.interviewChoices,
           },
@@ -796,6 +801,20 @@ export default function GeneratePage() {
       skipUserBubble: true,
     });
   }, [pendingPlan, lastStackPrompt, isGenerating, sendMessage]);
+
+  /** One-click repair from Scaffold checks — keeps files, skips clarify/plan. */
+  const fixFailuresFromChecks = useCallback(
+    (failReport: string) => {
+      if (isGenerating || filesRef.current.length === 0) return;
+      const prompt = buildValidationFixPrompt(failReport);
+      void sendMessage(prompt, {
+        phase: 'generate',
+        displayContent:
+          'Fix the failing scaffold checks and make Run all checks pass.',
+      });
+    },
+    [isGenerating, sendMessage]
+  );
 
   const submitClarifyingAnswers = useCallback(() => {
     if (isGenerating || pendingQuestions.length === 0) return;
@@ -1367,6 +1386,7 @@ export default function GeneratePage() {
                 awaitingApproval={awaitingApproval}
                 onApprove={approvePlan}
                 onDiscard={discardPlan}
+                onFixFailures={fixFailuresFromChecks}
               />
             </div>
           </section>
@@ -1475,7 +1495,9 @@ export default function GeneratePage() {
                     ? 'Describe plan changes, then send…'
                     : pendingQuestions.length
                       ? 'Or type an extra note…'
-                      : 'Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS'
+                      : files.length > 0
+                        ? 'Ask for changes, or paste check failures to fix…'
+                        : 'Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS'
                 }
                 value={input}
                 onChange={(e) => setInput(e.target.value)}

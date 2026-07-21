@@ -365,7 +365,32 @@ function patchGithubWorkflow(content: string): string {
   out = patchEcsServicesStable(out);
   out = indentHeredocClosers(out);
   out = trimTruncatedWorkflowTail(out);
+  out = quoteUnsafeRunLines(out);
   return out;
+}
+
+/**
+ * Single-line `run: echo "…: …"` breaks YAML (colon = mapping). Promote to `run: |`.
+ */
+function quoteUnsafeRunLines(content: string): string {
+  return content.replace(
+    /^([ \t]*)run:\s+(?!\|)(?!>).*$/gm,
+    (line, ind: string) => {
+      // Already a block scalar opener on its own line — leave alone
+      if (/^[ \t]*run:\s*[|>]/.test(line)) return line;
+      const rest = line.replace(/^[ \t]*run:\s+/, '');
+      // Unquoted value containing `:` outside ${{ }} is unsafe in YAML
+      if (!rest.includes(':')) return line;
+      // Fully single- or double-quoted already
+      if (
+        (rest.startsWith("'") && rest.endsWith("'")) ||
+        (rest.startsWith('"') && rest.endsWith('"'))
+      ) {
+        return line;
+      }
+      return `${ind}run: |\n${ind}  ${rest}`;
+    }
+  );
 }
 
 /** Standard Helm helper defines for a chart name prefix (e.g. app, nodeapp). */
@@ -890,8 +915,9 @@ function terraformResourceOwnerScore(path: string, type: string): number {
  * `terraform init` / `validate` can succeed after generation.
  */
 function dedupeTerraformResources(files: GeneratedFile[]): GeneratedFile[] {
-  const tfFiles = files.filter((f) => f.path.endsWith('.tf'));
-  if (tfFiles.length < 2) return files;
+  let next = dedupeTerraformOutputs(files);
+  const tfFiles = next.filter((f) => f.path.endsWith('.tf'));
+  if (tfFiles.length < 2) return next;
 
   type Occ = {
     path: string;
@@ -932,9 +958,9 @@ function dedupeTerraformResources(files: GeneratedFile[]): GeneratedFile[] {
     const win = winners.get(key);
     return !win || win.path !== occ.path || win.order !== occ.order;
   });
-  if (!hasDupes) return files;
+  if (!hasDupes) return next;
 
-  return files.map((file) => {
+  return next.map((file) => {
     if (!file.path.endsWith('.tf')) return file;
 
     const blocks = findTerraformResourceBlocks(file.content);
@@ -949,6 +975,92 @@ function dedupeTerraformResources(files: GeneratedFile[]): GeneratedFile[] {
       if (!keep) remove.push(block);
     }
 
+    if (remove.length === 0) return file;
+    let content = file.content;
+    for (const block of [...remove].sort((a, b) => b.start - a.start)) {
+      content = content.slice(0, block.start) + content.slice(block.end);
+    }
+    content = content.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+    return { ...file, content };
+  });
+}
+
+type TfOutputBlock = { name: string; start: number; end: number };
+
+function findTerraformOutputBlocks(content: string): TfOutputBlock[] {
+  const blocks: TfOutputBlock[] = [];
+  const re = /output\s+"([^"]+)"\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(content)) !== null) {
+    let depth = 1;
+    let i = match.index + match[0].length;
+    while (i < content.length && depth > 0) {
+      const ch = content[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    if (content[i] === '\r') i += 1;
+    if (content[i] === '\n') i += 1;
+    blocks.push({ name: match[1], start: match.index, end: i });
+  }
+  return blocks;
+}
+
+/**
+ * Keep a single definition per output name. Prefer outputs.tf; otherwise first wins.
+ */
+function dedupeTerraformOutputs(files: GeneratedFile[]): GeneratedFile[] {
+  const tfFiles = files.filter((f) => f.path.endsWith('.tf'));
+  if (tfFiles.length === 0) return files;
+
+  type Occ = { path: string; name: string; score: number; order: number };
+  const occurrences: Occ[] = [];
+  let order = 0;
+  for (const file of tfFiles) {
+    const base = file.path.split('/').pop() || file.path;
+    const score = base === 'outputs.tf' ? 100 : base === 'ecr.tf' ? 40 : 50;
+    for (const block of findTerraformOutputBlocks(file.content)) {
+      occurrences.push({
+        path: file.path,
+        name: block.name,
+        score,
+        order: order++,
+      });
+    }
+  }
+  if (occurrences.length === 0) return files;
+
+  const winners = new Map<string, Occ>();
+  for (const occ of occurrences) {
+    const prev = winners.get(occ.name);
+    if (
+      !prev ||
+      occ.score > prev.score ||
+      (occ.score === prev.score && occ.order < prev.order)
+    ) {
+      winners.set(occ.name, occ);
+    }
+  }
+
+  const hasDupes = occurrences.some((occ) => {
+    const win = winners.get(occ.name);
+    return !win || win.path !== occ.path || win.order !== occ.order;
+  });
+  if (!hasDupes) return files;
+
+  return files.map((file) => {
+    if (!file.path.endsWith('.tf')) return file;
+    const blocks = findTerraformOutputBlocks(file.content);
+    const remove: TfOutputBlock[] = [];
+    const seenInFile = new Set<string>();
+    for (const block of blocks) {
+      const win = winners.get(block.name);
+      const firstInFile = !seenInFile.has(block.name);
+      seenInFile.add(block.name);
+      const keep = win?.path === file.path && firstInFile;
+      if (!keep) remove.push(block);
+    }
     if (remove.length === 0) return file;
     let content = file.content;
     for (const block of [...remove].sort((a, b) => b.start - a.start)) {

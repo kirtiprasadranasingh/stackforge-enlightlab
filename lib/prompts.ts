@@ -659,6 +659,7 @@ ${fileBlocks.length ? fileBlocks.join('\n\n') : '(empty — create a full stack)
 - Update the project to satisfy the request — you MUST emit <<<FILE>>> markers for every new or changed file
 - Keep the PRD scope boundary: infrastructure, pipeline, container/orchestration, and only the minimal app stub required for build/probe consistency. Do not add CRUD, auth, UI, or business-domain features.
 - Never reply "already configured" or "no file changes needed" without emitting the relevant files for the user to verify
+- **Validation-fix requests** (FAIL lines / VALIDATION REPORT / "make checks pass"): treat as a surgical repair — fix only the reported issues, keep architecture stable, ensure terraform init+validate, actionlint, and hadolint can pass
 - **Dev/prod environments**: emit concrete artifacts, e.g. \`terraform/environments/dev.tfvars\`, \`terraform/environments/prod.tfvars\` (or \`env/dev/\` + \`env/prod/\` modules), update \`azure-pipelines.yml\` / workflow with separate \`dev\` and \`prod\` deployment stages or environments, and update \`README.md\`. List changed paths in SUMMARY.
 - **Meta questions** ("where did you update?", "what changed?"): answer in SUMMARY with the exact file paths from the previous turn; if nothing changed, say so plainly.
 - Emit <<<FILE>>> only for new or changed files (full content each)

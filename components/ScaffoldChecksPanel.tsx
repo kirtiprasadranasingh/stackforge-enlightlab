@@ -12,6 +12,11 @@ interface ScaffoldChecksPanelProps {
   isGenerating: boolean;
   /** Auto-run full checks once after generation finishes */
   autoRun?: boolean;
+  /**
+   * When checks fail, offer a one-click repair that sends FAIL lines into chat
+   * as an iterative fix (keeps existing files; does not restart clarify/plan).
+   */
+  onFixFailures?: (failReport: string) => void;
 }
 
 type TermLine = { id: number; text: string; kind: 'out' | 'meta' | 'err' };
@@ -41,6 +46,7 @@ export function ScaffoldChecksPanel({
   files,
   isGenerating,
   autoRun = true,
+  onFixFailures,
 }: ScaffoldChecksPanelProps) {
   const [lines, setLines] = useState<TermLine[]>([]);
   const [running, setRunning] = useState<ScaffoldCheckId | null>(null);
@@ -163,6 +169,25 @@ export function ScaffoldChecksPanel({
     },
     [append, files, isGenerating]
   );
+
+  const collectFailReport = useCallback(() => {
+    const failLines = lines
+      .map((l) => l.text)
+      .filter((t) => /^FAIL\s+-/i.test(t.trim()) || /^RESULT:\s*FAILED/i.test(t.trim()));
+    if (failLines.length > 0) return failLines.join('\n');
+    // Fallback: whole terminal buffer (still capped by buildValidationFixPrompt)
+    return lines
+      .map((l) => l.text)
+      .join('\n')
+      .slice(-5000);
+  }, [lines]);
+
+  const handleFixFailures = useCallback(() => {
+    if (!onFixFailures || isGenerating || running != null) return;
+    const report = collectFailReport();
+    if (!report.trim()) return;
+    onFixFailures(report);
+  }, [onFixFailures, isGenerating, running, collectFailReport]);
 
   useEffect(() => {
     if (!autoRun || isGenerating || files.length === 0 || running) return;
@@ -324,6 +349,17 @@ export function ScaffoldChecksPanel({
               {b.short}
             </button>
           ))}
+          {lastResult === 'fail' && onFixFailures ? (
+            <button
+              type="button"
+              disabled={isGenerating || running != null}
+              onClick={handleFixFailures}
+              title="Send failed checks to chat and regenerate corrected files"
+              className="text-[10px] font-semibold px-2 py-1 rounded border border-amber-600/80 bg-amber-950 text-amber-100 hover:bg-amber-900 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+            >
+              Fix failures
+            </button>
+          ) : null}
           {running ? (
             <button
               type="button"

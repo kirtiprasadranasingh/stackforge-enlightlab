@@ -18,6 +18,8 @@ interface WorkflowPanelProps {
   validationSummary?: string;
   onApprove?: () => void;
   onDiscard?: () => void;
+  /** Send failed scaffold-check output into chat for iterative repair */
+  onFixFailures?: (failReport: string) => void;
 }
 
 const STEPS = [
@@ -54,6 +56,7 @@ export function WorkflowPanel({
   validationSummary,
   onApprove,
   onDiscard,
+  onFixFailures,
 }: WorkflowPanelProps) {
   const hasFiles = files.length > 0;
   const active = stepIndex(phase, isGenerating, hasFiles, awaitingApproval);
@@ -130,6 +133,7 @@ export function WorkflowPanel({
               files={files}
               isGenerating={isGenerating}
               autoRun
+              onFixFailures={onFixFailures}
             />
           ) : null}
         </div>

@@ -88,6 +88,7 @@ export function isFullStackPrompt(prompt: string): boolean {
 /** Small iterative edits — never wipe the workspace for these. */
 export function isIterativeEditPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase().trim();
+  if (isValidationFixPrompt(prompt)) return true;
   if (
     /^(add|update|fix|change|harden|secure|wire|include|remove|delete|rename|move)\b/.test(
       lower
@@ -103,6 +104,47 @@ export function isIterativeEditPrompt(prompt: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * User pasted a scaffold-check report or asked to make checks pass.
+ * Must stay iterative — never restart clarify/plan or wipe files.
+ */
+export function isValidationFixPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (
+    /=====?\s*validation report\s*=====?/i.test(text) ||
+    /\bresult:\s*failed\b/i.test(text) ||
+    /^fail\s+- /im.test(text) ||
+    /\bfail\s+-\s+(terraform|hadolint|actionlint|helm)\b/i.test(text)
+  ) {
+    return true;
+  }
+  if (
+    /\b(make (them|it|all checks|the checks) pass|fix (these |the )?(validation |check |scaffold )?(failures?|errors?|issues?)|correct (the |these )?(error|errors|failures?)|checks? (did not|didn't|failed|not )pass)\b/i.test(
+      lower
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Build the chat/API prompt used when repairing from scaffold-check FAIL lines. */
+export function buildValidationFixPrompt(failReport: string): string {
+  const trimmed = failReport.trim().slice(0, 6000);
+  return `Fix the scaffold so "Run all checks" passes. Do not change cloud, region, environments, or architecture — only correct the failing files.
+
+Rules:
+- Duplicate Terraform outputs/resources: keep one definition, remove the duplicate.
+- actionlint / YAML: put shell with colons in a \`run: |\` block (never \`run: echo "…: …"\` on one line).
+- terraform init/validate errors: add missing variables/modules/resources or remove dangling refs.
+- Emit full corrected file bodies with <<<FILE>>> markers for every changed file.
+
+Validation failures:
+${trimmed}`;
 }
 
 /**
