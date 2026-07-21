@@ -17,6 +17,8 @@ interface ScaffoldChecksPanelProps {
    * as an iterative fix (keeps existing files; does not restart clarify/plan).
    */
   onFixFailures?: (failReport: string) => void;
+  /** Bubble check status up for the Validate step strip (not an error banner). */
+  onStatusChange?: (status: 'idle' | 'running' | 'ok' | 'fail') => void;
 }
 
 type TermLine = { id: number; text: string; kind: 'out' | 'meta' | 'err' };
@@ -47,6 +49,7 @@ export function ScaffoldChecksPanel({
   isGenerating,
   autoRun = true,
   onFixFailures,
+  onStatusChange,
 }: ScaffoldChecksPanelProps) {
   const [lines, setLines] = useState<TermLine[]>([]);
   const [running, setRunning] = useState<ScaffoldCheckId | null>(null);
@@ -188,6 +191,14 @@ export function ScaffoldChecksPanel({
     if (!report.trim()) return;
     onFixFailures(report);
   }, [onFixFailures, isGenerating, running, collectFailReport]);
+
+  useEffect(() => {
+    if (!onStatusChange) return;
+    if (running) onStatusChange('running');
+    else if (lastResult === 'ok') onStatusChange('ok');
+    else if (lastResult === 'fail') onStatusChange('fail');
+    else onStatusChange('idle');
+  }, [running, lastResult, onStatusChange]);
 
   useEffect(() => {
     if (!autoRun || isGenerating || files.length === 0 || running) return;
@@ -355,7 +366,7 @@ export function ScaffoldChecksPanel({
               disabled={isGenerating || running != null}
               onClick={handleFixFailures}
               title="Send failed checks to chat and regenerate corrected files"
-              className="text-[10px] font-semibold px-2 py-1 rounded border border-amber-600/80 bg-amber-950 text-amber-100 hover:bg-amber-900 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+              className="text-[10px] font-semibold px-2 py-1 rounded border border-indigo-500/80 bg-indigo-950 text-indigo-100 hover:bg-indigo-900 disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
             >
               Fix failures
             </button>

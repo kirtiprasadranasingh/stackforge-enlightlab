@@ -1215,9 +1215,7 @@ export default function GeneratePage() {
                             m.role === 'user'
                               ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40 font-medium'
                                 : m.role === 'system'
-                                ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
-                                  ? 'bg-rose-50 border border-rose-200/80 text-rose-800 rounded-xl shadow-sm'
-                                  : 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl shadow-sm'
+                                ? 'bg-rose-50 border border-rose-200/80 text-rose-800 rounded-xl shadow-sm'
                                 : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'
                           }`}
                         >
@@ -1226,9 +1224,7 @@ export default function GeneratePage() {
                             m.role === 'user'
                               ? 'text-white'
                               : m.role === 'system'
-                                ? m.content.toLowerCase().includes('error') || m.content.toLowerCase().includes('fail')
-                                  ? 'text-rose-800'
-                                  : 'text-amber-900'
+                                ? 'text-rose-800'
                                 : 'text-slate-700'
                           )}
                         </div>
@@ -1466,13 +1462,13 @@ export default function GeneratePage() {
                           m.role === 'user'
                             ? 'bg-[#4F46E5] text-white rounded-tr-sm shadow-md shadow-indigo-200/40'
                             : m.role === 'system'
-                              ? 'bg-amber-50 text-amber-900 border border-amber-200/70 rounded-xl'
+                              ? 'bg-rose-50 text-rose-800 border border-rose-200/80 rounded-xl'
                               : 'bg-white border border-[#E2E8F0] text-[#0F172A] rounded-tl-sm shadow-sm'
                         }`}
                       >
                         {renderChatMessage(
                           m,
-                          m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-amber-900' : 'text-slate-700'
+                          m.role === 'user' ? 'text-white' : m.role === 'system' ? 'text-rose-800' : 'text-slate-700'
                         )}
                       </div>
                     )}

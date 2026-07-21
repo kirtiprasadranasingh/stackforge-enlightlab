@@ -63,6 +63,9 @@ export function WorkflowPanel({
   const draftingPlan = isGenerating && phase === 'plan';
   const writingCode = isGenerating && phase === 'generate';
   const planReady = Boolean(awaitingApproval && pendingPlan && !isGenerating);
+  const [checkStatus, setCheckStatus] = useState<
+    'idle' | 'running' | 'ok' | 'fail'
+  >('idle');
 
   // Brief beat after the model finishes so the plan slides in — doesn't pop instantly.
   const [planReveal, setPlanReveal] = useState<'idle' | 'settling' | 'shown'>(
@@ -109,9 +112,7 @@ export function WorkflowPanel({
               </div>
             </div>
           ) : (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-              Reviewable infrastructure scaffold — validate and review these files before provisioning. This is not drop-in production code.
-            </div>
+            <ValidateStatusStrip status={checkStatus} fileCount={files.length} />
           )}
           {validationSummary && !writingCode ? (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-700 font-mono whitespace-pre-wrap max-h-28 overflow-y-auto">
@@ -134,6 +135,7 @@ export function WorkflowPanel({
               isGenerating={isGenerating}
               autoRun
               onFixFailures={onFixFailures}
+              onStatusChange={setCheckStatus}
             />
           ) : null}
         </div>
@@ -273,6 +275,41 @@ export function WorkflowPanel({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ValidateStatusStrip({
+  status,
+  fileCount,
+}: {
+  status: 'idle' | 'running' | 'ok' | 'fail';
+  fileCount: number;
+}) {
+  if (status === 'ok') {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] leading-relaxed text-emerald-900">
+        Scaffold checks passed — {fileCount} file{fileCount === 1 ? '' : 's'} ready to download and review.
+      </div>
+    );
+  }
+  if (status === 'fail') {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-700">
+        Some checks failed — use <span className="font-semibold text-indigo-700">Fix failures</span> in the panel below, then re-run checks.
+      </div>
+    );
+  }
+  if (status === 'running') {
+    return (
+      <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-[11px] leading-relaxed text-indigo-900">
+        Running scaffold checks…
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+      Validate step — run <span className="font-semibold text-slate-800">Scaffold checks</span> below, then download when ready.
     </div>
   );
 }
