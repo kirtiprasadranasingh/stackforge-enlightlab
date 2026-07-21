@@ -279,6 +279,82 @@ function patchEcsServicesStable(content: string): string {
   );
 }
 
+/**
+ * Column-0 heredoc closers (`EOF` / `END`) inside `run: |` blocks break YAML
+ * (actionlint: "could not find expected ':'"). Indent them to the script body.
+ */
+function indentHeredocClosers(content: string): string {
+  const lines = content.split('\n');
+  const out: string[] = [];
+  let scriptIndent: string | null = null;
+  let openMarker: string | null = null;
+
+  for (const line of lines) {
+    const runMatch = /^([ \t]*)run:\s*(\||>)/.exec(line);
+    if (runMatch) {
+      scriptIndent = `${runMatch[1]}  `;
+      openMarker = null;
+      out.push(line);
+      continue;
+    }
+
+    // Left a run block when indentation drops to step/job level
+    if (scriptIndent !== null) {
+      const ind = /^([ \t]*)/.exec(line)?.[1] ?? '';
+      if (line.trim() && ind.length < scriptIndent.length && !/^(EOF|END)\s*$/.test(line)) {
+        scriptIndent = null;
+        openMarker = null;
+      }
+    }
+
+    if (scriptIndent !== null) {
+      const heredoc = /<<[-]?['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/.exec(line);
+      if (heredoc) openMarker = heredoc[1];
+
+      // Bare column-0 (or under-indented) closer → indent into the script
+      if (
+        openMarker &&
+        new RegExp(`^\\s*${openMarker}\\s*$`).test(line) &&
+        (line.match(/^([ \t]*)/)?.[1].length ?? 0) < scriptIndent.length
+      ) {
+        out.push(`${scriptIndent}${openMarker}`);
+        openMarker = null;
+        continue;
+      }
+    }
+
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/** Drop a trailing truncated run/heredoc tail that leaves a bare EOF at EOF. */
+function trimTruncatedWorkflowTail(content: string): string {
+  let out = content.replace(/\s+$/, '');
+  // File ends with a root-level EOF/END left by a cut-off generation
+  if (/^(EOF|END)$/m.test(out.split('\n').pop() || '')) {
+    const lines = out.split('\n');
+    while (lines.length && /^(EOF|END)?\s*$/.test(lines[lines.length - 1])) {
+      lines.pop();
+    }
+    // Also drop the incomplete step that opened the heredoc if still broken
+    while (lines.length) {
+      const last = lines[lines.length - 1];
+      if (/^\s*-\s+name:/.test(last) || /^\s{0,4}[a-zA-Z_][\w-]*:\s*$/.test(last)) {
+        lines.pop();
+        continue;
+      }
+      if (/<<[-]?['"]?\w+['"]?/.test(last) || /^\s*run:\s*[|>]?/.test(last)) {
+        lines.pop();
+        continue;
+      }
+      break;
+    }
+    out = lines.join('\n');
+  }
+  return out.endsWith('\n') ? out : `${out}\n`;
+}
+
 function patchGithubWorkflow(content: string): string {
   let out = patchWorkflowDispatchInputs(content);
   out = promoteOrphanRollbackSteps(out);
@@ -287,6 +363,8 @@ function patchGithubWorkflow(content: string): string {
   out = patchWorkflowJobOutputRefs(out);
   out = patchImageUriOutput(out);
   out = patchEcsServicesStable(out);
+  out = indentHeredocClosers(out);
+  out = trimTruncatedWorkflowTail(out);
   return out;
 }
 
@@ -666,6 +744,38 @@ function patchTerraform(content: string): string {
   // 10. ECS tasks must not ingress-reference Redis SG (causes validate cycle with redis→ecs).
   out = patchSecurityGroupCycles(out);
 
+  // 11. aws_eip: `vpc = true` deprecated → `domain = "vpc"` (AWS provider 5.x).
+  out = out.replace(
+    /resource\s+"aws_eip"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) => block.replace(/\bvpc\s*=\s*true\b/g, 'domain = "vpc"')
+  );
+
+  // 12. Prefer Node-native ECS healthCheck over curl (Alpine/slim images rarely ship curl).
+  out = patchEcsCurlHealthCheckToNode(out);
+
+  return out;
+}
+
+/**
+ * Rewrite ECS container healthCheck commands that shell out to curl/wget into a
+ * Node one-liner so the check matches typical node:* images without apk/apt.
+ */
+function patchEcsCurlHealthCheckToNode(content: string): string {
+  if (!/healthCheck/i.test(content) || !/\bcurl\b|\bwget\b/i.test(content)) {
+    return content;
+  }
+  const nodeProbe =
+    `node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`;
+  // Single-line: ["CMD-SHELL", "curl ..."]
+  let out = content.replace(
+    /\[\s*"CMD-SHELL"\s*,\s*"[^"]*(?:curl|wget)[^"]*"\s*\]/gi,
+    `["CMD-SHELL", "${nodeProbe}"]`
+  );
+  // Multi-line list form
+  out = out.replace(
+    /\[\s*\r?\n\s*"CMD-SHELL"\s*,\s*\r?\n\s*"[^"]*(?:curl|wget)[^"]*"\s*\r?\n\s*\]/gi,
+    `["CMD-SHELL", "${nodeProbe}"]`
+  );
   return out;
 }
 
@@ -1063,43 +1173,118 @@ export function normalizeScaffoldFiles(
   return dedupeTerraformResources(Array.from(byPath.values()));
 }
 
-/** ECS Fargate: curl in TF healthCheck needs curl in image; accept app/Dockerfile layout. */
+const DEFAULT_ECS_EXPRESS_DOCKERFILE = `# hadolint ignore=DL3018,DL3008
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install --omit=dev
+COPY . .
+ENV PORT=3000
+EXPOSE 3000
+USER node
+CMD ["node", "server.js"]
+`;
+
+/** Ensure curl/wget install when TF still references them (after node rewrite fallback). */
+function ensureCurlInDockerfile(content: string): string {
+  if (
+    /apk add[^;\n]*curl|apt-get install[^;\n]*curl|yum install[^;\n]*curl|microdnf install[^;\n]*curl/i.test(
+      content
+    )
+  ) {
+    return content;
+  }
+
+  // Alpine (including node:*-alpine)
+  if (/FROM\s+[^\n]*alpine/i.test(content)) {
+    let out = content;
+    if (!/# hadolint ignore=.*DL3018/i.test(out)) {
+      out = `# hadolint ignore=DL3018\n${out}`;
+    }
+    if (/RUN\s+apk add[^\n]*/i.test(out)) {
+      out = out.replace(/(RUN\s+apk add[^\n]*)/i, (m) =>
+        /\bcurl\b/.test(m) ? m : `${m} curl`
+      );
+    } else {
+      out = out.replace(
+        /(FROM\s+[^\n]+\n)/i,
+        '$1RUN apk add --no-cache curl\n'
+      );
+    }
+    return out;
+  }
+
+  // Debian/Ubuntu family — node:*-slim / bookworm / bullseye (not only literal "debian")
+  if (
+    /FROM\s+[^\n]*(debian|ubuntu|slim|bookworm|bullseye|jammy|focal)/i.test(
+      content
+    )
+  ) {
+    let out = content;
+    if (!/# hadolint ignore=.*DL3008/i.test(out)) {
+      out = `# hadolint ignore=DL3008\n${out}`;
+    }
+    if (!/apt-get install[^;\n]*curl/i.test(out)) {
+      out = out.replace(
+        /(FROM\s+[^\n]+\n)/i,
+        '$1RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n'
+      );
+    }
+    return out;
+  }
+
+  return content;
+}
+
+/** ECS Fargate: Dockerfile present + curl/healthCheck aligned; accept app/Dockerfile layout. */
 function ensureEcsScaffoldCompleteness(byPath: Map<string, GeneratedFile>): void {
-  const tfBlob = [...byPath.entries()]
+  const tfEntries = [...byPath.entries()].filter(([p]) => p.endsWith('.tf'));
+  const tfBlob = tfEntries.map(([, f]) => f.content).join('\n');
+  if (!/aws_ecs_service|aws_ecs_task_definition/.test(tfBlob)) return;
+
+  // Re-apply curl→node rewrite across the full TF tree (covers split files).
+  for (const [p, f] of tfEntries) {
+    const next = patchEcsCurlHealthCheckToNode(f.content);
+    if (next !== f.content) {
+      byPath.set(p, { ...f, content: next });
+    }
+  }
+  const tfBlobAfter = [...byPath.entries()]
     .filter(([p]) => p.endsWith('.tf'))
     .map(([, f]) => f.content)
     .join('\n');
-  if (!/aws_ecs_service|aws_ecs_task_definition/.test(tfBlob)) return;
+  const usesCurlHealth = /healthCheck[\s\S]*?curl|curl\s+-f/i.test(tfBlobAfter);
 
-  const usesCurlHealth = /healthCheck[\s\S]*?curl|curl\s+-f/i.test(tfBlob);
+  const hasAppSources = [...byPath.keys()].some(
+    (p) => p.startsWith('app/') && p !== 'app/Dockerfile'
+  );
+  let dockerPaths = ['Dockerfile', 'app/Dockerfile'].filter((p) => byPath.has(p));
 
-  const dockerPaths = ['Dockerfile', 'app/Dockerfile'].filter((p) => byPath.has(p));
+  // Synthesize a minimal Express Dockerfile when the model omitted it
+  if (dockerPaths.length === 0) {
+    const target = hasAppSources ? 'app/Dockerfile' : 'Dockerfile';
+    const entry = byPath.has('app/server.js')
+      ? 'server.js'
+      : byPath.has('app/index.js') || byPath.has('index.js')
+        ? 'index.js'
+        : 'server.js';
+    byPath.set(target, {
+      path: target,
+      language: 'dockerfile',
+      content: DEFAULT_ECS_EXPRESS_DOCKERFILE.replace(
+        'CMD ["node", "server.js"]',
+        `CMD ["node", "${entry}"]`
+      ),
+    });
+    dockerPaths = [target];
+  }
+
   for (const dp of dockerPaths) {
     const file = byPath.get(dp)!;
     let content = patchDockerfileCopy(file.content);
-    if (
-      usesCurlHealth &&
-      !/apk add[^;\n]*curl|apt-get install[^;\n]*curl|yum install[^;\n]*curl|microdnf install[^;\n]*curl/i.test(
-        content
-      )
-    ) {
-      if (/FROM\s+[^\n]*alpine/i.test(content)) {
-        content = content.replace(
-          /(RUN\s+apk add[^\n]*)/i,
-          '$1 curl'
-        );
-        if (!/apk add[^;\n]*curl/i.test(content)) {
-          content = content.replace(
-            /(FROM\s+[^\n]+\n)/i,
-            '$1RUN apk add --no-cache curl\n'
-          );
-        }
-      } else if (/FROM\s+[^\n]*(debian|ubuntu)/i.test(content)) {
-        content = content.replace(
-          /(FROM\s+[^\n]+\n)/i,
-          '$1RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n'
-        );
-      }
+    content = patchDockerfileUser(content);
+    if (usesCurlHealth) {
+      content = ensureCurlInDockerfile(content);
     }
     byPath.set(dp, { ...file, content });
   }

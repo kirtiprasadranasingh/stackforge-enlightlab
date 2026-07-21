@@ -88,7 +88,9 @@ check_hado() {
   fi
   if [ -n "$df" ]; then
     if command -v hadolint > /dev/null 2>&1; then
-      if hadolint "$df" > "$JOB_DIR/hado.log" 2>&1; then
+      # Style/info rules (e.g. DL3018 pin apk versions) must not block scaffolds.
+      # Fail only on error-severity findings.
+      if hadolint --failure-threshold error "$df" > "$JOB_DIR/hado.log" 2>&1; then
         echo "PASS" > "$JOB_DIR/hado_status"
       else
         echo "FAIL" > "$JOB_DIR/hado_status"

@@ -965,7 +965,17 @@ Always format your response by wrapping the chat reply in the following markers:
 
                   controller.enqueue(sse({ type: 'status', message: `Validator flagged issues — auto-resolving (pass ${attempts}/${MAX_VALIDATION_ATTEMPTS - 1})…` }));
 
-                  const fixPrompt = `Static validation FAILED for the generated scaffold. Fix ONLY the issues below and return the corrected full file(s). Do not regenerate unaffected files, and do not change the cloud, region, environments, or architecture from the approved plan:\n\n${failLines.join('\n')}`;
+                  const fixPrompt = `Static validation FAILED for the generated scaffold. Fix ONLY the issues below and return the corrected full file(s). Do not regenerate unaffected files, and do not change the cloud, region, environments, or architecture from the approved plan.
+
+Rules for common failures:
+- terraform "undeclared module/resource/variable": add the missing module block, resource, or variable — do not leave dangling references.
+- actionlint YAML / trailing EOF: fix heredoc closers (indent EOF inside run blocks); never leave a bare column-0 EOF.
+- ECS curl healthCheck: use a Node fetch probe OR install curl in the Dockerfile.
+- Missing Dockerfile: emit app/Dockerfile (Express) or root Dockerfile.
+- hadolint pin-version warnings are non-blocking; focus on real errors.
+
+Failures:
+${failLines.join('\n')}`;
                   const fixPromptText = formatFollowUpPrompt({
                     message: fixPrompt,
                     presets,
