@@ -544,8 +544,9 @@ service:
   targetPort: 3000
 
 ingress:
-  enabled: true
-  className: alb
+  enabled: false
+  className: nginx
+  annotations: {}
   hosts:
     - host: app.example.com
       paths:
@@ -634,9 +635,9 @@ metadata:
   labels:
     {{- include "app.labels" . | nindent 4 }}
   annotations:
-    kubernetes.io/ingress.class: alb
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:
@@ -655,6 +656,49 @@ spec:
           {{- end }}
     {{- end }}
 {{- end }}
+`;
+
+const HELM_HELPERS = `{{- define "app.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "app.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name (include "app.name" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{- define "app.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "app.labels" -}}
+helm.sh/chart: {{ include "app.chart" . }}
+{{ include "app.selectorLabels" . }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{- define "app.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "app.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{- define "app.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "app.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+`;
+
+/** Outputs must NOT reference undefined resources — that fails terraform validate. */
+const SAFE_TF_OUTPUTS = `output "scaffold_note" {
+  description = "Reviewable StackForge scaffold — replace with real outputs after resources exist."
+  value       = "ok"
+}
 `;
 
 const HELM_HPA = `{{- if .Values.autoscaling.enabled }}
@@ -712,7 +756,7 @@ function awsEcsBase(): BaseFileMap {
     'terraform/security_groups.tf': TF_PLACEHOLDER('Security groups (no SG cycles)'),
     'terraform/redis.tf': TF_PLACEHOLDER('ElastiCache Redis (optional if unused)'),
     'terraform/cloudwatch.tf': TF_PLACEHOLDER('CloudWatch log group'),
-    'terraform/outputs.tf': `output "ecs_cluster_name" {\n  value = try(aws_ecs_cluster.main.name, null)\n}\n`,
+    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
     '.github/workflows/deploy.yml': GHA_ECS_DEPLOY,
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
@@ -744,17 +788,32 @@ function awsEksBase(): BaseFileMap {
     'terraform/variables.tf': TF_AWS_VARIABLES,
     'terraform/main.tf': TF_PLACEHOLDER('EKS cluster + networking'),
     'terraform/iam.tf': TF_PLACEHOLDER('IRSA + node/cluster roles'),
-    'terraform/outputs.tf': `output "cluster_name" {\n  value = try(aws_eks_cluster.main.name, null)\n}\n`,
+    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
     '.github/workflows/deploy.yml': GHA_EKS_DEPLOY,
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
+    'app/package-lock.json': EXPRESS_PACKAGE_LOCK,
     'app/server.js': EXPRESS_SERVER,
     'charts/app/Chart.yaml': HELM_CHART,
     'charts/app/values.yaml': HELM_VALUES,
+    'charts/app/templates/_helpers.tpl': HELM_HELPERS,
     'charts/app/templates/deployment.yaml': HELM_DEPLOYMENT,
     'charts/app/templates/service.yaml': HELM_SERVICE,
     'charts/app/templates/ingress.yaml': HELM_INGRESS,
     'charts/app/templates/hpa.yaml': HELM_HPA,
+    'charts/app/templates/serviceaccount.yaml': `{{- if .Values.serviceAccount.create -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "app.serviceAccountName" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+`,
     'README.md': README_STUB('AWS EKS + Helm Scaffold'),
   };
 }
@@ -767,7 +826,7 @@ function gcpCloudRunBase(): BaseFileMap {
     'terraform/network.tf': TF_PLACEHOLDER('VPC + private service networking for Cloud SQL'),
     'terraform/database.tf': TF_PLACEHOLDER('Cloud SQL (deletion_protection; private IP complete)'),
     'terraform/iam.tf': TF_PLACEHOLDER('Service accounts + IAM (single data.google_project)'),
-    'terraform/outputs.tf': `output "service_name" {\n  value = try(google_cloud_run_service.default.name, null)\n}\n`,
+    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
     '.gitlab-ci.yml': GITLAB_CI,
     Dockerfile: PYTHON_DOCKERFILE,
     'requirements.txt': FASTAPI_REQUIREMENTS,
@@ -786,7 +845,7 @@ function azureContainerAppsBase(): BaseFileMap {
     'terraform/key_vault.tf': TF_PLACEHOLDER('Key Vault'),
     'terraform/identity.tf': TF_PLACEHOLDER('Managed identity'),
     'terraform/container_apps.tf': TF_PLACEHOLDER('Container Apps environment + app'),
-    'terraform/outputs.tf': `output "resource_group_name" {\n  value = try(azurerm_resource_group.main.name, null)\n}\n`,
+    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
     'azure-pipelines.yml': AZURE_PIPELINE,
     Dockerfile: GO_DOCKERFILE,
     'go.mod': GO_MOD,
@@ -803,21 +862,103 @@ function oracleOkeBase(): BaseFileMap {
     'terraform/main.tf': TF_PLACEHOLDER('OKE cluster + node pool'),
     'terraform/network.tf': TF_PLACEHOLDER('VCN / NSGs'),
     'terraform/iam.tf': TF_PLACEHOLDER('Dynamic groups / policies'),
-    'terraform/outputs.tf': `output "cluster_id" {\n  value = try(oci_containerengine_cluster.main.id, null)\n}\n`,
-    '.github/workflows/deploy.yml': `name: Deploy\non:\n  push:\n    branches: [main]\njobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Note\n        run: |\n          echo "Configure OCI CLI + kubectl against OKE, then helm upgrade."\n`,
+    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
+    '.github/workflows/deploy.yml': `name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Note
+        run: |
+          echo "Configure OCI CLI + kubectl against OKE, then helm upgrade."
+`,
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
+    'app/package-lock.json': EXPRESS_PACKAGE_LOCK,
     'app/server.js': EXPRESS_SERVER,
     'charts/app/Chart.yaml': HELM_CHART,
-    'charts/app/values.yaml': HELM_VALUES.replace('className: alb', 'className: nginx'),
+    'charts/app/values.yaml': HELM_VALUES,
+    'charts/app/templates/_helpers.tpl': HELM_HELPERS,
     'charts/app/templates/deployment.yaml': HELM_DEPLOYMENT,
     'charts/app/templates/service.yaml': HELM_SERVICE,
-    'charts/app/templates/ingress.yaml': HELM_INGRESS.replace(
-      /alb\.ingress[\s\S]*?target-type: ip/m,
-      'nginx.ingress.kubernetes.io/rewrite-target: /'
-    ).replace('className: alb', 'className: nginx'),
+    'charts/app/templates/ingress.yaml': HELM_INGRESS,
     'charts/app/templates/hpa.yaml': HELM_HPA,
     'README.md': README_STUB('Oracle OKE Scaffold'),
+  };
+}
+
+function azureAksBase(): BaseFileMap {
+  return {
+    'terraform/versions.tf': TF_AZURE_VERSIONS,
+    'terraform/variables.tf': TF_AZURE_VARIABLES,
+    'terraform/main.tf': TF_PLACEHOLDER('AKS cluster'),
+    'terraform/network.tf': TF_PLACEHOLDER('VNet / subnets for AKS'),
+    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
+    '.github/workflows/deploy.yml': `name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Note
+        run: |
+          echo "az aks get-credentials + helm upgrade --install"
+`,
+    'app/Dockerfile': NODE_DOCKERFILE_APP,
+    'app/package.json': EXPRESS_PACKAGE_JSON,
+    'app/package-lock.json': EXPRESS_PACKAGE_LOCK,
+    'app/server.js': EXPRESS_SERVER,
+    'charts/app/Chart.yaml': HELM_CHART,
+    'charts/app/values.yaml': HELM_VALUES,
+    'charts/app/templates/_helpers.tpl': HELM_HELPERS,
+    'charts/app/templates/deployment.yaml': HELM_DEPLOYMENT,
+    'charts/app/templates/service.yaml': HELM_SERVICE,
+    'charts/app/templates/ingress.yaml': HELM_INGRESS,
+    'charts/app/templates/hpa.yaml': HELM_HPA,
+    'README.md': README_STUB('Azure AKS + Helm Scaffold'),
+  };
+}
+
+function gcpGkeBase(): BaseFileMap {
+  return {
+    'terraform/versions.tf': TF_GCP_VERSIONS,
+    'terraform/variables.tf': TF_GCP_VARIABLES,
+    'terraform/main.tf': TF_PLACEHOLDER('GKE cluster (prefer Autopilot or release_channel — not both)'),
+    'terraform/network.tf': TF_PLACEHOLDER('VPC for GKE'),
+    'terraform/iam.tf': TF_PLACEHOLDER('Workload Identity / GSA (single data.google_project)'),
+    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
+    '.github/workflows/deploy.yml': `name: Deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Note
+        run: |
+          echo "gcloud container clusters get-credentials + helm upgrade --install"
+`,
+    'app/Dockerfile': NODE_DOCKERFILE_APP,
+    'app/package.json': EXPRESS_PACKAGE_JSON,
+    'app/package-lock.json': EXPRESS_PACKAGE_LOCK,
+    'app/server.js': EXPRESS_SERVER,
+    'charts/app/Chart.yaml': HELM_CHART,
+    'charts/app/values.yaml': HELM_VALUES,
+    'charts/app/templates/_helpers.tpl': HELM_HELPERS,
+    'charts/app/templates/deployment.yaml': HELM_DEPLOYMENT,
+    'charts/app/templates/service.yaml': HELM_SERVICE,
+    'charts/app/templates/ingress.yaml': HELM_INGRESS,
+    'charts/app/templates/hpa.yaml': HELM_HPA,
+    'README.md': README_STUB('GCP GKE + Helm Scaffold'),
   };
 }
 
@@ -827,6 +968,8 @@ const BASES: Record<ScaffoldProfileId, () => BaseFileMap> = {
   'gcp-fastapi-cloudrun': gcpCloudRunBase,
   'azure-go-container-apps': azureContainerAppsBase,
   'oracle-oke-helm': oracleOkeBase,
+  'azure-aks-helm': azureAksBase,
+  'gcp-gke-helm': gcpGkeBase,
 };
 
 export function getProfileBaseFiles(profileId: ScaffoldProfileId): BaseFileMap {

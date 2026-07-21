@@ -6,7 +6,7 @@ import {
   formatFollowUpPrompt,
   formatPlanPrompt,
 } from '@/lib/prompts';
-import { sanitizeInput, validateOutputSize } from '@/lib/utils';
+import { sanitizeInput, validateOutputSize, getLanguageFromPath } from '@/lib/utils';
 import { validateGenerateRequest, ValidationError, RateLimitError } from '@/lib/validation';
 import {
   checkRateLimit,
@@ -870,8 +870,13 @@ Always format your response by wrapping the chat reply in the following markers:
               }
             }
           }
-          // Follow-ups must return files — do not treat prose-only replies as successful updates
-          if (isFollowUp && collectedFiles.length === 0) {
+          // Follow-ups must return files — except validation fixes, which can
+          // re-normalize the existing workspace even when the model emits no delta.
+          if (
+            isFollowUp &&
+            collectedFiles.length === 0 &&
+            !isValidationFixPrompt(prompt)
+          ) {
             const cleanText = fullText
               .replace(/<<<FILE[\s\S]*?>>>[\s\S]*?<<<END_FILE>>>/g, '')
               .replace(/<<<[\s\S]*?>>>/g, '')
@@ -898,7 +903,7 @@ Always format your response by wrapping the chat reply in the following markers:
                 })
               );
             }
-          } else if (!anyOutput && collectedFiles.length === 0 && !summarySent) {
+          } else if (!anyOutput && collectedFiles.length === 0 && !isFollowUp && !summarySent) {
             const cleanText = fullText
               .replace(/<<<FILE[\s\S]*?>>>[\s\S]*?<<<END_FILE>>>/g, '')
               .replace(/<<<[\s\S]*?>>>/g, '')
@@ -911,7 +916,12 @@ Always format your response by wrapping the chat reply in the following markers:
               controller.enqueue(sse({ type: 'summary', summary: cleanText }));
             }
           }
-          if (!anyOutput && collectedFiles.length === 0 && !summarySent) {
+          if (
+            !anyOutput &&
+            collectedFiles.length === 0 &&
+            !(isFollowUp && existingFiles.length > 0) &&
+            !summarySent
+          ) {
             controller.enqueue(
               sse({
                 type: 'error',
@@ -921,9 +931,27 @@ Always format your response by wrapping the chat reply in the following markers:
               })
             );
           } else {
-            if (collectedFiles.length > 0) {
-              // Cross-file repairs (Helm helpers, provider pins, SG cycles) need the full tree.
-              let finalized = normalizeScaffoldFiles(collectedFiles);
+            if (collectedFiles.length > 0 || (isFollowUp && existingFiles.length > 0)) {
+              // Follow-up / Fix failures: merge workspace + delta BEFORE normalize.
+              // Validating only the delta re-seeds placeholder TF over good files.
+              const workspaceFiles: GeneratedFile[] = isFollowUp
+                ? (() => {
+                    const byPath = new Map<string, GeneratedFile>();
+                    for (const f of existingFiles) {
+                      byPath.set(f.path, {
+                        path: f.path,
+                        language: getLanguageFromPath(f.path),
+                        content: f.content,
+                      });
+                    }
+                    for (const f of collectedFiles) {
+                      byPath.set(f.path, f);
+                    }
+                    return Array.from(byPath.values());
+                  })()
+                : collectedFiles;
+
+              let finalized = normalizeScaffoldFiles(workspaceFiles);
               const postNormProfile = detectScaffoldProfile(
                 (approvedPlan || '').trim().length > 80
                   ? approvedPlan || prompt
@@ -932,27 +960,29 @@ Always format your response by wrapping the chat reply in the following markers:
               );
               if (postNormProfile) {
                 finalized = mergeLockedBaseFiles(finalized, postNormProfile, {
-                  fillMissing: true,
+                  // Never fill missing paths with placeholders on repair turns.
+                  fillMissing: !isFollowUp,
                   forceStubs: true,
                 }).files;
                 finalized = normalizeScaffoldFiles(finalized);
               }
               for (const file of finalized) {
-                const prev = collectedFiles.find((f) => f.path === file.path);
+                const prev = workspaceFiles.find((f) => f.path === file.path);
+                const alreadyEmitted = collectedFiles.find(
+                  (f) => f.path === file.path && f.content === file.content
+                );
                 if (!prev || prev.content !== file.content) {
                   const idx = collectedFiles.findIndex((f) => f.path === file.path);
                   if (idx === -1) collectedFiles.push(file);
                   else collectedFiles[idx] = file;
-                  controller.enqueue(sse({ type: 'file', file }));
+                  if (!alreadyEmitted) {
+                    controller.enqueue(sse({ type: 'file', file }));
+                  }
                 }
               }
-              // Drop paths removed by normalization (e.g. duplicate aliases)
-              const finalPaths = new Set(finalized.map((f) => f.path));
-              for (let i = collectedFiles.length - 1; i >= 0; i--) {
-                if (!finalPaths.has(collectedFiles[i].path)) {
-                  collectedFiles.splice(i, 1);
-                }
-              }
+              // Keep the full workspace for validate/repair (not just the delta).
+              collectedFiles.length = 0;
+              collectedFiles.push(...finalized);
 
               const currentFiles = [...finalized];
               const MAX_VALIDATION_ATTEMPTS = 3; // 1 validate + up to 2 auto-repair passes (bounded by the wall-clock budget below)

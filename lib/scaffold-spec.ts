@@ -135,7 +135,9 @@ export type ScaffoldProfileId =
   | 'aws-ecs-express'
   | 'gcp-fastapi-cloudrun'
   | 'aws-eks-helm'
-  | 'oracle-oke-helm';
+  | 'oracle-oke-helm'
+  | 'azure-aks-helm'
+  | 'gcp-gke-helm';
 
 export interface ScaffoldProfile {
   id: ScaffoldProfileId;
@@ -167,69 +169,116 @@ export const ORACLE_OKE_HELM_PROFILE: ScaffoldProfile = {
   requiredPaths: ORACLE_OKE_HELM_FILES,
 };
 
+export const AZURE_AKS_HELM_FILES = [
+  'terraform/versions.tf',
+  'terraform/variables.tf',
+  'terraform/main.tf',
+  'terraform/network.tf',
+  'terraform/outputs.tf',
+  '.github/workflows/deploy.yml',
+  'app/Dockerfile',
+  'app/package.json',
+  'app/server.js',
+  'charts/app/Chart.yaml',
+  'charts/app/values.yaml',
+  'charts/app/templates/deployment.yaml',
+  'charts/app/templates/service.yaml',
+  'charts/app/templates/ingress.yaml',
+  'charts/app/templates/hpa.yaml',
+  'README.md',
+] as const;
+
+export const GCP_GKE_HELM_FILES = [
+  'terraform/versions.tf',
+  'terraform/variables.tf',
+  'terraform/main.tf',
+  'terraform/network.tf',
+  'terraform/iam.tf',
+  'terraform/outputs.tf',
+  '.github/workflows/deploy.yml',
+  'app/Dockerfile',
+  'app/package.json',
+  'app/server.js',
+  'charts/app/Chart.yaml',
+  'charts/app/values.yaml',
+  'charts/app/templates/deployment.yaml',
+  'charts/app/templates/service.yaml',
+  'charts/app/templates/ingress.yaml',
+  'charts/app/templates/hpa.yaml',
+  'README.md',
+] as const;
+
+export const AZURE_AKS_HELM_PROFILE: ScaffoldProfile = {
+  id: 'azure-aks-helm',
+  requiredPaths: AZURE_AKS_HELM_FILES,
+};
+
+export const GCP_GKE_HELM_PROFILE: ScaffoldProfile = {
+  id: 'gcp-gke-helm',
+  requiredPaths: GCP_GKE_HELM_FILES,
+};
+
 export function detectScaffoldProfile(
   prompt: string,
   presets: Presets
 ): ScaffoldProfile | null {
   const t = prompt.toLowerCase();
 
-  const isAzureCa =
+  // Match primarily on cloud + orchestrator so ANY CI / language still gets
+  // locked stubs. Language/CI hints only break ties.
+
+  if (
     presets.cloud === 'azure' &&
-    (presets.orchestrator === 'container-apps' ||
-      /container\s*apps?/.test(t));
-
-  const isGo = /\bgo\b|golang/.test(t);
-  const isPostgres = /postgres|postgresql/.test(t);
-  const isAzdo =
-    presets.ci === 'azure-devops' || /azure\s*devops|azure\s*pipelines/.test(t);
-
-  // Azure Container Apps: prefer Go+Postgres+AzDO lock; fall back when presets alone match
-  if (isAzureCa && ((isGo && isPostgres && isAzdo) || (isAzdo && isGo))) {
-    return AZURE_GO_CONTAINER_APPS_PROFILE;
-  }
-  if (isAzureCa && isAzdo) {
+    (presets.orchestrator === 'container-apps' || /container\s*apps?/.test(t))
+  ) {
     return AZURE_GO_CONTAINER_APPS_PROFILE;
   }
 
-  const isAwsEcs =
+  if (
     presets.cloud === 'aws' &&
-    (presets.orchestrator === 'ecs' || /\becs\b|\bfargate\b/.test(t));
-  const isExpress = /express/.test(t);
-  const isGha =
-    presets.ci === 'github-actions' || /github\s*actions/.test(t);
-
-  if (isAwsEcs && isGha && (isExpress || /\bnode\.?js\b|\bexpress\b/i.test(t) || /\bnode\b/.test(t))) {
-    return AWS_ECS_EXPRESS_PROFILE;
-  }
-  if (isAwsEcs && isGha) {
+    (presets.orchestrator === 'ecs' || /\becs\b|\bfargate\b/.test(t))
+  ) {
     return AWS_ECS_EXPRESS_PROFILE;
   }
 
-  const isGcpRun =
+  if (
+    presets.cloud === 'aws' &&
+    (presets.orchestrator === 'eks' || /\beks\b/.test(t))
+  ) {
+    return AWS_EKS_HELM_PROFILE;
+  }
+
+  if (
     presets.cloud === 'gcp' &&
     (presets.orchestrator === 'cloud-run' ||
       presets.orchestrator === 'serverless' ||
-      /cloud\s*run/.test(t));
-  const isFastapi = /fastapi|fast\s*api|python/.test(t);
-  const isGitlab = presets.ci === 'gitlab-ci' || /gitlab/.test(t);
-
-  // Cloud Run: lock when presets say so; language/CI hints preferred but not mandatory
-  if (isGcpRun && (isFastapi || isGitlab || presets.orchestrator === 'cloud-run')) {
+      /cloud\s*run/.test(t))
+  ) {
     return GCP_FASTAPI_CLOUDRUN_PROFILE;
   }
 
-  const isOracleOke =
-    (presets.cloud === 'oracle' || /\b(oci|oracle|oke)\b/.test(t)) &&
-    (presets.orchestrator === 'oke' || /\boke\b/.test(t) || presets.cloud === 'oracle');
-  if (isOracleOke) {
+  if (
+    presets.cloud === 'oracle' ||
+    presets.orchestrator === 'oke' ||
+    /\b(oci|oracle|oke)\b/.test(t)
+  ) {
     return ORACLE_OKE_HELM_PROFILE;
   }
 
-  const isAwsEks =
-    presets.cloud === 'aws' &&
-    (presets.orchestrator === 'eks' || /\beks\b/.test(t));
-  if (isAwsEks && isGha) {
-    return AWS_EKS_HELM_PROFILE;
+  // AKS / GKE: use Helm+stub bases from the closest locked profile shape
+  // without seeding the wrong cloud's Terraform providers.
+  if (
+    presets.cloud === 'azure' &&
+    (presets.orchestrator === 'aks' || /\baks\b/.test(t))
+  ) {
+    return AZURE_AKS_HELM_PROFILE;
+  }
+
+  if (
+    presets.cloud === 'gcp' &&
+    (presets.orchestrator === 'gke' || /\bgke\b/.test(t))
+  ) {
+    return GCP_GKE_HELM_PROFILE;
   }
 
   return null;

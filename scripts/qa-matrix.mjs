@@ -71,6 +71,18 @@ const CASES: Array<{
     presets: { cloud: 'oracle', orchestrator: 'oke', ci: 'github-actions' },
     expectProfile: 'oracle-oke-helm',
   },
+  {
+    name: 'Azure AKS Helm',
+    prompt: 'A Node.js API on Azure AKS with Helm and GitHub Actions',
+    presets: { cloud: 'azure', orchestrator: 'aks', ci: 'github-actions' },
+    expectProfile: 'azure-aks-helm',
+  },
+  {
+    name: 'GCP GKE Helm',
+    prompt: 'A Node.js API on GCP GKE with Helm and GitHub Actions',
+    presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'github-actions' },
+    expectProfile: 'gcp-gke-helm',
+  },
 ];
 
 let fail = 0;

@@ -39,5 +39,5 @@ export const ScaffoldCheckFileSchema = z.object({
 
 export const ScaffoldCheckRequestSchema = z.object({
   check: z.enum(CHECK_IDS),
-  files: z.array(ScaffoldCheckFileSchema).min(1).max(40),
+  files: z.array(ScaffoldCheckFileSchema).min(1).max(60),
 });

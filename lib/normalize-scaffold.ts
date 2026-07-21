@@ -1478,10 +1478,45 @@ export function normalizeScaffoldFiles(
   ensureHelmHelpers(byPath);
   ensureRequiredProviders(byPath);
   ensureEcsScaffoldCompleteness(byPath);
+  stripAlbAnnotationsWithoutController(byPath);
   stripCrossCloudBleed(byPath);
   ensureMinimalAppStubs(byPath);
 
   return dedupeTerraformResources(Array.from(byPath.values()));
+}
+
+function stripAlbAnnotationsWithoutController(
+  byPath: Map<string, GeneratedFile>
+): void {
+  const tfBlob = [...byPath.entries()]
+    .filter(([p]) => p.endsWith('.tf'))
+    .map(([, f]) => f.content)
+    .join('\n');
+  const hasController =
+    /helm_release/.test(tfBlob) && /aws-load-balancer-controller/.test(tfBlob);
+  if (hasController) return;
+
+  for (const [path, file] of [...byPath.entries()]) {
+    if (!/charts\/.+\/templates\/ingress\.ya?ml$/i.test(path)) continue;
+    if (!/alb\.ingress\.kubernetes\.io/.test(file.content)) continue;
+    const cleaned = file.content
+      .replace(/^\s*kubernetes\.io\/ingress\.class:\s*alb\s*$/gm, '')
+      .replace(/^\s*alb\.ingress\.kubernetes\.io\/[^\n]*$/gm, '');
+    byPath.set(path, { ...file, content: cleaned });
+  }
+
+  for (const [path, file] of [...byPath.entries()]) {
+    if (!/charts\/.+\/values\.ya?ml$/i.test(path)) continue;
+    if (!/alb\.ingress\.kubernetes\.io|className:\s*alb/.test(file.content)) {
+      continue;
+    }
+    let content = file.content.replace(/className:\s*alb\b/g, 'className: nginx');
+    content = content.replace(
+      /(ingress:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+enabled:\s*)true/m,
+      '$1false'
+    );
+    byPath.set(path, { ...file, content });
+  }
 }
 
 /** Drop AWS-only files that bled into a GCP Cloud Run scaffold (and vice versa). */

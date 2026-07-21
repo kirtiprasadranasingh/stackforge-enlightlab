@@ -161,7 +161,10 @@ Rules:
 - Artifact Registry: never use .repository_url — construct location-docker.pkg.dev/project/repo/….
 - App sources: keep a minimal /health stub only (no CRUD, ORM, auth).
 - actionlint / YAML: put shell with colons in a run: | block.
+- EKS ALB: if charts use alb.ingress.kubernetes.io, add terraform helm_release for aws-load-balancer-controller OR disable ingress / remove those annotations.
+- ECS/Azure image ownership: add lifecycle { ignore_changes = [task_definition] } or image ignore_changes when CI deploys images.
 - Emit full corrected file bodies with <<<FILE>>> markers for every changed file.
+- Do not ask clarifying questions.
 
 Validation failures:
 ${trimmed}`;

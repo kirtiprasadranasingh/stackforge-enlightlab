@@ -47,7 +47,7 @@ export const GenerateRequestSchema = z
     /** Prior chat turns (optional — for Lovable-style iteration) */
     history: z.array(HistoryMessageSchema).max(20).optional(),
     /** Current project files for follow-up edits */
-    existingFiles: z.array(ExistingFileSchema).max(40).optional(),
+    existingFiles: z.array(ExistingFileSchema).max(60).optional(),
     /** clarify | plan | generate — defaults to generate for small edits */
     phase: z.enum(['clarify', 'plan', 'generate']).optional(),
     /** Required when phase=generate for new/major stacks */
