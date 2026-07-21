@@ -355,6 +355,7 @@ jobs:
       contents: read
     outputs:
       image_uri: \${{ steps.set-image-uri.outputs.image_uri }}
+      prior_task_def_arn: \${{ steps.get-current-service.outputs.current_task_definition_arn }}
     steps:
       - uses: actions/checkout@v4
 

@@ -299,23 +299,41 @@ function patchWorkflowJobOutputRefs(content: string): string {
     'github.event.repository.name'
   );
 
+  // Merge prior_task_def_arn into an existing outputs: block — never add a second outputs: key.
   const priorRef = out.match(/needs\.([a-zA-Z0-9_-]+)\.outputs\.prior_task_def_arn/);
   if (priorRef) {
     const jobName = priorRef[1];
-    const jobHeader = new RegExp(
-      `(  ${jobName}:\\n(?:    [^\\n]+\\n)*?)(    steps:)`,
-      'm'
-    );
-    if (!new RegExp(`  ${jobName}:[\\s\\S]*?prior_task_def_arn:`).test(out)) {
+    if (!new RegExp(`  ${jobName}:[\\s\\S]*?prior_task_def_arn\\s*:`).test(out)) {
       const stepId =
         out.match(/id:\s*(get-current-service|capture-prior[^\n]*)/)?.[1] ||
         'get-current-service';
-      out = out.replace(
-        jobHeader,
-        `$1    outputs:\n      prior_task_def_arn: \${{ steps.${stepId}.outputs.current_task_definition_arn }}\n$2`
+      const outputsBlock = new RegExp(
+        `(  ${jobName}:\\n(?:    [^\\n]+\\n)*?    outputs:\\n)((?:      [^\\n]+\\n)*)`,
+        'm'
       );
+      if (outputsBlock.test(out)) {
+        out = out.replace(
+          outputsBlock,
+          `$1$2      prior_task_def_arn: \${{ steps.${stepId}.outputs.current_task_definition_arn }}\n`
+        );
+      } else {
+        const jobHeader = new RegExp(
+          `(  ${jobName}:\\n(?:    [^\\n]+\\n)*?)(    steps:)`,
+          'm'
+        );
+        out = out.replace(
+          jobHeader,
+          `$1    outputs:\n      prior_task_def_arn: \${{ steps.${stepId}.outputs.current_task_definition_arn }}\n$2`
+        );
+      }
     }
   }
+
+  // Collapse accidental duplicate `outputs:` keys under the same job.
+  out = out.replace(
+    /(  [a-zA-Z_][\w-]*:\n(?:    (?!outputs:)[^\n]+\n)*)    outputs:\n((?:      [^\n]+\n)+)((?:    (?!outputs:)[^\n]+\n)*)    outputs:\n((?:      [^\n]+\n)+)/g,
+    '$1    outputs:\n$2$4$3'
+  );
 
   return out;
 }
@@ -1553,6 +1571,7 @@ export function normalizeScaffoldFiles(
   ensureNodeLockfiles(byPath);
   ensureHelmHelpers(byPath);
   ensureRequiredProviders(byPath);
+  ensureMissingTerraformVariables(byPath);
   ensureEcsScaffoldCompleteness(byPath);
   stripEksWorkflowEcsBleed(byPath);
   stripAlbAnnotationsWithoutController(byPath);
@@ -1578,16 +1597,22 @@ function stripEksWorkflowEcsBleed(byPath: Map<string, GeneratedFile>): void {
 
   for (const [path, file] of [...byPath.entries()]) {
     if (!path.startsWith('.github/workflows/') || !path.endsWith('.yml')) continue;
-    if (!/aws\s+ecs\s+update-service/.test(file.content)) continue;
-    // Drop ECS deploy/wait steps; keep helm/kubeconfig path if present.
-    let content = file.content.replace(
-      /^[ \t]*-[ \t]+name:.*\r?\n(?:[ \t]+(?!-).*\r?\n)*[ \t]+run:\s*\|?\s*\r?\n(?:[ \t]+.*aws\s+ecs[\s\S]*?)(?=^[ \t]*-[ \t]+name:|^[ \t]*[a-zA-Z_][\w-]*:|\Z)/gm,
+    let content = file.content;
+    // Drop ECS rollback jobs that reference prior_task_def_arn (ECS-only).
+    content = content.replace(
+      /\n  scaffold_rollback:[\s\S]*?(?=\n  [a-zA-Z_]|\n*$)/g,
+      '\n'
+    );
+    content = content.replace(
+      /^[ \t]*aws\s+ecs\s+update-service[\s\S]*?(?=^[ \t]*aws\s+ecs\s+wait|^[ \t]*-[ \t]+name:|^[ \t]*[a-z_][\w-]*:)/gm,
       ''
     );
-    // Simpler fallback: remove update-service + wait lines
-    content = content
-      .replace(/^[ \t]*aws\s+ecs\s+update-service[\s\S]*?(?=^[ \t]*aws\s+ecs\s+wait|^[ \t]*-[ \t]+name:|^[ \t]*[a-z_][\w-]*:)/gm, '')
-      .replace(/^[ \t]*aws\s+ecs\s+wait\s+services-stable[\s\S]*?(?=^[ \t]*-[ \t]+name:|^[ \t]*[a-z_][\w-]*:)/gm, '');
+    content = content.replace(
+      /^[ \t]*aws\s+ecs\s+wait\s+services-stable[\s\S]*?(?=^[ \t]*-[ \t]+name:|^[ \t]*[a-z_][\w-]*:)/gm,
+      ''
+    );
+    // Remove prior_task_def_arn output lines on EKS workflows
+    content = content.replace(/^[ \t]*prior_task_def_arn:.*\r?\n/gm, '');
     if (content !== file.content) {
       byPath.set(path, { ...file, content });
     }
@@ -1848,6 +1873,52 @@ function ensureCurlInDockerfile(content: string): string {
   }
 
   return content;
+}
+
+/**
+ * Declare any var.NAME referenced in .tf files but missing from variable blocks.
+ * Unblocks terraform validate "undeclared input variable" without inventing resources.
+ */
+function ensureMissingTerraformVariables(
+  byPath: Map<string, GeneratedFile>
+): void {
+  const tfFiles = [...byPath.entries()].filter(([p]) => p.endsWith('.tf'));
+  if (tfFiles.length === 0) return;
+
+  const blob = tfFiles.map(([, f]) => f.content).join('\n');
+  const referenced = new Set<string>();
+  for (const m of blob.matchAll(/\bvar\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    referenced.add(m[1]);
+  }
+  if (referenced.size === 0) return;
+
+  const declared = new Set<string>();
+  for (const m of blob.matchAll(/variable\s+"([A-Za-z_][A-Za-z0-9_]*)"/g)) {
+    declared.add(m[1]);
+  }
+
+  const missing = [...referenced].filter((n) => !declared.has(n)).sort();
+  if (missing.length === 0) return;
+
+  const stub = missing
+    .map(
+      (name) =>
+        `variable "${name}" {\n  type        = any\n  description = "Auto-declared so terraform validate can resolve references"\n  default     = null\n}\n`
+    )
+    .join('\n');
+
+  const varsPath =
+    [...byPath.keys()].find((p) => p.endsWith('/variables.tf') || p === 'terraform/variables.tf') ||
+    'terraform/variables.tf';
+  const existing = byPath.get(varsPath);
+  byPath.set(varsPath, {
+    path: varsPath,
+    language: 'hcl',
+    content: existing
+      ? `${existing.content.replace(/\s*$/, '\n\n')}${stub}`
+      : stub,
+    description: existing?.description || 'Terraform variables (auto-completed)',
+  });
 }
 
 /**
