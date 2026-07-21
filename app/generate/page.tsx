@@ -209,20 +209,40 @@ function deriveProviderLabel(files: GeneratedFile[], presets: Presets): string {
   return `${cloud}, ${orch}, ${ci}`;
 }
 
+const SAFE_FILE_PATH = /^[a-zA-Z0-9/_.\-]+$/;
+
 /** Keep follow-up payloads small so nginx/browser don't drop the request. */
-function slimExistingFiles(files: GeneratedFile[]) {
-  const MAX_FILES = 20;
-  const MAX_CHARS_PER_FILE = 4000;
-  const MAX_TOTAL = 80_000;
+function slimExistingFiles(
+  files: GeneratedFile[],
+  opts?: { maxFiles?: number; maxCharsPerFile?: number; maxTotal?: number }
+) {
+  const MAX_FILES = opts?.maxFiles ?? 20;
+  const MAX_CHARS_PER_FILE = opts?.maxCharsPerFile ?? 4000;
+  const MAX_TOTAL = opts?.maxTotal ?? 80_000;
   let total = 0;
   const out: { path: string; content: string }[] = [];
   for (const f of files.slice(0, MAX_FILES)) {
+    if (!SAFE_FILE_PATH.test(f.path)) continue;
     const slice = f.content.slice(0, MAX_CHARS_PER_FILE);
     if (total + slice.length > MAX_TOTAL) break;
     total += slice.length;
     out.push({ path: f.path, content: slice });
   }
   return out;
+}
+
+function slimHistory(
+  history: { role: 'user' | 'assistant'; content: string }[],
+  maxMessages = 12,
+  maxChars = 3500
+) {
+  return history
+    .filter((m) => m.content.trim().length > 0)
+    .slice(-maxMessages)
+    .map((m) => ({
+      role: m.role,
+      content: m.content.slice(0, maxChars),
+    }));
 }
 
 export default function GeneratePage() {
@@ -419,13 +439,22 @@ export default function GeneratePage() {
       }
       const workflowStartedAt = Date.now();
 
+      const isRepairTurnEarly =
+        isIterativeEditPrompt(text) ||
+        Boolean(options?.displayContent?.trim());
+
       const existing =
         startFresh ||
         phase === 'plan' ||
         phase === 'clarify' ||
         Boolean(options?.approvedPlan)
           ? []
-          : slimExistingFiles(filesRef.current);
+          : slimExistingFiles(
+              filesRef.current,
+              isRepairTurnEarly
+                ? { maxFiles: 40, maxCharsPerFile: 8000, maxTotal: 160_000 }
+                : undefined
+            );
 
       if (!options?.skipUserBubble) {
         setMessages((prev) => [
@@ -523,9 +552,7 @@ export default function GeneratePage() {
             }))
           : [];
 
-      const isRepairTurn =
-        isIterativeEditPrompt(text) ||
-        Boolean(options?.displayContent?.trim());
+      const isRepairTurn = isRepairTurnEarly;
 
       // Fresh generate reuses the original stack prompt; repair turns must keep
       // the fix text (otherwise Fix failures restarts the clarify interview).
@@ -536,14 +563,25 @@ export default function GeneratePage() {
             ? `${lastStackPrompt}\n\nClient answers / revision feedback:\n${text}`
             : text;
 
+      // Generate + Fix failures: files (+ fail logs) only — long chat/plans trip Zod.
+      const requestHistory =
+        phase === 'generate'
+          ? []
+          : slimHistory(
+              priorHistory.map((m) => ({
+                role: m.role,
+                content: m.content,
+              }))
+            );
+
       try {
         const response = await fetch('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: requestPrompt,
+            prompt: requestPrompt.slice(0, 16000),
             presets: resolvedPresets,
-            history: phase === 'generate' && !isRepairTurn ? [] : priorHistory,
+            history: requestHistory,
             existingFiles: existing,
             phase,
             approvedPlan: options?.approvedPlan,
@@ -564,7 +602,11 @@ export default function GeneratePage() {
               'Starting architecture plan first — review it, then click Approve & Generate.'
             );
           }
-          throw new Error(apiError);
+          const detail =
+            Array.isArray(data.details) && data.details[0]
+              ? ` (${data.details[0].path?.join('.') || 'field'}: ${data.details[0].message})`
+              : '';
+          throw new Error(`${apiError}${detail}`);
         }
 
         const reader = response.body?.getReader();
