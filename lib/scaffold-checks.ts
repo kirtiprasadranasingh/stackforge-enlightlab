@@ -125,11 +125,6 @@ async function runShell(
   return streamProcess(child, emit, timeoutMs);
 }
 
-/** Per-run cache — shared dirs race on concurrent provider installs ("text file busy"). */
-async function writableTfPluginCache(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'stackforge-tf-cache-'));
-}
-
 async function pathExists(p: string): Promise<boolean> {
   try {
     await fs.access(p);
@@ -137,6 +132,53 @@ async function pathExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Shared writable cache — one dir per pod. mkdtemp per run filled the node disk (~11Gi) and caused 502 pod evictions. */
+async function writableTfPluginCache(): Promise<string> {
+  const shared =
+    process.env.STACKFORGE_TF_PLUGIN_CACHE?.trim() ||
+    '/tmp/stackforge-tf-plugin-cache';
+  await fs.mkdir(shared, { recursive: true });
+  const imageCache = '/usr/share/terraform/plugin-cache';
+  try {
+    const entries = await fs.readdir(shared);
+    if (entries.length === 0 && (await pathExists(imageCache))) {
+      await fs.cp(imageCache, shared, { recursive: true, force: false });
+    }
+  } catch {
+    // Seed is best-effort; terraform init can still download.
+  }
+  return shared;
+}
+
+/** Drop leftover check dirs so ephemeral-storage does not grow across requests. */
+export async function sweepStaleScaffoldTemp(maxAgeMs = 5 * 60 * 1000): Promise<void> {
+  const tmp = os.tmpdir();
+  let names: string[] = [];
+  try {
+    names = await fs.readdir(tmp);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  await Promise.all(
+    names
+      .filter((n) =>
+        /^(stackforge-check-|stackforge-tf-cache-|scaffold-jobs-)/.test(n)
+      )
+      .map(async (name) => {
+        const full = path.join(tmp, name);
+        try {
+          const st = await fs.stat(full);
+          if (now - st.mtimeMs >= maxAgeMs) {
+            await fs.rm(full, { recursive: true, force: true });
+          }
+        } catch {
+          // ignore
+        }
+      })
+  );
 }
 
 async function runTerraformChecks(
@@ -168,7 +210,10 @@ async function runTerraformChecks(
     Math.min(initBudget, left()),
     tfEnv
   );
-  if (code !== 0) return code;
+  if (code !== 0) {
+    await fs.rm(path.join(tfDir, '.terraform'), { recursive: true, force: true }).catch(() => {});
+    return code;
+  }
 
   code = await runShell(
     'terraform',
@@ -178,7 +223,10 @@ async function runTerraformChecks(
     Math.min(validateBudget, left()),
     tfEnv
   );
-  if (code !== 0) return code;
+  if (code !== 0) {
+    await fs.rm(path.join(tfDir, '.terraform'), { recursive: true, force: true }).catch(() => {});
+    return code;
+  }
 
   try {
     code = await runShell(
@@ -189,15 +237,20 @@ async function runTerraformChecks(
       left(),
       tfEnv
     );
-    if (code === 0 || code === 2) return 0;
+    if (code === 0 || code === 2) {
+      await fs.rm(path.join(tfDir, '.terraform'), { recursive: true, force: true }).catch(() => {});
+      return 0;
+    }
     emit(
       'WARN  - terraform plan exited non-zero (often missing cloud credentials — expected in generator QA)'
     );
+    await fs.rm(path.join(tfDir, '.terraform'), { recursive: true, force: true }).catch(() => {});
     return 0;
   } catch (err) {
     emit(
       `WARN  - terraform plan skipped — ${err instanceof Error ? err.message : String(err)}`
     );
+    await fs.rm(path.join(tfDir, '.terraform'), { recursive: true, force: true }).catch(() => {});
     return 0;
   }
 }

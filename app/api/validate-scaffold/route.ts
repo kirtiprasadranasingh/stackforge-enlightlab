@@ -10,6 +10,7 @@ import {
   ScaffoldCheckRequestSchema,
   runScaffoldCheck,
   writeScaffoldTemp,
+  sweepStaleScaffoldTemp,
   type ScaffoldCheckId,
 } from '@/lib/scaffold-checks';
 import { normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
@@ -69,6 +70,9 @@ export async function POST(request: NextRequest) {
   const { check, files } = parsed.data;
   const checkId = check as ScaffoldCheckId;
   const normalizedFiles = normalizeScaffoldFiles(files);
+
+  // Free disk from prior runs before terraform init downloads providers again.
+  await sweepStaleScaffoldTemp(2 * 60 * 1000).catch(() => {});
 
   const stream = new ReadableStream({
     async start(controller) {

@@ -452,7 +452,7 @@ export default function GeneratePage() {
           : slimExistingFiles(
               filesRef.current,
               isRepairTurnEarly
-                ? { maxFiles: 40, maxCharsPerFile: 8000, maxTotal: 160_000 }
+                ? { maxFiles: 24, maxCharsPerFile: 5000, maxTotal: 90_000 }
                 : undefined
             );
 

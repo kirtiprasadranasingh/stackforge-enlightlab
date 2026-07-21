@@ -22,21 +22,33 @@ log_warn() { REPORT+=("WARN  - $1"); }
 echo "Validating scaffold at: $SCAFFOLD_DIR"
 echo "----------------------------------------"
 
-# Writable per-run plugin cache. A shared path races under concurrent checks
-# ("text file busy" / chmod EPERM). Callers may set STACKFORGE_TF_PLUGIN_CACHE.
+# Writable plugin cache. Prefer a shared pod path (STACKFORGE_TF_PLUGIN_CACHE) so
+# we do not copy multi‑GB providers into a new mktemp on every Run all checks
+# (that filled OKE ephemeral disk and caused 502 pod evictions).
+CLEANUP_TF_CACHE=0
 if [ -z "${STACKFORGE_TF_PLUGIN_CACHE:-}" ]; then
   export TF_PLUGIN_CACHE_DIR="$(mktemp -d /tmp/stackforge-tf-cache-XXXXXX)"
+  CLEANUP_TF_CACHE=1
 else
   export TF_PLUGIN_CACHE_DIR="$STACKFORGE_TF_PLUGIN_CACHE"
   mkdir -p "$TF_PLUGIN_CACHE_DIR"
 fi
-# Best-effort seed from the image cache when present (speeds init; never required).
+# Seed once from the image cache when the writable dir is empty.
 if [ -d /usr/share/terraform/plugin-cache ] && [ -z "$(ls -A "$TF_PLUGIN_CACHE_DIR" 2>/dev/null)" ]; then
   cp -a /usr/share/terraform/plugin-cache/. "$TF_PLUGIN_CACHE_DIR/" 2>/dev/null || true
 fi
 
 # Create a unique temporary directory for this validation run's parallel logs
 JOB_DIR=$(mktemp -d /tmp/scaffold-jobs-XXXXXX)
+cleanup_validate_temps() {
+  rm -rf "$JOB_DIR" 2>/dev/null || true
+  if [ "$CLEANUP_TF_CACHE" = 1 ]; then
+    rm -rf "$TF_PLUGIN_CACHE_DIR" 2>/dev/null || true
+  fi
+  # Drop provider binaries left under the scaffold after init (biggest disk hog).
+  rm -rf "$SCAFFOLD_DIR/terraform/.terraform" 2>/dev/null || true
+}
+trap cleanup_validate_temps EXIT
 
 # Job 1: Terraform init + validate + plan (plan is non-blocking when creds/vars missing)
 check_tf() {
@@ -45,9 +57,9 @@ check_tf() {
     set +e
     terraform init -backend=false -input=false > "$JOB_DIR/tf_init.log" 2>&1
     INIT_EXIT=$?
-    # One retry with a fresh cache on plugin install races
+    # One retry on plugin install races (reuse same cache — do not mktemp again)
     if [ "$INIT_EXIT" -ne 0 ] && grep -qiE 'text file busy|operation not permitted' "$JOB_DIR/tf_init.log" 2>/dev/null; then
-      export TF_PLUGIN_CACHE_DIR="$(mktemp -d /tmp/stackforge-tf-cache-XXXXXX)"
+      sleep 2
       terraform init -backend=false -input=false > "$JOB_DIR/tf_init.log" 2>&1
       INIT_EXIT=$?
     fi
@@ -533,8 +545,9 @@ if [ "$STUB_SCOPE_OK" -eq 1 ]; then
   log_pass "app sources stay within minimal stub patterns"
 fi
 
-# Clean up parallel log outputs
+# Clean up parallel log outputs (also handled by EXIT trap)
 rm -rf "$JOB_DIR"
+JOB_DIR=""
 
 echo
 echo "===== VALIDATION REPORT ====="

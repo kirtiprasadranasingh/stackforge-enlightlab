@@ -37,12 +37,12 @@ spec:
       labels:
         app: stackforge
     spec:
+      # Live image is on Docker Hub (OCIR free-tier push often 403).
       imagePullSecrets:
-        - name: ocir-secret
+        - name: dockerhub-secret
       containers:
         - name: stackforge
-          # Replace TENANCY_NAMESPACE after you check OCIR (see DEPLOY steps)
-          image: bom.ocir.io/bmitpaosivqx/stackforge:latest
+          image: docker.io/kirtiprasad2003/stackforge:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
@@ -50,6 +50,11 @@ spec:
           envFrom:
             - secretRef:
                 name: stackforge-secrets
+          env:
+            - name: STACKFORGE_TF_PLUGIN_CACHE
+              value: /tmp/stackforge-tf-plugin-cache
+            - name: TF_PLUGIN_CACHE_DIR
+              value: /tmp/stackforge-tf-plugin-cache
           readinessProbe:
             httpGet:
               path: /
@@ -60,12 +65,23 @@ spec:
             httpGet:
               path: /
               port: http
-            initialDelaySeconds: 15
-            periodSeconds: 20
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             requests:
               cpu: 250m
               memory: 512Mi
+              ephemeral-storage: 2Gi
             limits:
               cpu: "1000m"
               memory: 1.5Gi
+              ephemeral-storage: 4Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 3Gi
