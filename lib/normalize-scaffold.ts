@@ -884,6 +884,128 @@ function patchTerraform(content: string): string {
   // 14. Break Cycle: data.google_project ↔ google_project_service
   out = patchGoogleProjectApiCycle(out);
 
+  // 15. AWS / OCI schema mistakes that commonly fail terraform validate
+  out = patchAwsValidateSchema(out);
+  out = patchOciValidateSchema(out);
+
+  return out;
+}
+
+/**
+ * AWS provider schema fixes (validate-blocking).
+ * aws_appautoscaling_policy has no tags; aws_ecs_service exports id (not always arn);
+ * aws_rds_cluster uses cluster_resource_id (not resource_id).
+ */
+function patchAwsValidateSchema(content: string): string {
+  let out = content;
+
+  // Strip tags from appautoscaling_policy / target (unsupported)
+  out = out.replace(
+    /resource\s+"aws_appautoscaling_(?:policy|target)"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) =>
+      block
+        .replace(/^[ \t]*tags\s*=\s*\{[\s\S]*?\n[ \t]*\}\s*\r?\n/gm, '')
+        .replace(/^[ \t]*tags\s*=\s*[^\n]+\r?\n/gm, '')
+  );
+
+  // RDS cluster IAM auth: resource_id → cluster_resource_id
+  out = out.replace(
+    /(aws_rds_cluster\.[A-Za-z0-9_]+(?:\[[^\]]*\])?)\.resource_id\b/g,
+    '$1.cluster_resource_id'
+  );
+  // Same for aws_db_instance if models invent resource_id
+  out = out.replace(
+    /(aws_db_instance\.[A-Za-z0-9_]+(?:\[[^\]]*\])?)\.resource_id\b/g,
+    '$1.resource_id'
+  );
+
+  // aws_ecs_service: prefer .id (ARN) — .arn missing on many 5.x versions
+  out = out.replace(
+    /(aws_ecs_service\.[A-Za-z0-9_]+(?:\[[^\]]*\])?)\.arn\b/g,
+    '$1.id'
+  );
+
+  return out;
+}
+
+/**
+ * Oracle OCI provider schema fixes (validate-blocking).
+ */
+function patchOciValidateSchema(content: string): string {
+  let out = content;
+
+  // service_gateway.services is a set — cannot index [0]
+  out = out.replace(
+    /(oci_core_service_gateway\.[A-Za-z0-9_]+)\.services\[0\]\.cidr_block/g,
+    'tolist($1.services)[0].cidr_block'
+  );
+  out = out.replace(
+    /(oci_core_service_gateway\.[A-Za-z0-9_]+)\.services\[0\]/g,
+    'tolist($1.services)[0]'
+  );
+
+  // Wrong CIDR arg names on OKE cluster options
+  out = out.replace(/\bpods_cidr_block(\s*=)/g, 'pods_cidr$1');
+  out = out.replace(/\bservices_cidr_block(\s*=)/g, 'services_cidr$1');
+
+  // Wrap bare pods_cidr/services_cidr under options into kubernetes_network_config
+  out = out.replace(
+    /resource\s+"oci_containerengine_cluster"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (resource) => {
+      if (/kubernetes_network_config\s*\{/.test(resource)) return resource;
+      if (!/\bpods_cidr\s*=/.test(resource) && !/\bservices_cidr\s*=/.test(resource)) {
+        return resource;
+      }
+      const pods = resource.match(/^[ \t]*pods_cidr\s*=\s*.+$/m)?.[0]?.trim();
+      const services = resource.match(/^[ \t]*services_cidr\s*=\s*.+$/m)?.[0]?.trim();
+      let next = resource
+        .replace(/^[ \t]*pods_cidr\s*=.*\r?\n/gm, '')
+        .replace(/^[ \t]*services_cidr\s*=.*\r?\n/gm, '');
+      const knc = [
+        '    kubernetes_network_config {',
+        `      ${pods || 'pods_cidr     = "10.244.0.0/16"'}`,
+        `      ${services || 'services_cidr = "10.96.0.0/16"'}`,
+        '    }',
+      ].join('\n');
+      if (/options\s*\{/.test(next)) {
+        return next.replace(/options\s*\{/, `options {\n${knc}`);
+      }
+      return next.replace(
+        /(\n)(\})/,
+        `\n  options {\n${knc}\n  }$1$2`
+      );
+    }
+  );
+
+  // Plural data source name typo
+  out = out.replace(
+    /data\s+"oci_containerengine_node_pool_options"/g,
+    'data "oci_containerengine_node_pool_option"'
+  );
+  out = out.replace(
+    /oci_containerengine_node_pool_options\./g,
+    'oci_containerengine_node_pool_option.'
+  );
+
+  // Drop oci_logging_log resources with invalid top-level source { } blocks
+  out = out.replace(
+    /resource\s+"oci_logging_log"\s+"[^"]+"\s*\{[\s\S]*?\n\}\s*/g,
+    (block) => {
+      const hasTopLevelSource =
+        /(^|\n)[ \t]*source\s*\{/.test(block) && !/configuration\s*\{/.test(block);
+      return hasTopLevelSource ? '' : block;
+    }
+  );
+
+  // Outputs referencing missing oci_vault_secret → null
+  const hasVaultResource = /resource\s+"oci_vault_secret"/.test(out);
+  if (!hasVaultResource) {
+    out = out.replace(
+      /value\s*=\s*oci_vault_secret\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+/g,
+      'value       = null'
+    );
+  }
+
   return out;
 }
 
