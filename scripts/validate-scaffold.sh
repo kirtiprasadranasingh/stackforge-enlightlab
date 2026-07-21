@@ -368,8 +368,14 @@ if [ -d "$SCAFFOLD_DIR/terraform" ] && grep -rq 'aws_ecs_service\|aws_ecs_task_d
   fi
 
   if grep -rqE 'curl\s+-f|CMD-SHELL.*curl' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
-    if [ -f "$SCAFFOLD_DIR/Dockerfile" ] \
-       && grep -qiE 'apk add.*curl|apt-get install.*curl|yum install.*curl|microdnf install.*curl' "$SCAFFOLD_DIR/Dockerfile" 2>/dev/null; then
+    HADO_DF=""
+    if [ -f "$SCAFFOLD_DIR/Dockerfile" ]; then
+      HADO_DF="$SCAFFOLD_DIR/Dockerfile"
+    elif [ -f "$SCAFFOLD_DIR/app/Dockerfile" ]; then
+      HADO_DF="$SCAFFOLD_DIR/app/Dockerfile"
+    fi
+    if [ -n "$HADO_DF" ] \
+       && grep -qiE 'apk add.*curl|apt-get install.*curl|yum install.*curl|microdnf install.*curl' "$HADO_DF" 2>/dev/null; then
       log_pass "ECS curl healthCheck has matching curl install in Dockerfile"
     else
       log_fail "ECS task healthCheck uses curl but Dockerfile does not install curl"
@@ -466,11 +472,14 @@ if [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ] \
   missing=""
   for f in \
     terraform/versions.tf terraform/variables.tf terraform/outputs.tf \
-    .github/workflows/deploy.yml Dockerfile README.md; do
+    .github/workflows/deploy.yml README.md; do
     if [ ! -f "$SCAFFOLD_DIR/$f" ]; then
       missing="$missing $f"
     fi
   done
+  if [ ! -f "$SCAFFOLD_DIR/Dockerfile" ] && [ ! -f "$SCAFFOLD_DIR/app/Dockerfile" ]; then
+    missing="$missing Dockerfile"
+  fi
   if [ ! -f "$SCAFFOLD_DIR/terraform/main.tf" ] \
      && [ ! -f "$SCAFFOLD_DIR/terraform/ecs.tf" ]; then
     missing="$missing terraform/main.tf"

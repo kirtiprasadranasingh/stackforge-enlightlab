@@ -232,6 +232,36 @@ function stripTerraformLeaksFromWorkflow(content: string): string {
     .replace(/\$\{terraform\.[^}]+\}/g, '${{ env.TF_OUTPUT_PLACEHOLDER }}');
 }
 
+/** Fix actionlint errors from outputs referenced but never declared on the job. */
+function patchWorkflowJobOutputRefs(content: string): string {
+  let out = content;
+
+  out = out.replace(
+    /needs\.setup_env\.outputs\.project_name(?:\s*\|\|\s*['"][^'"]*['"])?/g,
+    'github.event.repository.name'
+  );
+
+  const priorRef = out.match(/needs\.([a-zA-Z0-9_-]+)\.outputs\.prior_task_def_arn/);
+  if (priorRef) {
+    const jobName = priorRef[1];
+    const jobHeader = new RegExp(
+      `(  ${jobName}:\\n(?:    [^\\n]+\\n)*?)(    steps:)`,
+      'm'
+    );
+    if (!new RegExp(`  ${jobName}:[\\s\\S]*?prior_task_def_arn:`).test(out)) {
+      const stepId =
+        out.match(/id:\s*(get-current-service|capture-prior[^\n]*)/)?.[1] ||
+        'get-current-service';
+      out = out.replace(
+        jobHeader,
+        `$1    outputs:\n      prior_task_def_arn: \${{ steps.${stepId}.outputs.current_task_definition_arn }}\n$2`
+      );
+    }
+  }
+
+  return out;
+}
+
 /** After `aws ecs update-service`, wait for stability (blocking check in validate-scaffold). */
 function patchEcsServicesStable(content: string): string {
   if (!/aws\s+ecs\s+update-service/.test(content)) return content;
@@ -254,6 +284,7 @@ function patchGithubWorkflow(content: string): string {
   out = promoteOrphanRollbackSteps(out);
   out = stripOrphanWithBlocks(out);
   out = stripTerraformLeaksFromWorkflow(out);
+  out = patchWorkflowJobOutputRefs(out);
   out = patchImageUriOutput(out);
   out = patchEcsServicesStable(out);
   return out;
@@ -642,29 +673,32 @@ function patchTerraform(content: string): string {
 function patchDockerfileCopy(content: string): string {
   let out = content;
   out = out.replace(/^(\s*)COPY\s*$/gm, '$1COPY package*.json ./');
-  out = out.replace(/^(\s*)COPY\s+(\S+)\s*$/gm, (_m, ind: string, src: string) => {
-    if (src === '.') return `${ind}COPY . .`;
-    return `${ind}COPY ${src} .`;
-  });
+  // COPY [--flags...] <single-src>  → add destination
+  out = out.replace(
+    /^(\s*)COPY((?:\s+--[^\s=]+(?:=[^\s]+)?)*)\s+(\S+)\s*$/gm,
+    (_m, ind: string, flags: string, src: string) => {
+      if (src === '.') return `${ind}COPY${flags} . .`;
+      return `${ind}COPY${flags} ${src} .`;
+    }
+  );
   return out;
 }
 
 /**
- * Break aws_security_group cycles (ecs_tasks ↔ redis) that block terraform validate.
- * ECS tasks should receive from ALB only; Redis receives from ECS on 6379 — never mutual ingress.
+ * Break aws_security_group cycles (ecs_tasks ↔ redis/mongodb/rds) that block terraform validate.
+ * ECS task SGs receive from ALB only — data-store SGs accept from ECS, never the reverse.
  */
 function patchSecurityGroupCycles(content: string): string {
   let out = content;
   for (const block of findTerraformResourceBlocks(out)) {
     if (block.type !== 'aws_security_group') continue;
     const body = out.slice(block.start, block.end);
-    const isEcsLike = /ecs|task|fargate/i.test(block.name);
+    const isEcsLike =
+      /ecs|task|fargate/i.test(block.name) && !/alb|lb|balancer|load/i.test(block.name);
     if (!isEcsLike) continue;
-    if (!/aws_security_group\.[a-zA-Z0-9_]*(?:redis|elasticache|cache)/i.test(body)) {
-      continue;
-    }
+    // Remove ingress that references any SG except ALB/LB
     const cleaned = body.replace(
-      /\r?\n[ \t]*ingress\s*\{[^{}]*security_groups\s*=\s*\[[^\]]*(?:redis|elasticache|cache)[^\]]*\][^{}]*\}/gi,
+      /\r?\n[ \t]*ingress\s*\{[^{}]*security_groups\s*=\s*\[[^\]]*aws_security_group\.(?![a-zA-Z0-9_]*(?:alb|lb|balancer|load))[^\]]*\][^{}]*\}/gi,
       ''
     );
     if (cleaned !== body) {
@@ -1024,6 +1058,58 @@ export function normalizeScaffoldFiles(
   ensureNodeLockfiles(byPath);
   ensureHelmHelpers(byPath);
   ensureRequiredProviders(byPath);
+  ensureEcsScaffoldCompleteness(byPath);
 
   return dedupeTerraformResources(Array.from(byPath.values()));
+}
+
+/** ECS Fargate: curl in TF healthCheck needs curl in image; accept app/Dockerfile layout. */
+function ensureEcsScaffoldCompleteness(byPath: Map<string, GeneratedFile>): void {
+  const tfBlob = [...byPath.entries()]
+    .filter(([p]) => p.endsWith('.tf'))
+    .map(([, f]) => f.content)
+    .join('\n');
+  if (!/aws_ecs_service|aws_ecs_task_definition/.test(tfBlob)) return;
+
+  const usesCurlHealth = /healthCheck[\s\S]*?curl|curl\s+-f/i.test(tfBlob);
+
+  const dockerPaths = ['Dockerfile', 'app/Dockerfile'].filter((p) => byPath.has(p));
+  for (const dp of dockerPaths) {
+    const file = byPath.get(dp)!;
+    let content = patchDockerfileCopy(file.content);
+    if (
+      usesCurlHealth &&
+      !/apk add[^;\n]*curl|apt-get install[^;\n]*curl|yum install[^;\n]*curl|microdnf install[^;\n]*curl/i.test(
+        content
+      )
+    ) {
+      if (/FROM\s+[^\n]*alpine/i.test(content)) {
+        content = content.replace(
+          /(RUN\s+apk add[^\n]*)/i,
+          '$1 curl'
+        );
+        if (!/apk add[^;\n]*curl/i.test(content)) {
+          content = content.replace(
+            /(FROM\s+[^\n]+\n)/i,
+            '$1RUN apk add --no-cache curl\n'
+          );
+        }
+      } else if (/FROM\s+[^\n]*(debian|ubuntu)/i.test(content)) {
+        content = content.replace(
+          /(FROM\s+[^\n]+\n)/i,
+          '$1RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*\n'
+        );
+      }
+    }
+    byPath.set(dp, { ...file, content });
+  }
+
+  if (!byPath.has('README.md')) {
+    byPath.set('README.md', {
+      path: 'README.md',
+      language: 'markdown',
+      content:
+        '# AWS ECS Fargate Scaffold\n\nReviewable starting scaffold for Terraform + GitHub Actions + Express health stub. Not drop-in production — validate and customize before provisioning.\n',
+    });
+  }
 }

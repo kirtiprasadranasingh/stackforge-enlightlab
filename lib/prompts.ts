@@ -217,7 +217,7 @@ instead.
 - **Auth**: Prefer GitHub OIDC (\`permissions: id-token: write\` + \`role-to-assume\`) over long-lived \`AWS_ACCESS_KEY_ID\`/\`SECRET\`. If showing keys, mark them as temporary placeholders only.
 - **IAM**: Task role policies must not grant unused APIs with \`Resource = "*"\` (e.g. do not add \`ssm:GetParameters\` on \`*\` unless the app actually reads SSM). Scope ARNs or omit the statement.
 - **workflow_dispatch inputs**: Every \`github.event.inputs.X\` must be declared under \`workflow_dispatch.inputs\` or have a safe fallback. Do not reference undeclared \`aws_region\` inputs. Each input must be a mapping (\`name:\` then \`description\`/\`required\`/\`type\` on nested lines) — never \`name: 'Description'\` with \`required\` indented under a scalar.
-- **Security groups + Redis/ElastiCache**: NEVER create circular \`aws_security_group\` ingress (ecs_tasks ↔ redis). ECS task SGs receive from the ALB SG only. Redis/ElastiCache SGs may allow inbound **from** the ECS task SG on port 6379 — use ONE direction only, or separate \`aws_security_group_rule\` resources after both SGs exist.
+- **Security groups + data stores (Redis, MongoDB, RDS, ElastiCache)**: NEVER create circular \`aws_security_group\` ingress (ecs_tasks ↔ mongodb/redis). ECS task SGs receive from the ALB SG only. Data-store SGs may allow inbound **from** the ECS task SG — one direction only.
 - **Private/internal ALB**: When the user chose private/internal access, set \`internal = true\` on \`aws_lb\` and restrict ALB SG ingress to VPC CIDR (not 0.0.0.0/0).
 - **Dev + staging**: Use \`var.environment\` (or separate workspaces) for distinct ECS services, target groups, and Redis clusters — do not hardcode a single environment when both were requested.
 - **GitHub Actions syntax**: Use \`\${{ env.NAME }}\` or \`\${{ vars.NAME }}\` — NEVER Terraform \`\${var.xxx}\` in workflow YAML.
@@ -570,7 +570,7 @@ Do NOT invent EKS/Helm/AWS files for this stack.`;
 1. terraform/versions.tf — required_providers aws pinned + provider "aws" { region = var.aws_region }; avoid placeholder-only S3 backend
 2. terraform/variables.tf, terraform/vpc.tf, terraform/ecs.tf, terraform/alb.tf, terraform/iam.tf, terraform/security_groups.tf, terraform/redis.tf (when Redis requested), terraform/cloudwatch.tf, terraform/outputs.tf
 3. Internal ALB when access is private; VPC public+private subnets; ECS cluster/service/task with autoscaling; ECR; CloudWatch log group; ElastiCache Redis in private subnets; circuit breaker + lifecycle ignore_changes on task_definition when CI deploys
-4. Security groups: ALB→ECS on container_port; Redis allows inbound from ECS task SG on 6379 only — NEVER mutual SG ingress (no ecs_tasks↔redis cycle)
+4. Security groups: ALB→ECS on container_port; data-store SGs (Redis/MongoDB/RDS) allow inbound from ECS task SG only — NEVER mutual SG ingress (no ecs_tasks↔mongodb/redis cycles)
 5. .github/workflows/deploy.yml — step id set-image-uri writes image_uri to GITHUB_OUTPUT; services-stable wait; rollback; use \${{ env.* }} never \${var.*}
 6. app/Dockerfile (COPY must be two-arg e.g. COPY . .), app/server.js or app/index.js, app/package.json, app/package-lock.json — non-root USER, /health on PORT
 7. README.md — reviewable scaffold disclaimer
