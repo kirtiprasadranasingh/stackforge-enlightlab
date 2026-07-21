@@ -1655,7 +1655,7 @@ function stripCrossCloudBleed(byPath: Map<string, GeneratedFile>): void {
     }
   }
 
-  // EKS scaffolds must not keep ECS-only terraform that confuses validate checks.
+  // EKS / Helm scaffolds must not keep ECS-only terraform that confuses validate.
   const isEks =
     /aws_eks_cluster|aws_eks_node_group|aws_eks_fargate/.test(tfBlob) ||
     [...byPath.keys()].some((p) => p.startsWith('charts/'));
@@ -1663,6 +1663,19 @@ function stripCrossCloudBleed(byPath: Map<string, GeneratedFile>): void {
   if (isEks && !isEcsService) {
     for (const p of [...byPath.keys()]) {
       if (/(^|\/)ecs\.tf$/.test(p)) byPath.delete(p);
+    }
+  }
+  // Misplaced kubernetes/helm provider-only ecs.tf on EKS (common Fix-failures hallucination)
+  if (isEks) {
+    for (const p of [...byPath.keys()]) {
+      if (!/(^|\/)ecs\.tf$/.test(p)) continue;
+      const c = byPath.get(p)!.content;
+      if (
+        /provider\s+"kubernetes"|provider\s+"helm"|aws_eks_cluster/.test(c) &&
+        !/aws_ecs_service|aws_ecs_task_definition/.test(c)
+      ) {
+        byPath.delete(p);
+      }
     }
   }
 }

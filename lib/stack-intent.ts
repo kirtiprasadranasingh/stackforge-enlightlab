@@ -156,14 +156,15 @@ export function buildValidationFixPrompt(failReport: string): string {
   return `Fix the scaffold so "Run all checks" passes. Do not change cloud, region, environments, or architecture — only correct the failing files. Do not ask clarifying questions.
 
 Rules:
-- Duplicate Terraform data/resources/outputs: keep one definition, remove the duplicate (e.g. data.google_project.project only once).
+- Duplicate Terraform data/resources/outputs: keep one definition, remove the duplicate.
 - GCP Cycle data.google_project ↔ google_project_service: set project = var.project_id on APIs; remove depends_on google_project_service from data.google_project.
 - Artifact Registry: never use .repository_url — construct location-docker.pkg.dev/project/repo/….
 - App sources: keep a minimal /health stub only (no CRUD, ORM, auth).
 - actionlint / YAML: put shell with colons in a run: | block.
-- EKS ALB: if charts use alb.ingress.kubernetes.io, add terraform helm_release for aws-load-balancer-controller OR disable ingress / remove those annotations.
-- ECS/Azure image ownership: add lifecycle { ignore_changes = [task_definition] } or image ignore_changes when CI deploys images.
-- Emit full corrected file bodies with <<<FILE>>> markers for every changed file.
+- IAM condition keys with colons must be quoted: "ForAllValues:StringLike" = { ... }
+- EKS: do NOT add ECS resources or put kubernetes/helm providers in terraform/ecs.tf — use eks/main/iam/alb_controller only. Delete ecs.tf if this is EKS+Helm.
+- Do NOT modify .github/workflows/deploy.yml, Dockerfiles, package.json, server.js, main.py, main.go, or charts/app/Chart.yaml / _helpers.tpl — those are locked.
+- Emit full corrected file bodies with <<<FILE>>> markers only for Terraform files that still fail validate.
 - Do not ask clarifying questions.
 
 Validation failures:

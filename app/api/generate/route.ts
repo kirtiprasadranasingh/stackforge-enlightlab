@@ -37,7 +37,7 @@ import {
   getMissingPaths,
   parseFileManifestFromPlan,
 } from '@/lib/scaffold-spec';
-import { mergeLockedBaseFiles } from '@/lib/scaffold-base-files';
+import { mergeLockedBaseFiles, FORCE_STUB_PATHS } from '@/lib/scaffold-base-files';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
 import path from 'path';
@@ -944,7 +944,11 @@ Always format your response by wrapping the chat reply in the following markers:
                         content: f.content,
                       });
                     }
+                    // Gemini deltas must not overwrite locked CI/stubs on Fix failures.
+                    const rejectLocked =
+                      isValidationFixPrompt(prompt) || isFollowUp;
                     for (const f of collectedFiles) {
+                      if (rejectLocked && FORCE_STUB_PATHS.has(f.path)) continue;
                       byPath.set(f.path, f);
                     }
                     return Array.from(byPath.values());
@@ -955,7 +959,10 @@ Always format your response by wrapping the chat reply in the following markers:
               const postNormProfile = detectScaffoldProfile(
                 (approvedPlan || '').trim().length > 80
                   ? approvedPlan || prompt
-                  : prompt,
+                  : // Prefer presets for Fix failures (prompt has no cloud keywords).
+                    isValidationFixPrompt(prompt)
+                    ? `${presets.cloud} ${presets.orchestrator} ${presets.ci}`
+                    : prompt,
                 presets
               );
               if (postNormProfile) {
@@ -978,6 +985,16 @@ Always format your response by wrapping the chat reply in the following markers:
                   if (!alreadyEmitted) {
                     controller.enqueue(sse({ type: 'file', file }));
                   }
+                }
+              }
+              // Drop paths removed by normalize (e.g. ecs.tf bleed on EKS) from the UI.
+              const finalPathSet = new Set(finalized.map((f) => f.path));
+              const priorPaths = isFollowUp
+                ? existingFiles.map((f) => f.path)
+                : workspaceFiles.map((f) => f.path);
+              for (const path of priorPaths) {
+                if (!finalPathSet.has(path)) {
+                  controller.enqueue(sse({ type: 'delete', path }));
                 }
               }
               // Keep the full workspace for validate/repair (not just the delta).
@@ -1113,12 +1130,37 @@ ${failLines.join('\n')}`;
 
                   if (correctedFiles.length > 0) {
                     for (const file of correctedFiles) {
-                      const idx = currentFiles.findIndex(f => f.path === file.path);
+                      if (FORCE_STUB_PATHS.has(file.path)) continue;
+                      const idx = currentFiles.findIndex((f) => f.path === file.path);
                       if (idx !== -1) {
                         currentFiles[idx] = file;
                       } else {
                         currentFiles.push(file);
                       }
+                      controller.enqueue(sse({ type: 'file', file }));
+                    }
+                    // Re-lock stubs/CI after model repair so Gemini cannot re-break them.
+                    const repairProfile = detectScaffoldProfile(
+                      `${presets.cloud} ${presets.orchestrator}`,
+                      presets
+                    );
+                    let relocked = normalizeScaffoldFiles(currentFiles);
+                    if (repairProfile) {
+                      relocked = mergeLockedBaseFiles(relocked, repairProfile, {
+                        fillMissing: false,
+                        forceStubs: true,
+                      }).files;
+                      relocked = normalizeScaffoldFiles(relocked);
+                    }
+                    const relockPaths = new Set(relocked.map((f) => f.path));
+                    for (const f of currentFiles) {
+                      if (!relockPaths.has(f.path)) {
+                        controller.enqueue(sse({ type: 'delete', path: f.path }));
+                      }
+                    }
+                    currentFiles.length = 0;
+                    currentFiles.push(...relocked);
+                    for (const file of relocked) {
                       controller.enqueue(sse({ type: 'file', file }));
                     }
                   } else {
