@@ -457,6 +457,14 @@ if [ -d "$SCAFFOLD_DIR/terraform" ] && grep -rq 'google_sql_database_instance\|g
      && grep -rq 'google_artifact_registry_repository' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
     log_fail "terraform references repository_url on Artifact Registry — construct the URL from location/project/repository_id"
   fi
+  # Catch the classic API enablement cycle before terraform validate
+  if grep -rqE 'resource\s+"google_project_service"' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+     && grep -rqE 'project\s*=\s*data\.google_project\.[A-Za-z0-9_]+\.project_id' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+    if grep -rqE 'data\s+"google_project"' "$SCAFFOLD_DIR/terraform" 2>/dev/null \
+       && grep -rqE 'depends_on\s*=\s*\[[^\]]*google_project_service' "$SCAFFOLD_DIR/terraform" 2>/dev/null; then
+      log_fail "GCP Cycle risk: google_project_service uses data.google_project while data.google_project depends_on those APIs — use var.project_id"
+    fi
+  fi
 fi
 
 # 18. GitLab CI: fake quality gates

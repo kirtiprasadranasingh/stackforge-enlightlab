@@ -1,5 +1,7 @@
 # Shared LB (144.24.100.85) — host-based routing.
-# HTTPS: https://stackforge.144-24-100-85.nip.io
+# HTTPS:
+#   https://stackforge.enlightlab.com
+#   https://stackforge.144-24-100-85.nip.io
 #
 # Requires cert-manager ClusterIssuer (default name: letsencrypt-prod).
 # If your issuer differs: kubectl get clusterissuer
@@ -26,9 +28,20 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
+        - stackforge.enlightlab.com
         - stackforge.144-24-100-85.nip.io
       secretName: stackforge-tls
   rules:
+    - host: stackforge.enlightlab.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: stackforge
+                port:
+                  name: http
     - host: stackforge.144-24-100-85.nip.io
       http:
         paths:

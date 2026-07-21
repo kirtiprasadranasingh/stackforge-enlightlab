@@ -4,7 +4,7 @@
 - Region: `ap-mumbai-1` → OCIR: `bom.ocir.io`
 - Ingress class: `nginx`
 - Shared LB: `144.24.100.85`
-- App URL: **https://stackforge.144-24-100-85.nip.io** (TLS via cert-manager)
+- App URL: **https://stackforge.enlightlab.com** (also **https://stackforge.144-24-100-85.nip.io**)
 - Fallback HTTP redirects to HTTPS once the certificate is Ready
 
 ## A) Create OCIR repo

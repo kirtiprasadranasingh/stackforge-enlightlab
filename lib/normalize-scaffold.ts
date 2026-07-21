@@ -787,6 +787,64 @@ function patchTerraform(content: string): string {
   // 13. Artifact Registry has no repository_url — construct the Docker URL.
   out = patchArtifactRegistryRepositoryUrl(out);
 
+  // 14. Break Cycle: data.google_project ↔ google_project_service
+  out = patchGoogleProjectApiCycle(out);
+
+  return out;
+}
+
+/**
+ * Common GCP validate failure:
+ *   Cycle: data.google_project.project, google_project_service.apis
+ * Cause: APIs use data.google_project.project_id while data.google_project
+ * depends_on those APIs. Fix: APIs use var.project_id; drop the depends_on.
+ */
+function patchGoogleProjectApiCycle(content: string): string {
+  if (
+    !/google_project_service/.test(content) &&
+    !/data\s+"google_project"/.test(content)
+  ) {
+    return content;
+  }
+
+  let out = content;
+
+  // Enable APIs with var.project_id (not data.google_project.*.project_id)
+  out = out.replace(
+    /resource\s+"google_project_service"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) =>
+      block
+        .replace(
+          /\bproject\s*=\s*data\.google_project\.[A-Za-z0-9_]+\.project_id\b/g,
+          'project = var.project_id'
+        )
+        .replace(
+          /\bproject\s*=\s*"\$\{data\.google_project\.[A-Za-z0-9_]+\.project_id\}"/g,
+          'project = var.project_id'
+        )
+  );
+
+  // data.google_project must not depend on google_project_service*
+  out = out.replace(
+    /data\s+"google_project"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) => {
+      let b = block.replace(
+        /^[ \t]*depends_on\s*=\s*\[[^\]]*google_project_service[^\]]*\][ \t]*\r?\n/gm,
+        ''
+      );
+      b = b.replace(/depends_on\s*=\s*\[([\s\S]*?)\]/g, (full, inner: string) => {
+        if (!/google_project_service/.test(inner)) return full;
+        const items = inner
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0 && !/google_project_service/.test(s));
+        if (items.length === 0) return '';
+        return `depends_on = [\n    ${items.join(',\n    ')}\n  ]`;
+      });
+      return b;
+    }
+  );
+
   return out;
 }
 

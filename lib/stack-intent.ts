@@ -154,10 +154,12 @@ export function buildValidationFixPrompt(failReport: string): string {
 
 Rules:
 - Duplicate Terraform data/resources/outputs: keep one definition, remove the duplicate (e.g. data.google_project.project only once).
+- GCP Cycle data.google_project ↔ google_project_service: set project = var.project_id on APIs; remove depends_on google_project_service from data.google_project.
 - Artifact Registry: never use .repository_url — construct "\${location}-docker.pkg.dev/\${project}/\${repository_id}/…".
 - App sources: keep a minimal /health stub only (no CRUD, ORM, auth).
 - actionlint / YAML: put shell with colons in a \`run: |\` block.
 - Emit full corrected file bodies with <<<FILE>>> markers for every changed file.
+- Do not ask clarifying questions.
 
 Validation failures:
 ${trimmed}`;

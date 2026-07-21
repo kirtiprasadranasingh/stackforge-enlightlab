@@ -42,3 +42,21 @@ k8s/secret.yaml
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local QA / verify dumps — never commit providers or node_modules
+.verify-*/
+.review-*/
+.verify-*/
+_qa_*/
+temp-zip/
+**/node_modules/
+**/.terraform/
+**/.terraform.lock.hcl
+*.exe
+.last-deploy-tag
+
+# Large / generated local artifacts
+StackForge_*.pdf
+StackForge_*.html
+scripts/_debug-*
+scripts/_test-*
