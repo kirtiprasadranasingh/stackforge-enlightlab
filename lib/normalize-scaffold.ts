@@ -49,8 +49,8 @@ function patchIamConditionKeys(content: string): string {
   // Bad:  ForAllValues:StringLike = {
   // Good: "ForAllValues:StringLike" = {
   return content.replace(
-    /(^|[^{\n])(\s*)((?:ForAllValues|ForAnyValue|Null):[A-Za-z0-9]+)\s*=/gm,
-    (_m, pre: string, ws: string, key: string) => `${pre}${ws}"${key}" =`
+    /(^|\s)((?:ForAllValues|ForAnyValue|Null):[A-Za-z0-9]+)\s*=/gm,
+    '$1"$2" ='
   );
 }
 
