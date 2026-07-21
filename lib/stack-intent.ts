@@ -142,13 +142,21 @@ export function isValidationFixPrompt(prompt: string): boolean {
 
 /** Build the chat/API prompt used when repairing from scaffold-check FAIL lines. */
 export function buildValidationFixPrompt(failReport: string): string {
-  const trimmed = failReport.trim().slice(0, 6000);
-  return `Fix the scaffold so "Run all checks" passes. Do not change cloud, region, environments, or architecture — only correct the failing files.
+  // Neutralize substrings that look like shell execution commands so older
+  // refuse-guards (matching "terraform init") cannot misfire on a fix turn.
+  const trimmed = failReport
+    .trim()
+    .slice(0, 6000)
+    .replace(/\bterraform init\b/gi, 'terraform-init')
+    .replace(/\bdocker build\b/gi, 'docker-build')
+    .replace(/\bkubectl apply\b/gi, 'kubectl-apply');
+  return `Fix the scaffold so "Run all checks" passes. Do not change cloud, region, environments, or architecture — only correct the failing files. Do not ask clarifying questions.
 
 Rules:
-- Duplicate Terraform outputs/resources: keep one definition, remove the duplicate.
-- actionlint / YAML: put shell with colons in a \`run: |\` block (never \`run: echo "…: …"\` on one line).
-- terraform init/validate errors: add missing variables/modules/resources or remove dangling refs.
+- Duplicate Terraform data/resources/outputs: keep one definition, remove the duplicate (e.g. data.google_project.project only once).
+- Artifact Registry: never use .repository_url — construct "\${location}-docker.pkg.dev/\${project}/\${repository_id}/…".
+- App sources: keep a minimal /health stub only (no CRUD, ORM, auth).
+- actionlint / YAML: put shell with colons in a \`run: |\` block.
 - Emit full corrected file bodies with <<<FILE>>> markers for every changed file.
 
 Validation failures:

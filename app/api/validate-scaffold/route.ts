@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import {
   assertOriginAllowed,
-  checkRateLimit,
+  checkValidateRateLimit,
   getClientIP,
   getCORSHeaders,
 } from '@/lib/rate-limit';
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const rate = await checkRateLimit(`validate:${getClientIP(request)}`);
+  const rate = await checkValidateRateLimit(`validate:${getClientIP(request)}`);
   if (!rate.allowed) {
     return NextResponse.json(
       { error: 'Too many validation requests. Try again shortly.' },

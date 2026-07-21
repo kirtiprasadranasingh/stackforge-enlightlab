@@ -25,6 +25,7 @@ import { buildClarifyingQuestions } from '@/lib/clarifying-questions';
 import {
   isFullStackPrompt,
   isIterativeEditPrompt,
+  isValidationFixPrompt,
   requiresPlanApproval,
   isConversationalPrompt,
   isOutOfScopeOpsPrompt,
@@ -447,11 +448,18 @@ export async function POST(request: NextRequest) {
       lowerPrompt.includes('helm') ||
       lowerPrompt.includes('dockerfile');
 
-    const shouldRefuse = isExecutionCommand || 
-                         (!isFollowUp && (
-                           (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword) ||
-                           (isCapabilityQuestion && !hasPrescribedConfigKeyword && !hasCloudKeyword)
-                         ));
+    // Never refuse repair / follow-up turns. Fail reports embed strings like
+    // "terraform init" which would otherwise trip the execution-command guard.
+    const isRepairOrFollowUp =
+      isFollowUp ||
+      isValidationFixPrompt(prompt) ||
+      isIterativeEditPrompt(prompt);
+
+    const shouldRefuse =
+      !isRepairOrFollowUp &&
+      (isExecutionCommand ||
+        (isActionCommand && !isInformationalOrBlueprint && !hasCloudKeyword) ||
+        (isCapabilityQuestion && !hasPrescribedConfigKeyword && !hasCloudKeyword));
 
     if (shouldRefuse) {
       const stream = new ReadableStream({
@@ -556,8 +564,17 @@ Always format your response by wrapping the chat reply in the following markers:
 
     const gated = requiresPlanApproval(prompt, existingFiles.length > 0);
 
-    // Clients that skip workflow phases — interview first, then plan (never invent silently)
-    if (phase === 'generate' && gated && !approvedPlan?.trim()) {
+    // Clients that skip workflow phases — interview first, then plan (never invent silently).
+    // Never bounce validation-fix / iterative edits with files back into clarify/plan.
+    const skipGateForRepair =
+      isValidationFixPrompt(prompt) ||
+      (existingFiles.length > 0 && isIterativeEditPrompt(prompt));
+    if (
+      phase === 'generate' &&
+      gated &&
+      !approvedPlan?.trim() &&
+      !skipGateForRepair
+    ) {
       const hasPriorAssistant = history.some((m) => m.role === 'assistant');
       phase = hasPriorAssistant ? 'plan' : 'clarify';
     }

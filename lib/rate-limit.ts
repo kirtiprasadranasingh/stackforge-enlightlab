@@ -7,9 +7,18 @@ import { RateLimiterMemory } from 'rate-limiter-flexible';
 
 const RATE_LIMIT_REQUESTS = Number(process.env.RATE_LIMIT_REQUESTS || 8);
 const RATE_LIMIT_WINDOW = Number(process.env.RATE_LIMIT_WINDOW_SEC || 60);
+/** Scaffold checks are chatty (auto-run + per-tool buttons) — allow more headroom. */
+const VALIDATE_RATE_LIMIT_REQUESTS = Number(
+  process.env.VALIDATE_RATE_LIMIT_REQUESTS || 40
+);
 
 export const rateLimiter = new RateLimiterMemory({
   points: RATE_LIMIT_REQUESTS,
+  duration: RATE_LIMIT_WINDOW,
+});
+
+const validateRateLimiter = new RateLimiterMemory({
+  points: VALIDATE_RATE_LIMIT_REQUESTS,
   duration: RATE_LIMIT_WINDOW,
 });
 
@@ -18,6 +27,26 @@ export async function checkRateLimit(
 ): Promise<{ allowed: boolean; remaining: number }> {
   try {
     const result = await rateLimiter.consume(identifier);
+    return {
+      allowed: true,
+      remaining: result.remainingPoints,
+    };
+  } catch (rateLimiterRes) {
+    const remaining = Math.round(
+      (rateLimiterRes as { msBeforeNext: number }).msBeforeNext / 1000
+    );
+    return {
+      allowed: false,
+      remaining: Math.max(0, remaining),
+    };
+  }
+}
+
+export async function checkValidateRateLimit(
+  identifier: string
+): Promise<{ allowed: boolean; remaining: number }> {
+  try {
+    const result = await validateRateLimiter.consume(identifier);
     return {
       allowed: true,
       remaining: result.remainingPoints,
