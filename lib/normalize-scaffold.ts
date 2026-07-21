@@ -44,6 +44,64 @@ function patchDockerfileForRoot(content: string, stripAppPrefix: boolean): strin
   return out;
 }
 
+/** Quote IAM condition operator keys that contain colons (invalid bare HCL identifiers). */
+function patchIamConditionKeys(content: string): string {
+  // Bad:  ForAllValues:StringLike = {
+  // Good: "ForAllValues:StringLike" = {
+  return content.replace(
+    /(^|[^{\n])(\s*)((?:ForAllValues|ForAnyValue|Null):[A-Za-z0-9]+)\s*=/gm,
+    (_m, pre: string, ws: string, key: string) => `${pre}${ws}"${key}" =`
+  );
+}
+
+/** Ensure workflow_dispatch inputs referenced via github.event.inputs.* are declared. */
+function patchMissingWorkflowDispatchInputs(content: string): string {
+  const refs = [
+    ...content.matchAll(/github\.event\.inputs\.([A-Za-z_][\w]*)/g),
+  ].map((m) => m[1]);
+  if (refs.length === 0) return content;
+  const needed = [...new Set(refs)];
+
+  const dispatchMatch = content.match(
+    /workflow_dispatch:\s*\r?\n([ \t]*)inputs:\s*\r?\n([\s\S]*?)(?=\r?\n[ \t]*[A-Za-z_]|\r?\n[ \t]*jobs:|\r?\n[ \t]*permissions:|$)/
+  );
+  if (!dispatchMatch) {
+    // No inputs block — inject under workflow_dispatch if present
+    if (!/workflow_dispatch\s*:/.test(content)) return content;
+    const inputLines = needed
+      .map(
+        (name) =>
+          `      ${name}:\n        description: '${name}'\n        required: false\n        type: string`
+      )
+      .join('\n');
+    return content.replace(
+      /(workflow_dispatch\s*:\s*)(\r?\n)/,
+      `$1$2    inputs:\n${inputLines}\n`
+    );
+  }
+
+  const inputsBlock = dispatchMatch[2];
+  const indent = dispatchMatch[1] || '      ';
+  const missing = needed.filter(
+    (name) => !new RegExp(`^\\s*${name}\\s*:`, 'm').test(inputsBlock)
+  );
+  if (missing.length === 0) return content;
+
+  const insert = missing
+    .map(
+      (name) =>
+        `${indent}${name}:\n${indent}  description: '${name}'\n${indent}  required: false\n${indent}  type: string\n`
+    )
+    .join('');
+  const at = dispatchMatch.index! + dispatchMatch[0].length;
+  // Insert at start of inputs block body
+  const inputsStart =
+    content.indexOf('inputs:', dispatchMatch.index!) + 'inputs:'.length;
+  const nl = content.indexOf('\n', inputsStart);
+  const insertAt = nl >= 0 ? nl + 1 : inputsStart;
+  return content.slice(0, insertAt) + insert + content.slice(insertAt);
+}
+
 /** Fix common invalid workflow_dispatch input shapes that break actionlint/YAML. */
 function patchWorkflowDispatchInputs(content: string): string {
   // Bad:
@@ -268,14 +326,26 @@ function patchEcsServicesStable(content: string): string {
   if (/services-stable|service-stable|deployments-stable/.test(content)) {
     return content;
   }
-  return content.replace(
-    /(aws\s+ecs\s+update-service\b[\s\S]*?--force-new-deployment[^\n]*)(\r?\n)/,
+  // Match the update-service invocation whether or not --force-new-deployment is used.
+  const replaced = content.replace(
+    /(aws\s+ecs\s+update-service\b[^\n]*(?:\r?\n[ \t]+--[^\n]+)*)(\r?\n)/,
     `$1$2
           echo "Waiting for ECS service to stabilize..."
           aws ecs wait services-stable \\
             --cluster \${{ env.ECS_CLUSTER_NAME }} \\
             --services \${{ env.ECS_SERVICE_NAME }}
 `
+  );
+  if (replaced !== content) return replaced;
+  // Fallback: append before end of the run block that contains update-service
+  return content.replace(
+    /(aws\s+ecs\s+update-service\b[\s\S]{0,800}?)(\r?\n(?=[ \t]*-[ \t]+name:|\s*$))/,
+    `$1
+          echo "Waiting for ECS service to stabilize..."
+          aws ecs wait services-stable \\
+            --cluster \${{ env.ECS_CLUSTER_NAME }} \\
+            --services \${{ env.ECS_SERVICE_NAME }}
+$2`
   );
 }
 
@@ -357,6 +427,7 @@ function trimTruncatedWorkflowTail(content: string): string {
 
 function patchGithubWorkflow(content: string): string {
   let out = patchWorkflowDispatchInputs(content);
+  out = patchMissingWorkflowDispatchInputs(out);
   out = promoteOrphanRollbackSteps(out);
   out = stripOrphanWithBlocks(out);
   out = stripTerraformLeaksFromWorkflow(out);
@@ -696,6 +767,9 @@ function patchPipelineDockerContext(
  */
 function patchTerraform(content: string): string {
   let out = content;
+
+  // 0. IAM condition keys with colons must be quoted HCL strings
+  out = patchIamConditionKeys(out);
 
   // 1. depends_on cannot contain indexed/expression references. Strip
   //    [each.key] / [each.value] / [count.index] used inside a depends_on list.
@@ -1543,6 +1617,17 @@ function stripCrossCloudBleed(byPath: Map<string, GeneratedFile>): void {
       ) {
         byPath.delete(p);
       }
+    }
+  }
+
+  // EKS scaffolds must not keep ECS-only terraform that confuses validate checks.
+  const isEks =
+    /aws_eks_cluster|aws_eks_node_group|aws_eks_fargate/.test(tfBlob) ||
+    [...byPath.keys()].some((p) => p.startsWith('charts/'));
+  const isEcsService = /aws_ecs_service|aws_ecs_task_definition/.test(tfBlob);
+  if (isEks && !isEcsService) {
+    for (const p of [...byPath.keys()]) {
+      if (/(^|\/)ecs\.tf$/.test(p)) byPath.delete(p);
     }
   }
 }

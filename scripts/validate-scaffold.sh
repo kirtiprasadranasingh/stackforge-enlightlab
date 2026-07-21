@@ -417,7 +417,7 @@ if [ -f "$SCAFFOLD_DIR/.github/workflows/deploy.yml" ]; then
       log_fail "deploy.yml references image_uri output but never writes image_uri= to GITHUB_OUTPUT"
     fi
   fi
-  if grep -qE 'amazon-ecr-login|ecr-login|ECR_REPOSITORY|aws ecs update-service' "$WF" 2>/dev/null; then
+  if grep -qE 'aws ecs update-service' "$WF" 2>/dev/null; then
     if grep -qE 'services-stable|service-stable|deployments-stable' "$WF" 2>/dev/null; then
       log_pass "ECS deploy waits for services-stable (or equivalent)"
     else
