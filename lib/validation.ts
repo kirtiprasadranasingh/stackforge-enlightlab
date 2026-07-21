@@ -26,7 +26,8 @@ export const PresetsSchema = z.object({
 
 const HistoryMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
-  content: z.string().max(4000),
+  // Allow longer assistant/plan turns; repair prompts may appear in history.
+  content: z.string().max(16000),
 });
 
 const ExistingFileSchema = z.object({
@@ -40,7 +41,8 @@ const ExistingFileSchema = z.object({
 
 export const GenerateRequestSchema = z
   .object({
-    prompt: z.string().min(1).max(4000),
+    // Repair turns embed scaffold-check FAIL logs — need headroom beyond short chat.
+    prompt: z.string().min(1).max(16000),
     presets: PresetsSchema.optional(),
     /** Prior chat turns (optional — for Lovable-style iteration) */
     history: z.array(HistoryMessageSchema).max(20).optional(),

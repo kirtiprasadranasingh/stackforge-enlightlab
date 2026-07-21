@@ -142,11 +142,14 @@ export function isValidationFixPrompt(prompt: string): boolean {
 
 /** Build the chat/API prompt used when repairing from scaffold-check FAIL lines. */
 export function buildValidationFixPrompt(failReport: string): string {
-  // Neutralize substrings that look like shell execution commands so older
-  // refuse-guards (matching "terraform init") cannot misfire on a fix turn.
-  const trimmed = failReport
+  // Keep FAIL lines only — drop PASS/INFO noise so the request stays under API limits.
+  const failOnly = failReport
+    .split(/\r?\n/)
+    .filter((l) => /^FAIL\s+-/i.test(l.trim()) || /^RESULT:\s*FAILED/i.test(l.trim()))
+    .join('\n');
+  const trimmed = (failOnly || failReport)
     .trim()
-    .slice(0, 6000)
+    .slice(0, 8000)
     .replace(/\bterraform init\b/gi, 'terraform-init')
     .replace(/\bdocker build\b/gi, 'docker-build')
     .replace(/\bkubectl apply\b/gi, 'kubectl-apply');
@@ -155,11 +158,10 @@ export function buildValidationFixPrompt(failReport: string): string {
 Rules:
 - Duplicate Terraform data/resources/outputs: keep one definition, remove the duplicate (e.g. data.google_project.project only once).
 - GCP Cycle data.google_project ↔ google_project_service: set project = var.project_id on APIs; remove depends_on google_project_service from data.google_project.
-- Artifact Registry: never use .repository_url — construct "\${location}-docker.pkg.dev/\${project}/\${repository_id}/…".
+- Artifact Registry: never use .repository_url — construct location-docker.pkg.dev/project/repo/….
 - App sources: keep a minimal /health stub only (no CRUD, ORM, auth).
-- actionlint / YAML: put shell with colons in a \`run: |\` block.
+- actionlint / YAML: put shell with colons in a run: | block.
 - Emit full corrected file bodies with <<<FILE>>> markers for every changed file.
-- Do not ask clarifying questions.
 
 Validation failures:
 ${trimmed}`;
