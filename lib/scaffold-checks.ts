@@ -140,15 +140,9 @@ async function writableTfPluginCache(): Promise<string> {
     process.env.STACKFORGE_TF_PLUGIN_CACHE?.trim() ||
     '/tmp/stackforge-tf-plugin-cache';
   await fs.mkdir(shared, { recursive: true });
-  const imageCache = '/usr/share/terraform/plugin-cache';
-  try {
-    const entries = await fs.readdir(shared);
-    if (entries.length === 0 && (await pathExists(imageCache))) {
-      await fs.cp(imageCache, shared, { recursive: true, force: false });
-    }
-  } catch {
-    // Seed is best-effort; terraform init can still download.
-  }
+  // Do NOT copy the image's multi-cloud provider cache into /tmp — that alone
+  // exceeds OKE emptyDir limits and evicts the pod (502/503). Terraform init
+  // will download only the providers this scaffold needs.
   return shared;
 }
 

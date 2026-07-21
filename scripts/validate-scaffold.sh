@@ -33,10 +33,8 @@ else
   export TF_PLUGIN_CACHE_DIR="$STACKFORGE_TF_PLUGIN_CACHE"
   mkdir -p "$TF_PLUGIN_CACHE_DIR"
 fi
-# Seed once from the image cache when the writable dir is empty.
-if [ -d /usr/share/terraform/plugin-cache ] && [ -z "$(ls -A "$TF_PLUGIN_CACHE_DIR" 2>/dev/null)" ]; then
-  cp -a /usr/share/terraform/plugin-cache/. "$TF_PLUGIN_CACHE_DIR/" 2>/dev/null || true
-fi
+# Do NOT seed the full multi-cloud image cache into /tmp (OKE emptyDir eviction → 502).
+# terraform init downloads only providers required by this scaffold.
 
 # Create a unique temporary directory for this validation run's parallel logs
 JOB_DIR=$(mktemp -d /tmp/scaffold-jobs-XXXXXX)

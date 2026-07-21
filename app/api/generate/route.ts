@@ -1017,9 +1017,10 @@ Always format your response by wrapping the chat reply in the following markers:
                   let code = 0;
                   let output = "";
                   try {
-                    const tfCache = await fs.mkdtemp(
-                      path.join(os.tmpdir(), 'stackforge-tf-cache-')
-                    );
+                    const tfCache =
+                      process.env.STACKFORGE_TF_PLUGIN_CACHE?.trim() ||
+                      '/tmp/stackforge-tf-plugin-cache';
+                    await fs.mkdir(tfCache, { recursive: true });
                     const { stdout, stderr } = await execAsync(
                       `bash "${scriptPath}" "${tempDir}"`,
                       {
@@ -1038,6 +1039,14 @@ Always format your response by wrapping the chat reply in the following markers:
                     const execError = err as { code?: number; stdout?: string; stderr?: string };
                     code = execError.code || 1;
                     output = (execError.stdout || '') + (execError.stderr || '');
+                  } finally {
+                    // Drop provider binaries under the scaffold temp after each attempt.
+                    await fs
+                      .rm(path.join(tempDir, 'terraform', '.terraform'), {
+                        recursive: true,
+                        force: true,
+                      })
+                      .catch(() => {});
                   }
 
                   reportText = output;
