@@ -45,12 +45,20 @@ export function isOutOfScopeOpsPrompt(prompt: string): boolean {
 export function isFullStackPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase().trim();
   if (isOutOfScopeOpsPrompt(lower)) return false;
+  // Repair / validation-fix turns are never a brand-new stack interview
+  if (isValidationFixPrompt(prompt)) return false;
+  if (
+    /^(add|update|fix|change|harden|secure|wire|include|remove|delete|rename|move)\b/.test(
+      lower
+    )
+  ) {
+    return false;
+  }
 
   // Short but explicit cloud/orchestrator prompts are still full-stack requests
   // e.g. "An Oracle OKE service", "A Node.js API on AWS EKS"
   if (hasCloudOrOrchestratorSignal(lower) && lower.length >= 12) {
-    const looksLikeEdit = isIterativeEditPrompt(lower);
-    if (!looksLikeEdit) return true;
+    return true;
   }
 
   if (lower.length < 20) return false;

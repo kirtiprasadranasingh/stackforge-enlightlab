@@ -523,8 +523,14 @@ export default function GeneratePage() {
             }))
           : [];
 
+      const isRepairTurn =
+        isIterativeEditPrompt(text) ||
+        Boolean(options?.displayContent?.trim());
+
+      // Fresh generate reuses the original stack prompt; repair turns must keep
+      // the fix text (otherwise Fix failures restarts the clarify interview).
       const requestPrompt =
-        phase === 'generate' && lastStackPrompt
+        phase === 'generate' && lastStackPrompt && !isRepairTurn
           ? lastStackPrompt
           : phase === 'plan' && lastStackPrompt && text !== lastStackPrompt
             ? `${lastStackPrompt}\n\nClient answers / revision feedback:\n${text}`
@@ -537,7 +543,7 @@ export default function GeneratePage() {
           body: JSON.stringify({
             prompt: requestPrompt,
             presets: resolvedPresets,
-            history: phase === 'generate' ? [] : priorHistory,
+            history: phase === 'generate' && !isRepairTurn ? [] : priorHistory,
             existingFiles: existing,
             phase,
             approvedPlan: options?.approvedPlan,
