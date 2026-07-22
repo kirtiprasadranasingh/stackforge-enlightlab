@@ -67,12 +67,12 @@ variable "project_name" {
 
 variable "environment" {
   type        = string
-  description = "Environment name (development or staging)"
+  description = "Environment name"
   default     = "staging"
 
   validation {
-    condition     = contains(["development", "staging"], var.environment)
-    error_message = "environment must be development or staging."
+    condition     = contains(["development", "staging", "production"], var.environment)
+    error_message = "environment must be development, staging, or production."
   }
 }
 
@@ -90,8 +90,25 @@ variable "image_tag" {
 
 variable "db_username" {
   type        = string
-  description = "PostgreSQL master username"
+  description = "Database master username"
   default     = "appuser"
+}
+
+variable "enable_database" {
+  type        = bool
+  description = "Provision managed relational database"
+  default     = true
+}
+
+variable "db_engine" {
+  type        = string
+  description = "postgres or mysql"
+  default     = "postgres"
+}
+
+variable "db_multi_az" {
+  type        = bool
+  default     = true
 }
 
 variable "vpc_cidr" {
@@ -108,7 +125,7 @@ variable "node_instance_types" {
 
 variable "node_desired_size" {
   type        = number
-  description = "Desired worker nodes (medium traffic)"
+  description = "Desired worker nodes"
   default     = 3
 }
 
@@ -134,6 +151,7 @@ export const TF_EKS_MAIN = `locals {
 }
 
 resource "random_password" "db" {
+  count   = var.enable_database ? 1 : 0
   length  = 20
   special = false
 }
@@ -271,12 +289,13 @@ resource "aws_security_group_rule" "cluster_from_nodes" {
 }
 
 resource "aws_security_group" "rds" {
+  count       = var.enable_database ? 1 : 0
   name_prefix = "\${local.name_prefix}-rds-"
   vpc_id      = aws_vpc.main.id
-  description = "PostgreSQL access from EKS nodes only"
+  description = "Database access from EKS nodes only"
   ingress {
-    from_port       = 5432
-    to_port         = 5432
+    from_port       = var.db_engine == "mysql" ? 3306 : 5432
+    to_port         = var.db_engine == "mysql" ? 3306 : 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.eks_nodes.id]
   }
@@ -390,30 +409,32 @@ resource "aws_eks_node_group" "main" {
 `;
 
 export const TF_EKS_DATABASE = `resource "aws_db_subnet_group" "main" {
+  count      = var.enable_database ? 1 : 0
   name       = "\${local.name_prefix}-db"
   subnet_ids = aws_subnet.private[*].id
   tags       = merge(local.tags, { Name = "\${local.name_prefix}-db-subnets" })
 }
 
-resource "aws_db_instance" "postgres" {
-  identifier             = "\${local.name_prefix}-postgres"
-  engine                 = "postgres"
-  engine_version         = "15"
-  instance_class         = "db.t3.medium"
-  allocated_storage      = 50
-  max_allocated_storage  = 100
-  db_name                = "appdb"
-  username               = var.db_username
-  password               = random_password.db.result
-  db_subnet_group_name   = aws_db_subnet_group.main.name
-  vpc_security_group_ids = [aws_security_group.rds.id]
-  multi_az               = true
-  publicly_accessible    = false
-  storage_encrypted      = true
-  skip_final_snapshot    = true
-  deletion_protection    = false
+resource "aws_db_instance" "main" {
+  count                   = var.enable_database ? 1 : 0
+  identifier              = "\${local.name_prefix}-db"
+  engine                  = var.db_engine == "mysql" ? "mysql" : "postgres"
+  engine_version          = var.db_engine == "mysql" ? "8.0" : "15"
+  instance_class          = "db.t3.medium"
+  allocated_storage       = 50
+  max_allocated_storage   = 100
+  db_name                 = "appdb"
+  username                = var.db_username
+  password                = random_password.db[0].result
+  db_subnet_group_name    = aws_db_subnet_group.main[0].name
+  vpc_security_group_ids  = [aws_security_group.rds[0].id]
+  multi_az                = var.db_multi_az
+  publicly_accessible     = false
+  storage_encrypted       = true
+  skip_final_snapshot     = true
+  deletion_protection     = false
   backup_retention_period = 7
-  tags                   = local.tags
+  tags                    = local.tags
 }
 `;
 
@@ -436,25 +457,25 @@ output "private_subnet_ids" {
 }
 
 output "rds_endpoint" {
-  description = "Private PostgreSQL endpoint (from EKS nodes only)"
-  value       = aws_db_instance.postgres.address
+  description = "Private database endpoint (from EKS nodes only)"
+  value       = try(aws_db_instance.main[0].address, null)
 }
 
 output "rds_port" {
-  value = aws_db_instance.postgres.port
+  value = try(aws_db_instance.main[0].port, null)
 }
 
 output "db_name" {
-  value = aws_db_instance.postgres.db_name
+  value = try(aws_db_instance.main[0].db_name, null)
 }
 
 output "db_username" {
-  value = aws_db_instance.postgres.username
+  value = try(aws_db_instance.main[0].username, null)
 }
 
 output "db_password" {
   description = "Generated DB password — store in Secrets Manager before production use"
-  value       = random_password.db.result
+  value       = try(random_password.db[0].result, null)
   sensitive   = true
 }
 

@@ -23,6 +23,63 @@ import {
   EKS_ENV_DEV_TFVARS,
   EKS_README,
 } from '@/lib/locked-tf-aws-eks';
+import {
+  TF_ECS_VERSIONS,
+  TF_ECS_VARIABLES,
+  TF_ECS_MAIN,
+  TF_ECS_VPC,
+  TF_ECS_SG,
+  TF_ECS_IAM,
+  TF_ECS_ALB,
+  TF_ECS_SERVICE,
+  TF_ECS_DATABASE,
+  TF_ECS_REDIS,
+  TF_ECS_OUTPUTS,
+} from '@/lib/locked-tf-aws-ecs';
+import {
+  TF_CR_VERSIONS,
+  TF_CR_VARIABLES,
+  TF_CR_MAIN,
+  TF_CR_NETWORK,
+  TF_CR_DATABASE,
+  TF_CR_CLOUDRUN,
+  TF_CR_OUTPUTS,
+} from '@/lib/locked-tf-gcp-cloudrun';
+import {
+  TF_ACA_VERSIONS,
+  TF_ACA_VARIABLES,
+  TF_ACA_MAIN,
+  TF_ACA_NETWORK,
+  TF_ACA_DATABASE,
+  TF_ACA_APP,
+  TF_ACA_OUTPUTS,
+} from '@/lib/locked-tf-azure-aca';
+import {
+  TF_AKS_VERSIONS,
+  TF_AKS_VARIABLES,
+  TF_AKS_MAIN,
+  TF_AKS_NETWORK,
+  TF_AKS_CLUSTER,
+  TF_AKS_OUTPUTS,
+} from '@/lib/locked-tf-azure-aks';
+import {
+  TF_GKE_VERSIONS,
+  TF_GKE_VARIABLES,
+  TF_GKE_MAIN,
+  TF_GKE_NETWORK,
+  TF_GKE_CLUSTER,
+  TF_GKE_OUTPUTS,
+} from '@/lib/locked-tf-gcp-gke';
+import {
+  TF_OKE_VERSIONS,
+  TF_OKE_VARIABLES,
+  TF_OKE_NETWORK,
+  TF_OKE_CLUSTER,
+  TF_OKE_OUTPUTS,
+} from '@/lib/locked-tf-oracle-oke';
+import type { ScaffoldOptions } from '@/lib/scaffold-options';
+import type { Presets } from '@/types';
+import { applyScaffoldOptions } from '@/lib/apply-scaffold-options';
 
 type BaseFileMap = Record<string, string>;
 
@@ -779,17 +836,18 @@ export function shouldForceLockPath(path: string): boolean {
 
 function awsEcsBase(): BaseFileMap {
   return {
-    'terraform/versions.tf': TF_AWS_VERSIONS,
-    'terraform/variables.tf': TF_AWS_VARIABLES,
-    'terraform/main.tf': TF_PLACEHOLDER('AWS ECS entrypoint — VPC/ECS/ALB may live in sibling files'),
-    'terraform/vpc.tf': TF_PLACEHOLDER('VPC + subnets'),
-    'terraform/ecs.tf': TF_PLACEHOLDER('ECS cluster / service / task definition'),
-    'terraform/alb.tf': TF_PLACEHOLDER('ALB + target group (/health)'),
-    'terraform/iam.tf': TF_PLACEHOLDER('IAM roles/policies'),
-    'terraform/security_groups.tf': TF_PLACEHOLDER('Security groups (no SG cycles)'),
-    'terraform/redis.tf': TF_PLACEHOLDER('ElastiCache Redis (optional if unused)'),
-    'terraform/cloudwatch.tf': TF_PLACEHOLDER('CloudWatch log group'),
-    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
+    'terraform/versions.tf': TF_ECS_VERSIONS,
+    'terraform/variables.tf': TF_ECS_VARIABLES,
+    'terraform/main.tf': TF_ECS_MAIN,
+    'terraform/vpc.tf': TF_ECS_VPC,
+    'terraform/security_groups.tf': TF_ECS_SG,
+    'terraform/iam.tf': TF_ECS_IAM,
+    'terraform/alb.tf': TF_ECS_ALB,
+    'terraform/ecs.tf': TF_ECS_SERVICE,
+    'terraform/database.tf': TF_ECS_DATABASE,
+    'terraform/redis.tf': TF_ECS_REDIS,
+    'terraform/outputs.tf': TF_ECS_OUTPUTS,
+    'environments/staging.tfvars': `aws_region = "us-east-1"\nenvironment = "staging"\n`,
     '.github/workflows/deploy.yml': GHA_ECS_DEPLOY,
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
@@ -843,13 +901,14 @@ metadata:
 
 function gcpCloudRunBase(): BaseFileMap {
   return {
-    'terraform/versions.tf': TF_GCP_VERSIONS,
-    'terraform/variables.tf': TF_GCP_VARIABLES,
-    'terraform/main.tf': TF_PLACEHOLDER('Cloud Run + Artifact Registry (construct image URL; no repository_url)'),
-    'terraform/network.tf': TF_PLACEHOLDER('VPC + private service networking for Cloud SQL'),
-    'terraform/database.tf': TF_PLACEHOLDER('Cloud SQL (deletion_protection; private IP complete)'),
-    'terraform/iam.tf': TF_PLACEHOLDER('Service accounts + IAM (single data.google_project)'),
-    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
+    'terraform/versions.tf': TF_CR_VERSIONS,
+    'terraform/variables.tf': TF_CR_VARIABLES,
+    'terraform/main.tf': TF_CR_MAIN,
+    'terraform/network.tf': TF_CR_NETWORK,
+    'terraform/database.tf': TF_CR_DATABASE,
+    'terraform/cloudrun.tf': TF_CR_CLOUDRUN,
+    'terraform/outputs.tf': TF_CR_OUTPUTS,
+    'environments/staging.tfvars': `region = "us-central1"\nenvironment = "staging"\n# project_id = "YOUR_GCP_PROJECT"\n`,
     '.gitlab-ci.yml': GITLAB_CI,
     Dockerfile: PYTHON_DOCKERFILE,
     'requirements.txt': FASTAPI_REQUIREMENTS,
@@ -860,15 +919,14 @@ function gcpCloudRunBase(): BaseFileMap {
 
 function azureContainerAppsBase(): BaseFileMap {
   return {
-    'terraform/versions.tf': TF_AZURE_VERSIONS,
-    'terraform/variables.tf': TF_AZURE_VARIABLES,
-    'terraform/main.tf': TF_PLACEHOLDER('Resource group'),
-    'terraform/network.tf': TF_PLACEHOLDER('VNet / subnets'),
-    'terraform/database.tf': TF_PLACEHOLDER('PostgreSQL Flexible Server'),
-    'terraform/key_vault.tf': TF_PLACEHOLDER('Key Vault'),
-    'terraform/identity.tf': TF_PLACEHOLDER('Managed identity'),
-    'terraform/container_apps.tf': TF_PLACEHOLDER('Container Apps environment + app'),
-    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
+    'terraform/versions.tf': TF_ACA_VERSIONS,
+    'terraform/variables.tf': TF_ACA_VARIABLES,
+    'terraform/main.tf': TF_ACA_MAIN,
+    'terraform/network.tf': TF_ACA_NETWORK,
+    'terraform/database.tf': TF_ACA_DATABASE,
+    'terraform/container_apps.tf': TF_ACA_APP,
+    'terraform/outputs.tf': TF_ACA_OUTPUTS,
+    'environments/staging.tfvars': `location = "eastus"\nenvironment = "staging"\n`,
     'azure-pipelines.yml': AZURE_PIPELINE,
     Dockerfile: GO_DOCKERFILE,
     'go.mod': GO_MOD,
@@ -880,25 +938,16 @@ function azureContainerAppsBase(): BaseFileMap {
 
 function oracleOkeBase(): BaseFileMap {
   return {
-    'terraform/versions.tf': TF_OCI_VERSIONS,
-    'terraform/variables.tf': TF_OCI_VARIABLES,
-    'terraform/main.tf': TF_PLACEHOLDER('OKE cluster + node pool'),
-    'terraform/network.tf': TF_PLACEHOLDER('VCN / NSGs'),
-    'terraform/iam.tf': TF_PLACEHOLDER('Dynamic groups / policies'),
-    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
-    '.github/workflows/deploy.yml': `name: Deploy
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Note
-        run: |
-          echo "Configure OCI CLI + kubectl against OKE, then helm upgrade."
-`,
+    'terraform/versions.tf': TF_OKE_VERSIONS,
+    'terraform/variables.tf': TF_OKE_VARIABLES,
+    'terraform/network.tf': TF_OKE_NETWORK,
+    'terraform/oke.tf': TF_OKE_CLUSTER,
+    'terraform/outputs.tf': TF_OKE_OUTPUTS,
+    'environments/staging.tfvars': `region = "ap-mumbai-1"\nenvironment = "staging"\n# compartment_ocid = "ocid1.compartment..."\n# tenancy_ocid = "ocid1.tenancy..."\n`,
+    '.github/workflows/deploy.yml': GHA_EKS_DEPLOY.replace(/EKS_/g, 'OKE_').replace(
+      /eks update-kubeconfig[\s\S]*?\n/,
+      'echo "Configure oci ce cluster create-kubeconfig"\n'
+    ),
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
     'app/package-lock.json': EXPRESS_PACKAGE_LOCK,
@@ -916,24 +965,17 @@ jobs:
 
 function azureAksBase(): BaseFileMap {
   return {
-    'terraform/versions.tf': TF_AZURE_VERSIONS,
-    'terraform/variables.tf': TF_AZURE_VARIABLES,
-    'terraform/main.tf': TF_PLACEHOLDER('AKS cluster'),
-    'terraform/network.tf': TF_PLACEHOLDER('VNet / subnets for AKS'),
-    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
-    '.github/workflows/deploy.yml': `name: Deploy
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Note
-        run: |
-          echo "az aks get-credentials + helm upgrade --install"
-`,
+    'terraform/versions.tf': TF_AKS_VERSIONS,
+    'terraform/variables.tf': TF_AKS_VARIABLES,
+    'terraform/main.tf': TF_AKS_MAIN,
+    'terraform/network.tf': TF_AKS_NETWORK,
+    'terraform/aks.tf': TF_AKS_CLUSTER,
+    'terraform/outputs.tf': TF_AKS_OUTPUTS,
+    'environments/staging.tfvars': `location = "eastus"\nenvironment = "staging"\n`,
+    '.github/workflows/deploy.yml': GHA_EKS_DEPLOY.replace(/EKS_/g, 'AKS_').replace(
+      /aws eks update-kubeconfig[\s\S]*?\n/,
+      'echo "az aks get-credentials"\n'
+    ),
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
     'app/package-lock.json': EXPRESS_PACKAGE_LOCK,
@@ -951,25 +993,17 @@ jobs:
 
 function gcpGkeBase(): BaseFileMap {
   return {
-    'terraform/versions.tf': TF_GCP_VERSIONS,
-    'terraform/variables.tf': TF_GCP_VARIABLES,
-    'terraform/main.tf': TF_PLACEHOLDER('GKE cluster (prefer Autopilot or release_channel — not both)'),
-    'terraform/network.tf': TF_PLACEHOLDER('VPC for GKE'),
-    'terraform/iam.tf': TF_PLACEHOLDER('Workload Identity / GSA (single data.google_project)'),
-    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
-    '.github/workflows/deploy.yml': `name: Deploy
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Note
-        run: |
-          echo "gcloud container clusters get-credentials + helm upgrade --install"
-`,
+    'terraform/versions.tf': TF_GKE_VERSIONS,
+    'terraform/variables.tf': TF_GKE_VARIABLES,
+    'terraform/main.tf': TF_GKE_MAIN,
+    'terraform/network.tf': TF_GKE_NETWORK,
+    'terraform/gke.tf': TF_GKE_CLUSTER,
+    'terraform/outputs.tf': TF_GKE_OUTPUTS,
+    'environments/staging.tfvars': `region = "us-central1"\nenvironment = "staging"\n# project_id = "YOUR_GCP_PROJECT"\n`,
+    '.github/workflows/deploy.yml': GHA_EKS_DEPLOY.replace(/EKS_/g, 'GKE_').replace(
+      /aws eks update-kubeconfig[\s\S]*?\n/,
+      'echo "gcloud container clusters get-credentials"\n'
+    ),
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
     'app/package-lock.json': EXPRESS_PACKAGE_LOCK,
@@ -1005,6 +1039,10 @@ export interface MergeLockedBaseOptions {
   fillMissing?: boolean;
   /** Overwrite fragile stub paths even if the model emitted them (default true). */
   forceStubs?: boolean;
+  /** Cloud/orchestrator/CI presets — used with scaffoldOptions. */
+  presets?: Presets;
+  /** Interview answers mapped onto locked templates. */
+  scaffoldOptions?: ScaffoldOptions;
 }
 
 /**
@@ -1069,11 +1107,19 @@ export function mergeLockedBaseFiles(
       byPath.delete(p);
       seeded.push(`removed:${p}`);
     }
-    // Drop empty-module stubs from older sanitize passes
     for (const p of [...byPath.keys()]) {
       if (p.includes('_stackforge_empty')) byPath.delete(p);
     }
   }
 
-  return { files: Array.from(byPath.values()), seeded };
+  let merged = Array.from(byPath.values());
+  if (options.scaffoldOptions && options.presets) {
+    merged = applyScaffoldOptions(
+      merged,
+      options.presets,
+      options.scaffoldOptions
+    );
+  }
+
+  return { files: merged, seeded };
 }

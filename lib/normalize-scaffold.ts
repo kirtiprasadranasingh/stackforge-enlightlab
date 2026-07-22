@@ -1,9 +1,12 @@
-import type { GeneratedFile } from '@/types';
-import { PATH_ALIASES } from '@/lib/scaffold-spec';
-import { detectProfileFromGeneratedFiles } from '@/lib/scaffold-spec';
+import type { GeneratedFile, Presets } from '@/types';
+import {
+  PATH_ALIASES,
+  detectProfileFromGeneratedFiles,
+} from '@/lib/scaffold-spec';
 import { getLanguageFromPath, validateFilePath } from '@/lib/utils';
 import { sanitizeTerraformForValidate } from '@/lib/terraform-validate-repair';
 import { mergeLockedBaseFiles } from '@/lib/scaffold-base-files';
+import { parseScaffoldOptions } from '@/lib/scaffold-options';
 
 /** Map alternate model paths → canonical PRD paths */
 const CANONICAL_PATH: Record<string, string> = {};
@@ -1720,9 +1723,44 @@ export function normalizeScaffoldFiles(
   // Optimal fix: replace model Terraform with locked profile templates
   const profile = detectProfileFromGeneratedFiles(Array.from(byPath.values()));
   if (profile) {
+    const presets: Presets = {
+      cloud:
+        profile.id.startsWith('aws')
+          ? 'aws'
+          : profile.id.startsWith('gcp')
+            ? 'gcp'
+            : profile.id.startsWith('azure')
+              ? 'azure'
+              : 'oracle',
+      orchestrator: profile.id.includes('eks')
+        ? 'eks'
+        : profile.id.includes('ecs')
+          ? 'ecs'
+          : profile.id.includes('gke')
+            ? 'gke'
+            : profile.id.includes('aks')
+              ? 'aks'
+              : profile.id.includes('cloudrun')
+                ? 'cloud-run'
+                : profile.id.includes('container-apps')
+                  ? 'container-apps'
+                  : 'oke',
+      ci: profile.id.includes('cloudrun')
+        ? 'gitlab-ci'
+        : profile.id.includes('container-apps')
+          ? 'azure-devops'
+          : 'github-actions',
+    };
+    const textBlob = Array.from(byPath.values())
+      .map((f) => f.content)
+      .join('\n')
+      .slice(0, 20000);
+    const scaffoldOptions = parseScaffoldOptions(textBlob, presets);
     const locked = mergeLockedBaseFiles(Array.from(byPath.values()), profile, {
       fillMissing: true,
       forceStubs: true,
+      presets,
+      scaffoldOptions,
     });
     byPath.clear();
     for (const f of locked.files) byPath.set(f.path, f);

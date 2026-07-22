@@ -1,0 +1,208 @@
+/** Locked GCP Cloud Run + optional Cloud SQL Postgres/MySQL. */
+export const TF_CR_VERSIONS = `terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+`;
+
+export const TF_CR_VARIABLES = `variable "project_id" {
+  type = string
+}
+variable "region" {
+  type    = string
+  default = "us-central1"
+}
+variable "service_name" {
+  type    = string
+  default = "stackforge-api"
+}
+variable "environment" {
+  type    = string
+  default = "staging"
+}
+variable "image_tag" {
+  type    = string
+  default = "latest"
+}
+variable "enable_database" {
+  type    = bool
+  default = true
+}
+variable "db_engine" {
+  type    = string
+  default = "postgres"
+}
+variable "db_ha" {
+  type    = bool
+  default = true
+}
+`;
+
+export const TF_CR_MAIN = `resource "google_project_service" "apis" {
+  for_each = toset([
+    "run.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "sqladmin.googleapis.com",
+    "secretmanager.googleapis.com",
+    "vpcaccess.googleapis.com",
+    "servicenetworking.googleapis.com",
+  ])
+  project            = var.project_id
+  service            = each.value
+  disable_on_destroy = false
+}
+
+resource "random_password" "db" {
+  count   = var.enable_database ? 1 : 0
+  length  = 20
+  special = false
+}
+
+resource "google_artifact_registry_repository" "docker" {
+  location      = var.region
+  repository_id = "\${var.service_name}-\${var.environment}"
+  format        = "DOCKER"
+  depends_on    = [google_project_service.apis]
+}
+
+resource "google_service_account" "runtime" {
+  account_id   = substr("\${var.service_name}-\${var.environment}", 0, 28)
+  display_name = "Cloud Run runtime"
+}
+
+locals {
+  image_url = "\${var.region}-docker.pkg.dev/\${var.project_id}/\${google_artifact_registry_repository.docker.repository_id}/app:\${var.image_tag}"
+}
+`;
+
+export const TF_CR_NETWORK = `resource "google_compute_network" "vpc" {
+  name                    = "\${var.service_name}-\${var.environment}-vpc"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_global_address" "private_ip" {
+  count         = var.enable_database ? 1 : 0
+  name          = "\${var.service_name}-\${var.environment}-sql-range"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 16
+  network       = google_compute_network.vpc.id
+}
+
+resource "google_service_networking_connection" "private_vpc" {
+  count                   = var.enable_database ? 1 : 0
+  network                 = google_compute_network.vpc.id
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.private_ip[0].name]
+  depends_on              = [google_project_service.apis]
+}
+
+resource "google_vpc_access_connector" "connector" {
+  name          = substr("\${var.service_name}-\${var.environment}-conn", 0, 25)
+  region        = var.region
+  network       = google_compute_network.vpc.name
+  ip_cidr_range = "10.8.0.0/28"
+  depends_on    = [google_project_service.apis]
+}
+`;
+
+export const TF_CR_DATABASE = `resource "google_sql_database_instance" "main" {
+  count            = var.enable_database ? 1 : 0
+  name             = "\${var.service_name}-\${var.environment}-sql"
+  region           = var.region
+  database_version = var.db_engine == "mysql" ? "MYSQL_8_0" : "POSTGRES_15"
+  deletion_protection = false
+
+  settings {
+    tier              = "db-custom-1-3840"
+    availability_type = var.db_ha ? "REGIONAL" : "ZONAL"
+    backup_configuration {
+      enabled = true
+    }
+    ip_configuration {
+      ipv4_enabled    = false
+      private_network = google_compute_network.vpc.id
+    }
+  }
+
+  depends_on = [google_service_networking_connection.private_vpc]
+}
+
+resource "google_sql_database" "app" {
+  count    = var.enable_database ? 1 : 0
+  name     = "appdb"
+  instance = google_sql_database_instance.main[0].name
+}
+
+resource "google_sql_user" "app" {
+  count    = var.enable_database ? 1 : 0
+  name     = "appuser"
+  instance = google_sql_database_instance.main[0].name
+  password = random_password.db[0].result
+}
+`;
+
+export const TF_CR_CLOUDRUN = `resource "google_cloud_run_v2_service" "app" {
+  name     = "\${var.service_name}-\${var.environment}"
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL"
+
+  template {
+    service_account = google_service_account.runtime.email
+    scaling {
+      min_instance_count = 1
+      max_instance_count = 10
+    }
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = "PRIVATE_RANGES_ONLY"
+    }
+    containers {
+      image = local.image_url
+      ports {
+        container_port = 8080
+      }
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "public" {
+  name     = google_cloud_run_v2_service.app.name
+  location = google_cloud_run_v2_service.app.location
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+`;
+
+export const TF_CR_OUTPUTS = `output "cloud_run_uri" {
+  value = google_cloud_run_v2_service.app.uri
+}
+output "artifact_registry" {
+  value = local.image_url
+}
+output "sql_connection_name" {
+  value = try(google_sql_database_instance.main[0].connection_name, null)
+}
+`;

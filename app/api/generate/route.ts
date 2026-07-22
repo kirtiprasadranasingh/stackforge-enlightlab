@@ -38,6 +38,7 @@ import {
   parseFileManifestFromPlan,
 } from '@/lib/scaffold-spec';
 import { mergeLockedBaseFiles, shouldForceLockPath } from '@/lib/scaffold-base-files';
+import { parseScaffoldOptions } from '@/lib/scaffold-options';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
 import path from 'path';
@@ -312,6 +313,13 @@ export async function POST(request: NextRequest) {
     } = validation.data;
     const prompt = sanitizeInput(rawPrompt);
     const presets = inferPresetsFromPrompt(prompt, rawPresets as Presets);
+    const optionsText = [
+      prompt,
+      approvedPlan || '',
+      priorPlan || '',
+      ...history.map((h: { content?: string }) => h.content || ''),
+    ].join('\n');
+    const scaffoldOptions = parseScaffoldOptions(optionsText, presets);
     const lowerPrompt = prompt.toLowerCase().trim();
     let phase: WorkflowPhase = requestedPhase || 'generate';
 
@@ -775,6 +783,8 @@ Always format your response by wrapping the chat reply in the following markers:
               const merged = mergeLockedBaseFiles(collectedFiles, profile, {
                 fillMissing: true,
                 forceStubs: true,
+                presets,
+                scaffoldOptions,
               });
               if (merged.seeded.length > 0) {
                 controller.enqueue(
@@ -835,6 +845,8 @@ Always format your response by wrapping the chat reply in the following markers:
                     const rem = mergeLockedBaseFiles(collectedFiles, profile, {
                       fillMissing: false,
                       forceStubs: true,
+                      presets,
+                      scaffoldOptions,
                     });
                     for (const path of rem.seeded) {
                       const file = rem.files.find((f) => f.path === path);
@@ -970,6 +982,8 @@ Always format your response by wrapping the chat reply in the following markers:
                   // Never fill missing paths with placeholders on repair turns.
                   fillMissing: !isFollowUp,
                   forceStubs: true,
+                  presets,
+                  scaffoldOptions,
                 }).files;
                 finalized = normalizeScaffoldFiles(finalized);
               }
@@ -1149,6 +1163,8 @@ ${failLines.join('\n')}`;
                       relocked = mergeLockedBaseFiles(relocked, repairProfile, {
                         fillMissing: false,
                         forceStubs: true,
+                        presets,
+                        scaffoldOptions,
                       }).files;
                       relocked = normalizeScaffoldFiles(relocked);
                     }
