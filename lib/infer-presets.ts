@@ -156,9 +156,12 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
 
   if (!overrides.orchestrator) {
     if (namedCloud && cloud === 'azure') {
-      if (/container\s*apps?/.test(t) || /serverless\s*containers?/.test(t)) {
+      // AKS / Kubernetes must win over a generic "container" word and UI defaults.
+      if (/\baks\b/.test(t) || /azure\s+kubernetes/.test(t) || /kubernetes\s+service/.test(t)) {
+        orchestrator = 'aks';
+      } else if (/container\s*apps?/.test(t) || /serverless\s*containers?/.test(t)) {
         orchestrator = 'container-apps';
-      } else if (/\baks\b/.test(t) || /kubernetes/.test(t) || /\bk8s\b/.test(t)) {
+      } else if (/kubernetes/.test(t) || /\bk8s\b/.test(t)) {
         orchestrator = 'aks';
       } else if (orchestrator !== 'aks' && orchestrator !== 'container-apps') {
         orchestrator = 'container-apps';

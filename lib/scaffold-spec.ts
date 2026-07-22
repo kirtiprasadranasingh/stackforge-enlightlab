@@ -184,6 +184,8 @@ export const AZURE_AKS_HELM_FILES = [
   'terraform/variables.tf',
   'terraform/main.tf',
   'terraform/network.tf',
+  'terraform/aks.tf',
+  'terraform/database.tf',
   'terraform/outputs.tf',
   '.github/workflows/deploy.yml',
   'app/Dockerfile',
@@ -278,6 +280,16 @@ export function detectScaffoldProfile(
     );
 
   if (hasAzureOverride) {
+    // Explicit AKS / Kubernetes in the prompt always wins over a leftover
+    // Container Apps UI preset (common cause of hybrid ACA+Helm scaffolds).
+    if (
+      presets.orchestrator === 'aks' ||
+      /\baks\b/.test(t) ||
+      /azure\s+kubernetes/.test(t) ||
+      /kubernetes\s+service/.test(t)
+    ) {
+      return AZURE_AKS_HELM_PROFILE;
+    }
     if (
       presets.orchestrator === 'container-apps' ||
       /container\s*apps?/.test(t)

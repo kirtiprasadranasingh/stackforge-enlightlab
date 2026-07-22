@@ -1649,15 +1649,17 @@ export function normalizeScaffoldFile(
 /** Merge duplicates — later canonical path wins */
 export function normalizeScaffoldFiles(
   files: Array<Pick<GeneratedFile, 'path' | 'content'> & Partial<GeneratedFile>>,
-  preferred?: {
+    preferred?: {
     profile?: import('@/lib/scaffold-spec').ScaffoldProfile | null;
     presets?: Presets;
     scaffoldOptions?: import('@/lib/scaffold-options').ScaffoldOptions;
     /**
-     * When false, skip locked-profile merge (validate-scaffold path).
-     * Prevents wiping interview-applied tfvars / CI with base defaults.
+     * When false, skip locked-profile merge (legacy). Prefer terraformOnly
+     * on validate so broken model TF is replaced without wiping interview CI.
      */
     applyLockedProfile?: boolean;
+    /** Only force-lock terraform/*.tf when merging the profile base. */
+    terraformOnly?: boolean;
   }
 ): GeneratedFile[] {
   const byPath = new Map<string, GeneratedFile>();
@@ -1767,6 +1769,7 @@ export function normalizeScaffoldFiles(
     const locked = mergeLockedBaseFiles(Array.from(byPath.values()), profile, {
       fillMissing: true,
       forceStubs: true,
+      terraformOnly: preferred?.terraformOnly === true,
       presets,
       // Only apply when caller supplied interview-derived options.
       scaffoldOptions: preferred?.scaffoldOptions,
@@ -1939,6 +1942,22 @@ function stripCrossCloudBleed(byPath: Map<string, GeneratedFile>): void {
   if (isEks) {
     for (const p of [...byPath.keys()]) {
       if (/(^|\/)ecs\.tf$/.test(p)) byPath.delete(p);
+    }
+  }
+
+  // AKS Helm: drop Container Apps bleed (common when UI preset was ACA).
+  const isAks =
+    /azurerm_kubernetes_cluster/.test(tfBlob) ||
+    ([...byPath.keys()].some((p) => p.startsWith('charts/')) &&
+      /azurerm_/.test(tfBlob) &&
+      !/aws_|google_/.test(tfBlob));
+  if (isAks) {
+    for (const p of [...byPath.keys()]) {
+      if (
+        /(^|\/)(container_apps|key_vault|keyvault|identity)\.tf$/.test(p)
+      ) {
+        byPath.delete(p);
+      }
     }
   }
 }

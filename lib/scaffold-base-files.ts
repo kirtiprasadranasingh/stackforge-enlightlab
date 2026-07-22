@@ -65,6 +65,7 @@ import {
   TF_AKS_MAIN,
   TF_AKS_NETWORK,
   TF_AKS_CLUSTER,
+  TF_AKS_DATABASE,
   TF_AKS_OUTPUTS,
 } from '@/lib/locked-tf-azure-aks';
 import {
@@ -989,6 +990,7 @@ function azureAksBase(): BaseFileMap {
     'terraform/main.tf': TF_AKS_MAIN,
     'terraform/network.tf': TF_AKS_NETWORK,
     'terraform/aks.tf': TF_AKS_CLUSTER,
+    'terraform/database.tf': TF_AKS_DATABASE,
     'terraform/outputs.tf': TF_AKS_OUTPUTS,
     'environments/staging.tfvars': `location = "eastus"\nenvironment = "staging"\n`,
     '.github/workflows/deploy.yml': GHA_EKS_DEPLOY.replace(/EKS_/g, 'AKS_').replace(
@@ -1059,6 +1061,11 @@ export interface MergeLockedBaseOptions {
   fillMissing?: boolean;
   /** Overwrite fragile stub paths even if the model emitted them (default true). */
   forceStubs?: boolean;
+  /**
+   * When true, only force-lock terraform/*.tf (used by validate-scaffold so
+   * interview CI/runtime choices are not reverted to profile defaults).
+   */
+  terraformOnly?: boolean;
   /** Cloud/orchestrator/CI presets — used with scaffoldOptions. */
   presets?: Presets;
   /** Interview answers mapped onto locked templates. */
@@ -1080,6 +1087,7 @@ export function mergeLockedBaseFiles(
 ): { files: GeneratedFile[]; seeded: string[] } {
   const fillMissing = options.fillMissing !== false;
   const forceStubs = options.forceStubs !== false;
+  const terraformOnly = options.terraformOnly === true;
   const base = getProfileBaseFiles(profile.id);
   if (Object.keys(base).length === 0) {
     return { files, seeded: [] };
@@ -1101,7 +1109,11 @@ export function mergeLockedBaseFiles(
 
   for (const [path, content] of Object.entries(base)) {
     const exists = byPath.has(path);
-    const shouldForce = forceStubs && shouldForceLockPath(path);
+    const isTf = path.startsWith('terraform/') && path.endsWith('.tf');
+    const shouldForce =
+      forceStubs &&
+      shouldForceLockPath(path) &&
+      (!terraformOnly || isTf);
     const shouldFill = missing.includes(path) || (!exists && fillMissing);
     const existing = byPath.get(path);
     const emptyExisting = exists && !(existing?.content || '').trim();

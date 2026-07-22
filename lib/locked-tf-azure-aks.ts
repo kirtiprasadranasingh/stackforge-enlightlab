@@ -1,4 +1,4 @@
-/** Locked Azure AKS + optional PostgreSQL. */
+/** Locked Azure AKS + optional PostgreSQL (Helm chart separate). */
 export const TF_AKS_VERSIONS = `terraform {
   required_version = ">= 1.5.0"
   required_providers {
@@ -37,6 +37,10 @@ variable "node_count" {
 variable "enable_database" {
   type    = bool
   default = true
+}
+variable "availability_zones" {
+  type    = list(string)
+  default = ["1", "2"]
 }
 `;
 
@@ -78,6 +82,7 @@ export const TF_AKS_CLUSTER = `resource "azurerm_kubernetes_cluster" "main" {
     node_count     = var.node_count
     vm_size        = "Standard_D2s_v3"
     vnet_subnet_id = azurerm_subnet.nodes.id
+    zones          = var.availability_zones
   }
 
   identity {
@@ -90,8 +95,9 @@ export const TF_AKS_CLUSTER = `resource "azurerm_kubernetes_cluster" "main" {
     dns_service_ip = "10.0.0.10"
   }
 }
+`;
 
-resource "azurerm_postgresql_flexible_server" "main" {
+export const TF_AKS_DATABASE = `resource "azurerm_postgresql_flexible_server" "main" {
   count                  = var.enable_database ? 1 : 0
   name                   = "\${var.project_name}-\${var.environment}-pg"
   resource_group_name    = azurerm_resource_group.main.name
@@ -101,7 +107,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   administrator_password = random_password.db[0].result
   sku_name               = "GP_Standard_D2s_v3"
   storage_mb             = 32768
-  zone                   = "1"
+  zone                   = var.availability_zones[0]
   public_network_access_enabled = false
 }
 `;

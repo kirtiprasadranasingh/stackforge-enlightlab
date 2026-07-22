@@ -70,10 +70,12 @@ export async function POST(request: NextRequest) {
 
   const { check, files } = parsed.data;
   const checkId = check as ScaffoldCheckId;
-  // Do NOT re-lock with default interview options — that wipes Redis/scale/envs
-  // the generate path already applied. Only light sanitize for validate tools.
+  // Re-lock Terraform templates for the detected profile so model/hybrid
+  // refs cannot fail validate — but do NOT re-apply default interview options
+  // (preserves Jenkins / Redis tfvars / runtime from generate).
   const normalizedFiles = normalizeScaffoldFiles(files, {
-    applyLockedProfile: false,
+    applyLockedProfile: true,
+    terraformOnly: true,
   });
 
   // Free disk from prior runs before terraform init downloads providers again.
