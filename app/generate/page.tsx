@@ -484,7 +484,9 @@ export default function GeneratePage() {
             ? options?.priorPlan || awaitingApproval
               ? 'Revising plan…'
               : 'Planning…'
-            : 'Writing files…'
+            : Boolean(options?.approvedPlan) || startFresh || !hasFiles
+              ? 'Writing files…'
+              : 'Working…'
       );
       setError(null);
       setWarnings([]);

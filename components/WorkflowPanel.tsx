@@ -66,6 +66,14 @@ export function WorkflowPanel({
   const draftingPlan = isGenerating && phase === 'plan';
   const writingCode = isGenerating && phase === 'generate';
   const planReady = Boolean(awaitingApproval && pendingPlan && !isGenerating);
+  // Hide checks terminal while scaffold files are streaming (approve → generate).
+  // Chat/repair with status "Working…" keeps the panel visible.
+  const streamingScaffoldFiles =
+    writingCode &&
+    (/^Writing\b/i.test(generationStatus || '') ||
+      /writing files/i.test(generationStatus || '') ||
+      /streaming files/i.test(generationStatus || ''));
+  const showChecksPanel = hasFiles && !streamingScaffoldFiles;
   const [checkStatus, setCheckStatus] = useState<
     'idle' | 'running' | 'ok' | 'fail'
   >('idle');
@@ -132,17 +140,17 @@ export function WorkflowPanel({
               generationStatus={generationStatus}
             />
           </div>
-          {/* Keep checks terminal mounted during chat/generate so it does not disappear */}
-          <div className={writingCode ? 'opacity-70 pointer-events-none' : ''}>
+          {/* Checks terminal only after file generation finishes — not while streaming */}
+          {showChecksPanel ? (
             <ScaffoldChecksPanel
               files={files}
               isGenerating={isGenerating}
-              autoRun={!writingCode}
-              onFixFailures={writingCode ? undefined : onFixFailures}
+              autoRun
+              onFixFailures={onFixFailures}
               onNormalizedFiles={onNormalizedFiles}
               onStatusChange={setCheckStatus}
             />
-          </div>
+          ) : null}
         </div>
       </div>
     );
