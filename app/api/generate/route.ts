@@ -37,7 +37,7 @@ import {
   getMissingPaths,
   parseFileManifestFromPlan,
 } from '@/lib/scaffold-spec';
-import { mergeLockedBaseFiles, FORCE_STUB_PATHS } from '@/lib/scaffold-base-files';
+import { mergeLockedBaseFiles, shouldForceLockPath } from '@/lib/scaffold-base-files';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
 import path from 'path';
@@ -948,7 +948,7 @@ Always format your response by wrapping the chat reply in the following markers:
                     const rejectLocked =
                       isValidationFixPrompt(prompt) || isFollowUp;
                     for (const f of collectedFiles) {
-                      if (rejectLocked && FORCE_STUB_PATHS.has(f.path)) continue;
+                      if (rejectLocked && shouldForceLockPath(f.path)) continue;
                       byPath.set(f.path, f);
                     }
                     return Array.from(byPath.values());
@@ -1130,7 +1130,7 @@ ${failLines.join('\n')}`;
 
                   if (correctedFiles.length > 0) {
                     for (const file of correctedFiles) {
-                      if (FORCE_STUB_PATHS.has(file.path)) continue;
+                      if (shouldForceLockPath(file.path)) continue;
                       const idx = currentFiles.findIndex((f) => f.path === file.path);
                       if (idx !== -1) {
                         currentFiles[idx] = file;

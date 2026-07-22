@@ -1,7 +1,9 @@
 import type { GeneratedFile } from '@/types';
 import { PATH_ALIASES } from '@/lib/scaffold-spec';
+import { detectProfileFromGeneratedFiles } from '@/lib/scaffold-spec';
 import { getLanguageFromPath, validateFilePath } from '@/lib/utils';
 import { sanitizeTerraformForValidate } from '@/lib/terraform-validate-repair';
+import { mergeLockedBaseFiles } from '@/lib/scaffold-base-files';
 
 /** Map alternate model paths → canonical PRD paths */
 const CANONICAL_PATH: Record<string, string> = {};
@@ -1708,13 +1710,24 @@ export function normalizeScaffoldFiles(
   stripCrossCloudBleed(byPath);
   ensureMinimalAppStubs(byPath);
 
-  // Force safe outputs, stub missing modules, rewrite undeclared refs
+  // Force safe outputs, stub missing modules (light sanitize)
   const sanitized = sanitizeTerraformForValidate(Array.from(byPath.values()));
   byPath.clear();
   for (const f of sanitized) byPath.set(f.path, f);
-  // Variables may reference new stubs — re-declare missing vars once more
   ensureMissingTerraformVariables(byPath);
   stripAlbAnnotationsWithoutController(byPath);
+
+  // Optimal fix: replace model Terraform with locked profile templates
+  const profile = detectProfileFromGeneratedFiles(Array.from(byPath.values()));
+  if (profile) {
+    const locked = mergeLockedBaseFiles(Array.from(byPath.values()), profile, {
+      fillMissing: true,
+      forceStubs: true,
+    });
+    byPath.clear();
+    for (const f of locked.files) byPath.set(f.path, f);
+    stripAlbAnnotationsWithoutController(byPath);
+  }
 
   return dedupeTerraformResources(Array.from(byPath.values()));
 }

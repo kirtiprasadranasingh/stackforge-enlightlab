@@ -285,6 +285,75 @@ export function detectScaffoldProfile(
 }
 
 /**
+ * Infer locked profile from generated files (used on validate / normalize
+ * when we must replace model Terraform with the validated template).
+ */
+export function detectProfileFromGeneratedFiles(
+  files: Array<{ path: string; content: string }>
+): ScaffoldProfile | null {
+  const paths = files.map((f) => f.path.replace(/\\/g, '/'));
+  const pathBlob = paths.join('\n');
+  const tfBlob = files
+    .filter((f) => f.path.replace(/\\/g, '/').endsWith('.tf'))
+    .map((f) => f.content)
+    .join('\n');
+  const hasCharts = paths.some((p) => p.startsWith('charts/'));
+
+  if (
+    /oracle\/oci|resource\s+"oci_|provider\s+"oci"/.test(tfBlob) ||
+    /tenancy_ocid|compartment_ocid/.test(tfBlob)
+  ) {
+    return ORACLE_OKE_HELM_PROFILE;
+  }
+
+  if (
+    /hashicorp\/azurerm|provider\s+"azurerm"|azurerm_/.test(tfBlob) &&
+    (hasCharts || /azurerm_kubernetes_cluster/.test(tfBlob))
+  ) {
+    return AZURE_AKS_HELM_PROFILE;
+  }
+
+  if (
+    /azurerm_container_app|container_apps\.tf/.test(tfBlob) ||
+    pathBlob.includes('azure-pipelines.yml')
+  ) {
+    return AZURE_GO_CONTAINER_APPS_PROFILE;
+  }
+
+  if (
+    /hashicorp\/google|provider\s+"google"|google_cloud_run|google_container_cluster/.test(
+      tfBlob
+    )
+  ) {
+    if (hasCharts || /google_container_cluster/.test(tfBlob)) {
+      return GCP_GKE_HELM_PROFILE;
+    }
+    return GCP_FASTAPI_CLOUDRUN_PROFILE;
+  }
+
+  if (
+    /hashicorp\/aws|provider\s+"aws"|resource\s+"aws_/.test(tfBlob) ||
+    pathBlob.includes('terraform/')
+  ) {
+    if (
+      hasCharts ||
+      /aws_eks_cluster|aws_eks_node_group|aws_eks_fargate/.test(tfBlob)
+    ) {
+      return AWS_EKS_HELM_PROFILE;
+    }
+    if (/aws_ecs_service|aws_ecs_cluster|ecs\.tf/.test(tfBlob + pathBlob)) {
+      return AWS_ECS_EXPRESS_PROFILE;
+    }
+    // Default AWS + charts already handled; bare AWS → ECS profile (common QA)
+    if (!hasCharts) return AWS_ECS_EXPRESS_PROFILE;
+    return AWS_EKS_HELM_PROFILE;
+  }
+
+  if (hasCharts) return AWS_EKS_HELM_PROFILE;
+  return null;
+}
+
+/**
  * Extract concrete file paths from an approved plan's File manifest section.
  * Supports bullets, `path: description`, and bare relative paths.
  */
