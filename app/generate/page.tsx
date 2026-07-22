@@ -27,6 +27,10 @@ import {
   formatInterviewAnswersForPlan,
   type InterviewChoiceItem,
 } from '@/lib/interview-choices';
+import {
+  interviewAlreadyChoseCi,
+  isCiSystemQuestion,
+} from '@/lib/clarifying-questions';
 import { ConfirmedChoicesCard } from '@/components/ConfirmedChoicesCard';
 import { WorkflowPanel } from '@/components/WorkflowPanel';
 import { inferPresetsFromPrompt } from '@/lib/infer-presets';
@@ -891,7 +895,14 @@ export default function GeneratePage() {
   const submitClarifyingAnswers = useCallback(() => {
     if (isGenerating || pendingQuestions.length === 0) return;
 
-    const incomplete = pendingQuestions.some((_, index) => {
+    const incomplete = pendingQuestions.some((question, index) => {
+      // Already chose CI via "Change CI/CD: …" — don't require the later CI question
+      if (
+        isCiSystemQuestion(question) &&
+        interviewAlreadyChoseCi(questionAnswers)
+      ) {
+        return false;
+      }
       const answer = questionAnswers[index]?.trim() || '';
       if (!answer) return true;
       if (answer === 'Change the cloud') return true;

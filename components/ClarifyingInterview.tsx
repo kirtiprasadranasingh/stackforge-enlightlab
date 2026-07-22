@@ -7,6 +7,8 @@ import {
   adaptClarifyingQuestions,
   baseCloudFromSetupQuestion,
   cloudFromInterviewAnswer,
+  interviewAlreadyChoseCi,
+  isCiSystemQuestion,
   parseClarifyingQuestion,
 } from '@/lib/clarifying-questions';
 
@@ -208,17 +210,25 @@ export function ClarifyingInterview({
   const [step, setStep] = useState(0);
   const [isAdvancing, setIsAdvancing] = useState(false);
 
-  const effectiveQuestions = useMemo(
+  const adaptedQuestions = useMemo(
     () => adaptClarifyingQuestions(questions, answers),
     [questions, answers]
   );
 
-  if (!effectiveQuestions.length) return null;
+  // Skip the standalone CI question when the client already picked CI via
+  // "Change CI/CD: …" on the setup question (avoids asking twice).
+  const steps = useMemo(() => {
+    const skipCi = interviewAlreadyChoseCi(answers);
+    return adaptedQuestions
+      .map((question, sourceIndex) => ({ question, sourceIndex }))
+      .filter(({ question }) => !(skipCi && isCiSystemQuestion(question)));
+  }, [adaptedQuestions, answers]);
 
-  const currentIndex = Math.min(step, effectiveQuestions.length - 1);
-  const { prompt, options } = parseClarifyingQuestion(
-    effectiveQuestions[currentIndex]
-  );
+  if (!steps.length) return null;
+
+  const stepIndex = Math.min(step, steps.length - 1);
+  const currentIndex = steps[stepIndex].sourceIndex;
+  const { prompt, options } = parseClarifyingQuestion(steps[stepIndex].question);
   const currentAnswer = answers[currentIndex] || '';
   const { selectedOption, detail } = parseStructuredAnswer(currentAnswer, options);
   const { primary: followUpPrimary, hosting: followUpHosting } =
@@ -231,7 +241,7 @@ export function ClarifyingInterview({
 
   // Keep 'Change the hosting platform' within the cloud proposed in question 1
   // so we never mix, e.g., Oracle OKE compute with a Google Cloud SQL database.
-  const baseCloud = baseCloudFromSetupQuestion(effectiveQuestions[0]);
+  const baseCloud = baseCloudFromSetupQuestion(adaptedQuestions[0]);
   const hostingChangeOptions = baseCloud
     ? HOSTING_OPTIONS_BY_CLOUD[baseCloud]
     : ALL_HOSTING_OPTIONS;
@@ -287,10 +297,10 @@ export function ClarifyingInterview({
   })();
 
   const canContinue = answerComplete && !disabled && !isAdvancing;
-  const isLast = currentIndex >= effectiveQuestions.length - 1;
+  const isLast = stepIndex >= steps.length - 1;
 
-  const answeredCount = effectiveQuestions.reduce((count, question, index) => {
-    const answer = answers[index]?.trim() || '';
+  const answeredCount = steps.reduce((count, { question, sourceIndex }) => {
+    const answer = answers[sourceIndex]?.trim() || '';
     if (!answer) return count;
     const { options: questionOptions } = parseClarifyingQuestion(question);
     const parsed = parseStructuredAnswer(answer, questionOptions);
@@ -309,7 +319,7 @@ export function ClarifyingInterview({
   }, 0);
 
   const clearStaleRegionIfNeeded = (nextCloudAnswer: string) => {
-    const regionIndex = effectiveQuestions.findIndex((question) =>
+    const regionIndex = adaptedQuestions.findIndex((question) =>
       /^Where should we host it\?/i.test(question)
     );
     if (regionIndex < 0) return;
@@ -374,7 +384,7 @@ export function ClarifyingInterview({
 
     setIsAdvancing(true);
     window.setTimeout(() => {
-      setStep((value) => Math.min(value + 1, effectiveQuestions.length - 1));
+      setStep((value) => Math.min(value + 1, steps.length - 1));
       setIsAdvancing(false);
     }, 700);
   };
@@ -399,7 +409,7 @@ export function ClarifyingInterview({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 id="requirements-heading" className="text-xs font-bold text-gray-900">
-            Question {currentIndex + 1} of {effectiveQuestions.length}
+            Question {stepIndex + 1} of {steps.length}
           </h3>
           <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
             Choose one option. If you pick a change, we ask short follow-ups so the
@@ -407,7 +417,7 @@ export function ClarifyingInterview({
           </p>
         </div>
         <span className="shrink-0 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
-          {answeredCount}/{effectiveQuestions.length}
+          {answeredCount}/{steps.length}
         </span>
       </div>
 
@@ -415,7 +425,7 @@ export function ClarifyingInterview({
         <div
           className="h-full rounded-full bg-indigo-600 transition-all duration-300"
           style={{
-            width: `${((currentIndex + (answerComplete ? 1 : 0)) / effectiveQuestions.length) * 100}%`,
+            width: `${((stepIndex + (answerComplete ? 1 : 0)) / steps.length) * 100}%`,
           }}
         />
       </div>

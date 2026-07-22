@@ -203,6 +203,22 @@ export function adaptClarifyingQuestions(
   });
 }
 
+/** True when the client already picked CI via "Change CI/CD: …" on an earlier question. */
+export function interviewAlreadyChoseCi(
+  answers: Record<number, string>
+): boolean {
+  return Object.values(answers).some((raw) => {
+    const answer = (raw || '').trim();
+    if (!/^Change CI\/CD:\s*/i.test(answer)) return false;
+    const choice = answer.replace(/^Change CI\/CD:\s*/i, '').trim();
+    return Boolean(choice) && choice.toLowerCase() !== 'other';
+  });
+}
+
+export function isCiSystemQuestion(question: string): boolean {
+  return /^Which CI\/CD system should we use\?/i.test(question.trim());
+}
+
 /** Expand interview picks into explicit requirements for the plan model. */
 export function formatInterviewAnswerForPlan(rawAnswer: string): string {
   const answer = rawAnswer.trim().replace(/\.+$/, '').trim();
