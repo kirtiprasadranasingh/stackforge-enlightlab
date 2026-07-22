@@ -144,3 +144,7 @@ output "sql_connection_name" {
   value = try(google_sql_database_instance.main[0].connection_name, null)
 }
 `;
+
+export const TF_GKE_IAM = `# Workload Identity / CI deployer bindings — extend per environment.
+# Autopilot GKE uses the runtime SA from the Helm chart serviceAccount.
+`;

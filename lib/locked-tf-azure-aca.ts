@@ -38,6 +38,23 @@ variable "db_ha" {
   type    = bool
   default = true
 }
+variable "ingress_external" {
+  type        = bool
+  description = "false = private/internal Container Apps ingress"
+  default     = false
+}
+variable "backup_retention_days" {
+  type    = number
+  default = 7
+}
+variable "min_replicas" {
+  type    = number
+  default = 2
+}
+variable "max_replicas" {
+  type    = number
+  default = 4
+}
 `;
 
 export const TF_ACA_MAIN = `resource "azurerm_resource_group" "main" {
@@ -112,6 +129,8 @@ export const TF_ACA_DATABASE = `resource "azurerm_postgresql_flexible_server" "m
   sku_name               = var.db_ha ? "GP_Standard_D2s_v3" : "B_Standard_B1ms"
   storage_mb             = 32768
   zone                   = "1"
+  backup_retention_days  = var.backup_retention_days
+  public_network_access_enabled = false
 }
 
 resource "azurerm_postgresql_flexible_server_database" "app" {
@@ -121,12 +140,49 @@ resource "azurerm_postgresql_flexible_server_database" "app" {
 }
 `;
 
+export const TF_ACA_IDENTITY = `data "azurerm_client_config" "current" {}
+
+resource "azurerm_user_assigned_identity" "app" {
+  name                = "\${var.project_name}-\${var.environment}-id"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_role_assignment" "app_kv_secrets_user" {
+  count                = var.enable_database ? 1 : 0
+  scope                = azurerm_key_vault.main[0].id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+}
+`;
+
+export const TF_ACA_KEY_VAULT = `resource "azurerm_key_vault" "main" {
+  count                       = var.enable_database ? 1 : 0
+  name                        = substr(replace("\${var.project_name}\${var.environment}kv", "-", ""), 0, 24)
+  location                    = azurerm_resource_group.main.location
+  resource_group_name         = azurerm_resource_group.main.name
+  tenant_id                   = data.azurerm_client_config.current.tenant_id
+  sku_name                    = "standard"
+  soft_delete_retention_days  = 7
+  purge_protection_enabled    = false
+  enable_rbac_authorization   = true
+}
+
+resource "azurerm_key_vault_secret" "db_password" {
+  count        = var.enable_database ? 1 : 0
+  name         = "db-password"
+  value        = random_password.db[0].result
+  key_vault_id = azurerm_key_vault.main[0].id
+}
+`;
+
 export const TF_ACA_APP = `resource "azurerm_container_app_environment" "main" {
   name                       = "\${var.project_name}-\${var.environment}-cae"
   location                   = azurerm_resource_group.main.location
   resource_group_name        = azurerm_resource_group.main.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
   infrastructure_subnet_id   = azurerm_subnet.apps.id
+  internal_load_balancer_enabled = !var.ingress_external
 }
 
 resource "azurerm_container_app" "app" {
@@ -135,9 +191,23 @@ resource "azurerm_container_app" "app" {
   resource_group_name          = azurerm_resource_group.main.name
   revision_mode                = "Single"
 
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  dynamic "secret" {
+    for_each = var.enable_database ? [1] : []
+    content {
+      name                = "db-password"
+      key_vault_secret_id = azurerm_key_vault_secret.db_password[0].versionless_id
+      identity            = azurerm_user_assigned_identity.app.id
+    }
+  }
+
   template {
-    min_replicas = 2
-    max_replicas = 10
+    min_replicas = var.min_replicas
+    max_replicas = var.max_replicas
     container {
       name   = "app"
       image  = "\${azurerm_container_registry.main.login_server}/app:latest"
@@ -147,7 +217,7 @@ resource "azurerm_container_app" "app" {
   }
 
   ingress {
-    external_enabled = true
+    external_enabled = var.ingress_external
     target_port      = 8080
     traffic_weight {
       latest_revision = true
@@ -171,5 +241,8 @@ output "acr_login_server" {
 }
 output "postgres_fqdn" {
   value = try(azurerm_postgresql_flexible_server.main[0].fqdn, null)
+}
+output "managed_identity_id" {
+  value = azurerm_user_assigned_identity.app.id
 }
 `;

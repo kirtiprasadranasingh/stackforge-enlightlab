@@ -70,7 +70,11 @@ export async function POST(request: NextRequest) {
 
   const { check, files } = parsed.data;
   const checkId = check as ScaffoldCheckId;
-  const normalizedFiles = normalizeScaffoldFiles(files);
+  // Do NOT re-lock with default interview options — that wipes Redis/scale/envs
+  // the generate path already applied. Only light sanitize for validate tools.
+  const normalizedFiles = normalizeScaffoldFiles(files, {
+    applyLockedProfile: false,
+  });
 
   // Free disk from prior runs before terraform init downloads providers again.
   await sweepStaleScaffoldTemp(2 * 60 * 1000).catch(() => {});

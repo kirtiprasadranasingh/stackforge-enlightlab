@@ -1,0 +1,13 @@
+{
+  "name": "express-health-check",
+  "version": "1.0.0",
+  "description": "A minimal Express.js health check application",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"No tests specified\""
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

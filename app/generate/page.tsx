@@ -287,6 +287,7 @@ export default function GeneratePage() {
   const [pendingQuestions, setPendingQuestions] = useState<string[]>([]);
   const [questionAnswers, setQuestionAnswers] = useState<Record<number, string>>({});
   const [lastStackPrompt, setLastStackPrompt] = useState('');
+  const [lastInterviewAnswers, setLastInterviewAnswers] = useState('');
   const [awaitingApproval, setAwaitingApproval] = useState(false);
 
   useEffect(() => {
@@ -332,6 +333,7 @@ export default function GeneratePage() {
   const filesRef = useRef<GeneratedFile[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
   const lastStackPromptRef = useRef('');
+  const lastInterviewAnswersRef = useRef('');
 
   useEffect(() => {
     filesRef.current = files;
@@ -525,11 +527,14 @@ export default function GeneratePage() {
       }
 
       const originalRequestPresets = inferPresetsFromPrompt(
-        lastStackPrompt || text,
+        [lastStackPrompt || text, options?.approvedPlan || ''].join('\n'),
         presets
       );
       const resolvedPresets = options?.approvedPlan
-        ? inferPresetsFromPrompt(options.approvedPlan, presets)
+        ? inferPresetsFromPrompt(
+            [lastStackPrompt || text, options.approvedPlan].join('\n'),
+            presets
+          )
         : phase === 'plan' && lastStackPrompt && text !== lastStackPrompt
           ? inferPresetsFromPrompt(text, originalRequestPresets)
           : originalRequestPresets;
@@ -556,9 +561,15 @@ export default function GeneratePage() {
 
       // Fresh generate reuses the original stack prompt; repair turns must keep
       // the fix text (otherwise Fix failures restarts the clarify interview).
+      // Always append interview answers so region/DB/scale/access survive even
+      // when history is cleared for Zod payload size.
+      const interviewBlock =
+        lastInterviewAnswersRef.current || lastInterviewAnswers || '';
       const requestPrompt =
         phase === 'generate' && lastStackPrompt && !isRepairTurn
-          ? lastStackPrompt
+          ? interviewBlock
+            ? `${lastStackPrompt}\n\n${interviewBlock}`
+            : lastStackPrompt
           : phase === 'plan' && lastStackPrompt && text !== lastStackPrompt
             ? `${lastStackPrompt}\n\nClient answers / revision feedback:\n${text}`
             : text;
@@ -590,6 +601,9 @@ export default function GeneratePage() {
               (phase === 'plan' && awaitingApproval
                 ? pendingPlan || undefined
                 : undefined),
+            interviewAnswers: interviewBlock
+              ? interviewBlock.slice(0, 8000)
+              : undefined,
           }),
           signal: abortController.current.signal,
         });
@@ -835,6 +849,7 @@ export default function GeneratePage() {
       pendingPlan,
       pendingQuestions,
       lastStackPrompt,
+      lastInterviewAnswers,
     ]
   );
 
@@ -898,6 +913,8 @@ export default function GeneratePage() {
       pendingQuestions,
       questionAnswers
     );
+    lastInterviewAnswersRef.current = formattedAnswers;
+    setLastInterviewAnswers(formattedAnswers);
     void sendMessage(formattedAnswers, { phase: 'plan', interviewChoices: choices });
   }, [isGenerating, pendingQuestions, questionAnswers, sendMessage]);
 
@@ -933,6 +950,8 @@ export default function GeneratePage() {
     setQuestionAnswers({});
     setLastStackPrompt('');
     lastStackPromptRef.current = '';
+    setLastInterviewAnswers('');
+    lastInterviewAnswersRef.current = '';
     setAwaitingApproval(false);
   };
 
@@ -1112,6 +1131,8 @@ export default function GeneratePage() {
     setQuestionAnswers({});
     setLastStackPrompt('');
     lastStackPromptRef.current = '';
+    setLastInterviewAnswers('');
+    lastInterviewAnswersRef.current = '';
     setWorkspaceOpen(false);
     setWorkflowPhase('idle');
   };
@@ -1300,7 +1321,9 @@ export default function GeneratePage() {
                       ? 'Describe plan changes…'
                       : pendingQuestions.length
                         ? 'Type your choices or your own answer…'
-                        : 'Ask for changes...'
+                        : hasFiles
+                          ? 'Ask about files, request a small infra change, or fix checks…'
+                          : 'Describe the cloud stack you want…'
                   }
                   className="flex-1 bg-transparent text-xs text-slate-900 placeholder-slate-400 focus:outline-none pl-1 py-1.5 border-0 min-w-0 font-sans"
                 />
@@ -1548,7 +1571,7 @@ export default function GeneratePage() {
                     : pendingQuestions.length
                       ? 'Or type an extra note…'
                       : files.length > 0
-                        ? 'Ask for changes, or paste check failures to fix…'
+                        ? 'Ask about a file, request a small infra change, or fix check failures…'
                         : 'Ask anything, e.g. deploy a Node.js API with PostgreSQL to AWS EKS'
                 }
                 value={input}

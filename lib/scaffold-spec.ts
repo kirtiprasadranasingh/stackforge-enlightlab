@@ -11,6 +11,8 @@ export const AZURE_GO_CONTAINER_APPS_FILES = [
   'terraform/identity.tf',
   'terraform/container_apps.tf',
   'terraform/outputs.tf',
+  'environments/staging.tfvars',
+  'environments/development.tfvars',
   'azure-pipelines.yml',
   'Dockerfile',
   'go.mod',
@@ -30,7 +32,6 @@ export const AWS_ECS_EXPRESS_FILES = [
   'terraform/iam.tf',
   'terraform/security_groups.tf',
   'terraform/redis.tf',
-  'terraform/cloudwatch.tf',
   'terraform/outputs.tf',
   '.github/workflows/deploy.yml',
   'app/Dockerfile',
@@ -233,9 +234,82 @@ export function detectScaffoldProfile(
 ): ScaffoldProfile | null {
   const t = prompt.toLowerCase();
 
-  // Match primarily on cloud + orchestrator so ANY CI / language still gets
-  // locked stubs. Language/CI hints only break ties.
+  // Client overrides always win over the original prompt keywords
+  // (e.g. "OKE prompt" + Azure AKS override must not stay on Oracle).
+  const hasAzureOverride =
+    presets.cloud === 'azure' ||
+    presets.orchestrator === 'aks' ||
+    presets.orchestrator === 'container-apps' ||
+    /cloud provider\s*\(client override\)\s*:[^.\n]*(azure|microsoft)/i.test(
+      prompt
+    ) ||
+    /hosting platform\s*\(client override\)\s*:[^.\n]*(aks|azure kubernetes|container apps?)/i.test(
+      prompt
+    ) ||
+    /microsoft\s+azure[\s\S]{0,200}hosting platform\s*\(client override\)/i.test(
+      prompt
+    );
 
+  const hasOracleOverride =
+    presets.cloud === 'oracle' ||
+    presets.orchestrator === 'oke' ||
+    /cloud provider\s*\(client override\)\s*:[^.\n]*(oracle|oci)/i.test(prompt) ||
+    /hosting platform\s*\(client override\)\s*:[^.\n]*(oke|oracle kubernetes)/i.test(
+      prompt
+    ) ||
+    /oracle cloud infrastructure[\s\S]{0,200}hosting platform\s*\(client override\)/i.test(
+      prompt
+    );
+
+  const hasAwsOverride =
+    presets.cloud === 'aws' ||
+    presets.orchestrator === 'eks' ||
+    presets.orchestrator === 'ecs' ||
+    /hosting platform\s*\(client override\)\s*:[^.\n]*(eks|ecs|fargate)/i.test(
+      prompt
+    );
+
+  const hasGcpOverride =
+    presets.cloud === 'gcp' ||
+    presets.orchestrator === 'gke' ||
+    presets.orchestrator === 'cloud-run' ||
+    /hosting platform\s*\(client override\)\s*:[^.\n]*(gke|cloud run)/i.test(
+      prompt
+    );
+
+  if (hasAzureOverride) {
+    if (
+      presets.orchestrator === 'container-apps' ||
+      /container\s*apps?/.test(t)
+    ) {
+      return AZURE_GO_CONTAINER_APPS_PROFILE;
+    }
+    return AZURE_AKS_HELM_PROFILE;
+  }
+
+  if (hasOracleOverride) {
+    return ORACLE_OKE_HELM_PROFILE;
+  }
+
+  if (hasAwsOverride) {
+    if (presets.orchestrator === 'ecs' || /\becs\b|\bfargate\b/.test(t)) {
+      return AWS_ECS_EXPRESS_PROFILE;
+    }
+    return AWS_EKS_HELM_PROFILE;
+  }
+
+  if (hasGcpOverride) {
+    if (
+      presets.orchestrator === 'cloud-run' ||
+      presets.orchestrator === 'serverless' ||
+      /cloud\s*run/.test(t)
+    ) {
+      return GCP_FASTAPI_CLOUDRUN_PROFILE;
+    }
+    return GCP_GKE_HELM_PROFILE;
+  }
+
+  // No client override — match on presets + prompt keywords
   if (
     presets.cloud === 'azure' &&
     (presets.orchestrator === 'container-apps' || /container\s*apps?/.test(t))
@@ -266,16 +340,10 @@ export function detectScaffoldProfile(
     return GCP_FASTAPI_CLOUDRUN_PROFILE;
   }
 
-  if (
-    presets.cloud === 'oracle' ||
-    presets.orchestrator === 'oke' ||
-    /\b(oci|oracle|oke)\b/.test(t)
-  ) {
+  if (presets.cloud === 'oracle' || /\b(oci|oracle|oke)\b/.test(t)) {
     return ORACLE_OKE_HELM_PROFILE;
   }
 
-  // AKS / GKE: use Helm+stub bases from the closest locked profile shape
-  // without seeding the wrong cloud's Terraform providers.
   if (
     presets.cloud === 'azure' &&
     (presets.orchestrator === 'aks' || /\baks\b/.test(t))

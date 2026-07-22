@@ -59,6 +59,22 @@ variable "backup_retention_count" {
   type    = number
   default = 7
 }
+variable "enable_redis" {
+  type    = bool
+  default = false
+}
+variable "redis_ha" {
+  type    = bool
+  default = true
+}
+variable "min_instance_count" {
+  type    = number
+  default = 1
+}
+variable "max_instance_count" {
+  type    = number
+  default = 10
+}
 `;
 
 export const TF_CR_MAIN = `resource "google_project_service" "apis" {
@@ -104,7 +120,7 @@ export const TF_CR_NETWORK = `resource "google_compute_network" "vpc" {
 }
 
 resource "google_compute_global_address" "private_ip" {
-  count         = var.enable_database ? 1 : 0
+  count         = var.enable_database || var.enable_redis ? 1 : 0
   name          = "\${var.service_name}-\${var.environment}-sql-range"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
@@ -113,7 +129,7 @@ resource "google_compute_global_address" "private_ip" {
 }
 
 resource "google_service_networking_connection" "private_vpc" {
-  count                   = var.enable_database ? 1 : 0
+  count                   = var.enable_database || var.enable_redis ? 1 : 0
   network                 = google_compute_network.vpc.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip[0].name]
@@ -170,6 +186,19 @@ resource "google_sql_user" "app" {
 }
 `;
 
+export const TF_CR_REDIS = `resource "google_redis_instance" "cache" {
+  count          = var.enable_redis ? 1 : 0
+  name           = "\${var.service_name}-\${var.environment}-redis"
+  tier           = var.redis_ha ? "STANDARD_HA" : "BASIC"
+  memory_size_gb = 1
+  region         = var.region
+  redis_version  = "REDIS_7_0"
+  authorized_network = google_compute_network.vpc.id
+  connect_mode   = "PRIVATE_SERVICE_ACCESS"
+  depends_on     = [google_service_networking_connection.private_vpc]
+}
+`;
+
 export const TF_CR_CLOUDRUN = `resource "google_cloud_run_v2_service" "app" {
   name     = "\${var.service_name}-\${var.environment}"
   location = var.region
@@ -178,8 +207,8 @@ export const TF_CR_CLOUDRUN = `resource "google_cloud_run_v2_service" "app" {
   template {
     service_account = google_service_account.runtime.email
     scaling {
-      min_instance_count = 1
-      max_instance_count = 10
+      min_instance_count = var.min_instance_count
+      max_instance_count = var.max_instance_count
     }
     vpc_access {
       connector = google_vpc_access_connector.connector.id
@@ -251,10 +280,13 @@ output "artifact_registry" {
 output "sql_connection_name" {
   value = try(google_sql_database_instance.main[0].connection_name, null)
 }
+output "redis_host" {
+  value = try(google_redis_instance.cache[0].host, null)
+}
 output "runtime_service_account" {
   value = google_service_account.runtime.email
 }
-output "gitlab_ci_service_account" {
+output "ci_deployer_service_account" {
   value = google_service_account.gitlab_ci.email
 }
 `;

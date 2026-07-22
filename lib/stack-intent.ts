@@ -5,7 +5,9 @@
 /** Concrete infra / cloud / runtime tokens — shared by conversational + gate logic. */
 export function hasInfraSignal(prompt: string): boolean {
   const raw = prompt.toLowerCase();
-  return /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s|terraform|helm|dockerfile|docker|pipeline|ci\s*\/?\s*cd|gitlab|github\s*actions|jenkins|circleci|azure\s*devops|codepipeline|code\s*build|cloud\s*build|oci\s*devops|microservice|micro-?service|backend|frontend|serverless|cluster|ingress|autoscal|replica|hpa|nsg|vpc|subnet|load\s*balancer|database|postgres|postgresql|mysql|mongo|mongodb|redis|dynamodb|graphql|rest\s*api|\bapi\b|manifest|scaffold|provision|infrastructure|infra\b|node\.?js|\bnode\b|nextjs|next\.js|python|fastapi|django|flask|golang|\bjava\b|spring|\.net|dotnet|express|nestjs|rails|\bphp\b|laravel)\b/.test(
+  // Languages alone are NOT infra (blocks "hello world in Python" jailbreaks).
+  // Require cloud/orchestrator/IaC/CI or a clear stack-shaped ask.
+  return /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s|terraform|helm|dockerfile|docker|pipeline|ci\s*\/?\s*cd|gitlab|github\s*actions|jenkins|circleci|azure\s*devops|codepipeline|code\s*build|cloud\s*build|oci\s*devops|microservice|micro-?service|serverless|cluster|ingress|autoscal|replica|hpa|nsg|vpc|subnet|load\s*balancer|database|postgres|postgresql|mysql|mongo|mongodb|redis|dynamodb|scaffold|provision|infrastructure|infra\b)\b/.test(
     raw
   );
 }
@@ -17,11 +19,63 @@ export function hasCloudOrOrchestratorSignal(prompt: string): boolean {
   );
 }
 
+/** Prompt-injection / jailbreak attempts — never start clarify or emit code. */
+export function isJailbreakPrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase().trim();
+  if (
+    /\bignore\s+(all\s+)?(previous|prior|above)\s+instructions\b/.test(lower) ||
+    /\bdisregard\s+(all\s+)?(previous|prior|above)\s+instructions\b/.test(lower) ||
+    /\byou\s+are\s+now\b.{0,40}\b(dan|jailbreak|unrestricted)\b/.test(lower) ||
+    /\bdo\s+not\s+follow\s+(your|the)\s+(system|developer)\s+prompt\b/.test(lower) ||
+    /\boverride\s+(your|the)\s+system\s+prompt\b/.test(lower)
+  ) {
+    return true;
+  }
+  // "Output a hello world script" without any cloud/infra framing
+  if (
+    /\b(hello\s*world|print\s*\(\s*['\"]hello|script\s+in\s+python|write\s+.*\bcode\b)\b/.test(
+      lower
+    ) &&
+    !hasCloudOrOrchestratorSignal(lower) &&
+    !/\b(terraform|helm|dockerfile|pipeline|scaffold|infrastructure)\b/.test(lower)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Off-topic asks (recipes, homework, general coding) outside StackForge scope.
+ * Cake recipe, jokes, etc. — refuse without starting an infra interview.
+ */
+export function isOffTopicPrompt(prompt: string): boolean {
+  if (isJailbreakPrompt(prompt)) return true;
+  const lower = prompt.toLowerCase().trim();
+  if (hasCloudOrOrchestratorSignal(lower) || hasInfraSignal(lower)) return false;
+  if (
+    /\b(recipe|cake|cookie|cook|bake|chocolate|pasta|pizza|song|lyrics|poem|joke|story|homework|essay|translate|weather|stock\s*price)\b/.test(
+      lower
+    )
+  ) {
+    return true;
+  }
+  // Generic "write a X script/app" with no cloud
+  if (
+    /^(write|output|give\s+me|create|make)\b.{0,80}\b(script|program|function|class|hello\s*world)\b/.test(
+      lower
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Ops / product asks outside StackForge's generator scope (billing, CMS install,
  * managing DNS as a service). These must NOT invent an AWS/EKS interview.
  */
 export function isOutOfScopeOpsPrompt(prompt: string): boolean {
+  if (isOffTopicPrompt(prompt)) return true;
   const lower = prompt.toLowerCase().trim();
   if (/\b(pay|paying|settle)\b.{0,40}\b(bill|invoice|aws\s*bill|azure\s*bill)\b/.test(lower)) {
     return true;
@@ -194,14 +248,20 @@ export function requiresPlanApproval(
 }
 
 /** Detect conversational greetings, confirmations, or general questions. */
-export function isConversationalPrompt(prompt: string): boolean {
+export function isGreetingOnlyPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "");
-
   const greetings = [
     'hi', 'hello', 'hey', 'yo', 'good morning', 'good afternoon', 'good evening',
     'hola', 'hi there', 'hello there', 'greetings', 'wasup', 'whats up', 'sup'
   ];
-  if (greetings.includes(lower)) return true;
+  return greetings.includes(lower);
+}
+
+/** Detect conversational greetings, confirmations, or general questions. */
+export function isConversationalPrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "");
+
+  if (isGreetingOnlyPrompt(prompt)) return true;
 
   const acknowledgements = [
     'all good', 'al good', 'looks good', 'look good', 'perfect', 'thanks', 'thank you',
@@ -221,8 +281,9 @@ export function isConversationalPrompt(prompt: string): boolean {
   // Out-of-scope ops asks are not "conversation" — route them to a scope reply
   // in the API (separate from small talk).
   if (isOutOfScopeOpsPrompt(prompt)) return false;
+  if (isJailbreakPrompt(prompt)) return false;
 
-  if (hasInfraSignal(prompt)) return false;
+  if (hasInfraSignal(prompt) || hasCloudOrOrchestratorSignal(prompt)) return false;
 
   const commandVerb =
     /^(add|update|fix|change|remove|delete|rename|move|create|generate|build|make|set\s*up|setup|deploy|scaffold|provision|harden|secure|wire|include|configure|refactor|optimize|design)\b/;

@@ -132,16 +132,17 @@ export function WorkflowPanel({
               generationStatus={generationStatus}
             />
           </div>
-          {!writingCode ? (
+          {/* Keep checks terminal mounted during chat/generate so it does not disappear */}
+          <div className={writingCode ? 'opacity-70 pointer-events-none' : ''}>
             <ScaffoldChecksPanel
               files={files}
               isGenerating={isGenerating}
-              autoRun
-              onFixFailures={onFixFailures}
+              autoRun={!writingCode}
+              onFixFailures={writingCode ? undefined : onFixFailures}
               onNormalizedFiles={onNormalizedFiles}
               onStatusChange={setCheckStatus}
             />
-          ) : null}
+          </div>
         </div>
       </div>
     );

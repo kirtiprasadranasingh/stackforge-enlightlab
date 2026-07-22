@@ -54,6 +54,12 @@ export const GenerateRequestSchema = z
     approvedPlan: z.string().max(20000).optional(),
     /** Prior plan when revising */
     priorPlan: z.string().max(20000).optional(),
+    /**
+     * Verbatim interview answers (Confirmed choices block).
+     * Generate clears chat history for Zod size — this field carries region /
+     * DB / scale / access so parseScaffoldOptions does not fall back to defaults.
+     */
+    interviewAnswers: z.string().max(8000).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.prompt.trim().length < 1) {

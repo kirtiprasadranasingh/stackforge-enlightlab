@@ -205,7 +205,7 @@ export function adaptClarifyingQuestions(
 
 /** Expand interview picks into explicit requirements for the plan model. */
 export function formatInterviewAnswerForPlan(rawAnswer: string): string {
-  const answer = rawAnswer.trim();
+  const answer = rawAnswer.trim().replace(/\.+$/, '').trim();
   if (!answer) return answer;
 
   if (answer === 'Yes, use this setup') {

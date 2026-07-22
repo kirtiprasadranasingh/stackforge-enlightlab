@@ -42,6 +42,7 @@ import {
   TF_CR_MAIN,
   TF_CR_NETWORK,
   TF_CR_DATABASE,
+  TF_CR_REDIS,
   TF_CR_CLOUDRUN,
   TF_CR_IAM,
   TF_CR_OUTPUTS,
@@ -53,6 +54,8 @@ import {
   TF_ACA_MAIN,
   TF_ACA_NETWORK,
   TF_ACA_DATABASE,
+  TF_ACA_IDENTITY,
+  TF_ACA_KEY_VAULT,
   TF_ACA_APP,
   TF_ACA_OUTPUTS,
 } from '@/lib/locked-tf-azure-aca';
@@ -71,12 +74,16 @@ import {
   TF_GKE_NETWORK,
   TF_GKE_CLUSTER,
   TF_GKE_OUTPUTS,
+  TF_GKE_IAM,
 } from '@/lib/locked-tf-gcp-gke';
 import {
   TF_OKE_VERSIONS,
+  TF_OKE_MAIN,
   TF_OKE_VARIABLES,
   TF_OKE_NETWORK,
   TF_OKE_CLUSTER,
+  TF_OKE_DATABASE,
+  TF_OKE_IAM,
   TF_OKE_OUTPUTS,
 } from '@/lib/locked-tf-oracle-oke';
 import type { ScaffoldOptions } from '@/lib/scaffold-options';
@@ -832,7 +839,8 @@ export function shouldForceLockPath(path: string): boolean {
   if (FORCE_STUB_PATHS.has(path)) return true;
   // Optimal fix: never trust model Terraform — always use profile-validated TF
   if (path.startsWith('terraform/') && path.endsWith('.tf')) return true;
-  if (path.startsWith('environments/') && path.endsWith('.tfvars')) return true;
+  // environments/*.tfvars are owned by applyScaffoldOptions from interview
+  // answers — never force locked staging/us-east-1 defaults over them.
   return false;
 }
 
@@ -908,6 +916,7 @@ function gcpCloudRunBase(): BaseFileMap {
     'terraform/main.tf': TF_CR_MAIN,
     'terraform/network.tf': TF_CR_NETWORK,
     'terraform/database.tf': TF_CR_DATABASE,
+    'terraform/redis.tf': TF_CR_REDIS,
     'terraform/cloudrun.tf': TF_CR_CLOUDRUN,
     'terraform/iam.tf': TF_CR_IAM,
     'terraform/outputs.tf': TF_CR_OUTPUTS,
@@ -928,9 +937,12 @@ function azureContainerAppsBase(): BaseFileMap {
     'terraform/main.tf': TF_ACA_MAIN,
     'terraform/network.tf': TF_ACA_NETWORK,
     'terraform/database.tf': TF_ACA_DATABASE,
+    'terraform/key_vault.tf': TF_ACA_KEY_VAULT,
+    'terraform/identity.tf': TF_ACA_IDENTITY,
     'terraform/container_apps.tf': TF_ACA_APP,
     'terraform/outputs.tf': TF_ACA_OUTPUTS,
-    'environments/staging.tfvars': `location = "eastus"\nenvironment = "staging"\n`,
+    'environments/staging.tfvars': `location = "westeurope"\nenvironment = "staging"\n`,
+    'environments/development.tfvars': `location = "westeurope"\nenvironment = "development"\n`,
     'azure-pipelines.yml': AZURE_PIPELINE,
     Dockerfile: GO_DOCKERFILE,
     'go.mod': GO_MOD,
@@ -943,9 +955,12 @@ function azureContainerAppsBase(): BaseFileMap {
 function oracleOkeBase(): BaseFileMap {
   return {
     'terraform/versions.tf': TF_OKE_VERSIONS,
+    'terraform/main.tf': TF_OKE_MAIN,
     'terraform/variables.tf': TF_OKE_VARIABLES,
     'terraform/network.tf': TF_OKE_NETWORK,
     'terraform/oke.tf': TF_OKE_CLUSTER,
+    'terraform/database.tf': TF_OKE_DATABASE,
+    'terraform/iam.tf': TF_OKE_IAM,
     'terraform/outputs.tf': TF_OKE_OUTPUTS,
     'environments/staging.tfvars': `region = "ap-mumbai-1"\nenvironment = "staging"\n# compartment_ocid = "ocid1.compartment..."\n# tenancy_ocid = "ocid1.tenancy..."\n`,
     '.github/workflows/deploy.yml': GHA_EKS_DEPLOY.replace(/EKS_/g, 'OKE_').replace(
@@ -1002,6 +1017,7 @@ function gcpGkeBase(): BaseFileMap {
     'terraform/main.tf': TF_GKE_MAIN,
     'terraform/network.tf': TF_GKE_NETWORK,
     'terraform/gke.tf': TF_GKE_CLUSTER,
+    'terraform/iam.tf': TF_GKE_IAM,
     'terraform/outputs.tf': TF_GKE_OUTPUTS,
     'environments/staging.tfvars': `region = "us-central1"\nenvironment = "staging"\n# project_id = "YOUR_GCP_PROJECT"\n`,
     '.github/workflows/deploy.yml': GHA_EKS_DEPLOY.replace(/EKS_/g, 'GKE_').replace(
@@ -1113,6 +1129,24 @@ export function mergeLockedBaseFiles(
     }
     for (const p of [...byPath.keys()]) {
       if (p.includes('_stackforge_empty')) byPath.delete(p);
+    }
+  }
+
+  // Drop model-invented Helm charts outside charts/app (nginx-ingress etc. fail lint)
+  if (forceStubs) {
+    const lockedChartPaths = new Set(
+      Object.keys(base).filter((p) => p.startsWith('charts/'))
+    );
+    if (lockedChartPaths.size > 0) {
+      for (const p of [...byPath.keys()]) {
+        if (!p.startsWith('charts/')) continue;
+        if (lockedChartPaths.has(p)) continue;
+        // Keep only charts/app/** from locked base
+        if (!p.startsWith('charts/app/')) {
+          byPath.delete(p);
+          seeded.push(`removed:${p}`);
+        }
+      }
     }
   }
 

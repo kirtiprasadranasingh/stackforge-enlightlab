@@ -6,7 +6,6 @@ import {
 import { getLanguageFromPath, validateFilePath } from '@/lib/utils';
 import { sanitizeTerraformForValidate } from '@/lib/terraform-validate-repair';
 import { mergeLockedBaseFiles } from '@/lib/scaffold-base-files';
-import { parseScaffoldOptions } from '@/lib/scaffold-options';
 
 /** Map alternate model paths → canonical PRD paths */
 const CANONICAL_PATH: Record<string, string> = {};
@@ -1649,7 +1648,17 @@ export function normalizeScaffoldFile(
 
 /** Merge duplicates — later canonical path wins */
 export function normalizeScaffoldFiles(
-  files: Array<Pick<GeneratedFile, 'path' | 'content'> & Partial<GeneratedFile>>
+  files: Array<Pick<GeneratedFile, 'path' | 'content'> & Partial<GeneratedFile>>,
+  preferred?: {
+    profile?: import('@/lib/scaffold-spec').ScaffoldProfile | null;
+    presets?: Presets;
+    scaffoldOptions?: import('@/lib/scaffold-options').ScaffoldOptions;
+    /**
+     * When false, skip locked-profile merge (validate-scaffold path).
+     * Prevents wiping interview-applied tfvars / CI with base defaults.
+     */
+    applyLockedProfile?: boolean;
+  }
 ): GeneratedFile[] {
   const byPath = new Map<string, GeneratedFile>();
   for (const raw of files) {
@@ -1720,10 +1729,14 @@ export function normalizeScaffoldFiles(
   ensureMissingTerraformVariables(byPath);
   stripAlbAnnotationsWithoutController(byPath);
 
-  // Optimal fix: replace model Terraform with locked profile templates
-  const profile = detectProfileFromGeneratedFiles(Array.from(byPath.values()));
-  if (profile) {
-    const presets: Presets = {
+  // Replace model Terraform with locked profile templates.
+  // NEVER invent scaffoldOptions from README/TF — that wipes interview answers.
+  // Callers must pass preferred.scaffoldOptions for option wiring.
+  const profile =
+    preferred?.profile ||
+    detectProfileFromGeneratedFiles(Array.from(byPath.values()));
+  if (profile && preferred?.applyLockedProfile !== false) {
+    const presets: Presets = preferred?.presets || {
       cloud:
         profile.id.startsWith('aws')
           ? 'aws'
@@ -1751,20 +1764,28 @@ export function normalizeScaffoldFiles(
           ? 'azure-devops'
           : 'github-actions',
     };
-    const textBlob = Array.from(byPath.values())
-      .map((f) => f.content)
-      .join('\n')
-      .slice(0, 20000);
-    const scaffoldOptions = parseScaffoldOptions(textBlob, presets);
     const locked = mergeLockedBaseFiles(Array.from(byPath.values()), profile, {
       fillMissing: true,
       forceStubs: true,
       presets,
-      scaffoldOptions,
+      // Only apply when caller supplied interview-derived options.
+      scaffoldOptions: preferred?.scaffoldOptions,
     });
     byPath.clear();
     for (const f of locked.files) byPath.set(f.path, f);
+    // Model sometimes invents a second app tree; keep locked `app/` only.
+    for (const p of [...byPath.keys()]) {
+      if (p === 'container_app' || p.startsWith('container_app/')) {
+        byPath.delete(p);
+      }
+    }
     stripAlbAnnotationsWithoutController(byPath);
+  } else {
+    for (const p of [...byPath.keys()]) {
+      if (p === 'container_app' || p.startsWith('container_app/')) {
+        byPath.delete(p);
+      }
+    }
   }
 
   return dedupeTerraformResources(Array.from(byPath.values()));

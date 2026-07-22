@@ -102,6 +102,7 @@ resource "azurerm_postgresql_flexible_server" "main" {
   sku_name               = "GP_Standard_D2s_v3"
   storage_mb             = 32768
   zone                   = "1"
+  public_network_access_enabled = false
 }
 `;
 

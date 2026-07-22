@@ -29,6 +29,9 @@ import {
   requiresPlanApproval,
   isConversationalPrompt,
   isOutOfScopeOpsPrompt,
+  isJailbreakPrompt,
+  isOffTopicPrompt,
+  isGreetingOnlyPrompt,
 } from '@/lib/stack-intent';
 import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import {
@@ -173,11 +176,12 @@ async function streamPlanningPhase(params: {
           const parsed = appendAndParse(parseState, chunkText);
 
           // Never emit files from planning phases even if the model misbehaves
-          if (parsed.questions?.length && !questionsSent) {
+          // Casual chat: never surface interview questions or a plan
+          if (!conversational && parsed.questions?.length && !questionsSent) {
             questionsSent = true;
             controller.enqueue(sse({ type: 'questions', questions: parsed.questions }));
           }
-          if (parsed.plan && parsed.plan.length > 40 && !planSent) {
+          if (!conversational && parsed.plan && parsed.plan.length > 40 && !planSent) {
             planSent = true;
             controller.enqueue(sse({ type: 'plan', plan: parsed.plan }));
           }
@@ -188,11 +192,11 @@ async function streamPlanningPhase(params: {
         }
 
         const finalParsed = appendAndParse(parseState, '', true);
-        if (finalParsed.questions?.length && !questionsSent) {
+        if (!conversational && finalParsed.questions?.length && !questionsSent) {
           questionsSent = true;
           controller.enqueue(sse({ type: 'questions', questions: finalParsed.questions }));
         }
-        if (finalParsed.plan && finalParsed.plan.length > 40 && !planSent) {
+        if (!conversational && finalParsed.plan && finalParsed.plan.length > 40 && !planSent) {
           planSent = true;
           controller.enqueue(sse({ type: 'plan', plan: finalParsed.plan }));
         }
@@ -310,50 +314,35 @@ export async function POST(request: NextRequest) {
       phase: requestedPhase,
       approvedPlan,
       priorPlan,
+      interviewAnswers,
     } = validation.data;
     const prompt = sanitizeInput(rawPrompt);
-    const presets = inferPresetsFromPrompt(prompt, rawPresets as Presets);
+    // interviewAnswers is critical: generate clears history for payload size,
+    // so region/DB/scale/access live here — not only in the approved plan prose.
     const optionsText = [
       prompt,
+      interviewAnswers || '',
       approvedPlan || '',
       priorPlan || '',
       ...history.map((h: { content?: string }) => h.content || ''),
     ].join('\n');
+    // Infer from plan + history too — client overrides live in interview answers,
+    // not only in the short approve/generate prompt.
+    const presets = inferPresetsFromPrompt(optionsText, rawPresets as Presets);
     const scaffoldOptions = parseScaffoldOptions(optionsText, presets);
     const lowerPrompt = prompt.toLowerCase().trim();
     let phase: WorkflowPhase = requestedPhase || 'generate';
 
-    // 1. Intercept Greetings — word-boundary only; never when chat/files already exist
-    const isGreeting =
-      (existingFiles.length === 0 && history.length === 0) &&
-      (/^(hi|hello|hey|yo|greetings|good morning|good afternoon|good evening)[!.?\s]*$/i.test(lowerPrompt) ||
-        /^(hi|hello|hey)\s+\w+/i.test(lowerPrompt) && lowerPrompt.split(/\s+/).length <= 4);
-
-    if (isGreeting) {
+    const replyText = async (summary: string, status = 'Checking…') => {
       const stream = new ReadableStream({
         async start(controller) {
-          controller.enqueue(
-            sse({
-              type: 'status',
-              message: 'Greeting user...',
-            })
-          );
-          await new Promise(r => setTimeout(r, 400));
-          controller.enqueue(
-            sse({
-              type: 'summary',
-              summary: "Hey! I am StackForge from Enlight Labs. I generate infrastructure scaffolds — Terraform, CI/CD pipelines, Dockerfiles, and orchestration manifests — plus a minimal health-check stub (not a full application).\n\nDescribe the cloud stack you want, answer a few clarifying questions, approve the plan, and I'll stream the files.",
-            })
-          );
-          controller.enqueue(
-            sse({
-              type: 'warnings',
-              warnings: [],
-            })
-          );
+          controller.enqueue(sse({ type: 'status', message: status }));
+          await new Promise((r) => setTimeout(r, 250));
+          controller.enqueue(sse({ type: 'summary', summary }));
+          controller.enqueue(sse({ type: 'warnings', warnings: [] }));
           controller.enqueue(sse({ type: 'done' }));
           controller.close();
-        }
+        },
       });
       return new NextResponse(stream, {
         headers: {
@@ -364,6 +353,47 @@ export async function POST(request: NextRequest) {
           ...cors,
         },
       });
+    };
+
+    // Jailbreak / off-topic BEFORE any clarify/plan (python-only "hello world" must not interview)
+    if (isJailbreakPrompt(prompt) || isOffTopicPrompt(prompt)) {
+      return replyText(
+        "I'm StackForge — I only help design and scaffold cloud infrastructure (Terraform, CI/CD, Kubernetes/Helm, plus a minimal health stub) for AWS, Azure, GCP, or Oracle.\n\nI can't run prompt overrides or write unrelated scripts/recipes. Describe a cloud stack (for example: \"a Node API on EKS with Postgres and GitHub Actions\") and I'll interview you, draft a plan, then generate files.",
+        'Checking scope…'
+      );
+    }
+
+    // Greetings — deterministic (no Gemini inventing a stack). Works with or without files.
+    if (isGreetingOnlyPrompt(prompt)) {
+      if (existingFiles.length > 0) {
+        return replyText(
+          `Hey! Your scaffold is already on the right (${existingFiles.length} files). I can explain those files, suggest small infra tweaks (env, region, CI), or help fix failing scaffold checks.\n\nAsk something like \"what does terraform/gke.tf do?\" or \"switch CI to Cloud Build\" — or start a New Project for a different stack.`,
+          'Chatting…'
+        );
+      }
+      if (history.length === 0) {
+        return replyText(
+          "Hey! I am StackForge from Enlight Labs. I generate infrastructure scaffolds — Terraform, CI/CD pipelines, Dockerfiles, and orchestration manifests — plus a minimal health-check stub (not a full application).\n\nDescribe the cloud stack you want, answer a few clarifying questions, approve the plan, and I'll stream the files.",
+          'Greeting user...'
+        );
+      }
+      return replyText(
+        "Hi — ready when you are. Describe the cloud stack you want (cloud, compute, CI, database if any), and I'll start the interview.",
+        'Chatting…'
+      );
+    }
+
+    // 1. Intercept legacy empty-workspace greetings (kept for longer greetings)
+    const isGreeting =
+      (existingFiles.length === 0 && history.length === 0) &&
+      (/^(hi|hello|hey|yo|greetings|good morning|good afternoon|good evening)[!.?\s]*$/i.test(lowerPrompt) ||
+        /^(hi|hello|hey)\s+\w+/i.test(lowerPrompt) && lowerPrompt.split(/\s+/).length <= 4);
+
+    if (isGreeting) {
+      return replyText(
+        "Hey! I am StackForge from Enlight Labs. I generate infrastructure scaffolds — Terraform, CI/CD pipelines, Dockerfiles, and orchestration manifests — plus a minimal health-check stub (not a full application).\n\nDescribe the cloud stack you want, answer a few clarifying questions, approve the plan, and I'll stream the files.",
+        'Greeting user...'
+      );
     }
 
     // 2. Intercept Out-of-Scope Execution Commands
@@ -546,7 +576,24 @@ export async function POST(request: NextRequest) {
     }
 
     if (isConversationalPrompt(prompt)) {
-      const CONVERSATIONAL_SYSTEM_PROMPT = `You are StackForge, a helpful AI cloud architect assistant for Enlight Labs.
+      const hasWorkspace = existingFiles.length > 0;
+      const CONVERSATIONAL_SYSTEM_PROMPT = hasWorkspace
+        ? `You are StackForge, a helpful AI cloud architect for Enlight Labs.
+The user already has a generated scaffold open in the workspace (${existingFiles.length} files). They are chatting casually or asking a meta question — they are NOT asking to regenerate a new stack.
+
+Respond in 2–4 short sentences.
+- If they greet you or say thanks: acknowledge briefly and point them to the files on the right, scaffold checks, or small follow-ups (explain a file, tweak env/CI, fix check failures).
+- If they ask what you can do now: explain files, suggest infra-only edits, or New Project for a different stack.
+- Do NOT claim you just created or regenerated files.
+- Do NOT invent a new cloud/stack summary.
+- Do NOT ask clarifying interview questions or emit <<<FILE>>> / <<<PLAN>>> / <<<QUESTIONS>>> markers.
+Always format:
+<<<SUMMARY>>>
+[Your reply]
+<<<WARNINGS>>>
+[]
+`
+        : `You are StackForge, a helpful AI cloud architect assistant for Enlight Labs.
 The user is making small talk, asking who you are / what you can do, or otherwise chatting — they are NOT (yet) describing infrastructure to build.
 Respond directly and helpfully to what they actually said. Keep it short and friendly (2-4 sentences).
 
@@ -967,14 +1014,16 @@ Always format your response by wrapping the chat reply in the following markers:
                   })()
                 : collectedFiles;
 
-              let finalized = normalizeScaffoldFiles(workspaceFiles);
+              let finalized = normalizeScaffoldFiles(workspaceFiles, {
+                profile: detectScaffoldProfile(
+                  optionsText.length > 80 ? optionsText : prompt,
+                  presets
+                ),
+                presets,
+                scaffoldOptions,
+              });
               const postNormProfile = detectScaffoldProfile(
-                (approvedPlan || '').trim().length > 80
-                  ? approvedPlan || prompt
-                  : // Prefer presets for Fix failures (prompt has no cloud keywords).
-                    isValidationFixPrompt(prompt)
-                    ? `${presets.cloud} ${presets.orchestrator} ${presets.ci}`
-                    : prompt,
+                optionsText.length > 80 ? optionsText : prompt,
                 presets
               );
               if (postNormProfile) {
@@ -985,7 +1034,11 @@ Always format your response by wrapping the chat reply in the following markers:
                   presets,
                   scaffoldOptions,
                 }).files;
-                finalized = normalizeScaffoldFiles(finalized);
+                finalized = normalizeScaffoldFiles(finalized, {
+                  profile: postNormProfile,
+                  presets,
+                  scaffoldOptions,
+                });
               }
               for (const file of finalized) {
                 const prev = workspaceFiles.find((f) => f.path === file.path);
@@ -1032,7 +1085,14 @@ Always format your response by wrapping the chat reply in the following markers:
                 let tempDir = "";
                 try {
                   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'stackforge-val-'));
-                  const filesForValidate = normalizeScaffoldFiles(currentFiles);
+                  const filesForValidate = normalizeScaffoldFiles(currentFiles, {
+                    presets,
+                    scaffoldOptions,
+                    profile: detectScaffoldProfile(
+                      `${presets.cloud} ${presets.orchestrator}`,
+                      presets
+                    ),
+                  });
                   for (const file of filesForValidate) {
                     const filePath = path.join(tempDir, file.path);
                     await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -1137,10 +1197,18 @@ ${failLines.join('\n')}`;
                   const parseStateFix = createParseState();
                   const parsedFix = appendAndParse(parseStateFix, fixText);
                   const finalParsedFix = appendAndParse(parseStateFix, '', true);
-                  const correctedFiles = normalizeScaffoldFiles([
-                    ...parsedFix.files,
-                    ...finalParsedFix.files,
-                  ]);
+                  const repairNormPreferred = {
+                    presets,
+                    scaffoldOptions,
+                    profile: detectScaffoldProfile(
+                      `${presets.cloud} ${presets.orchestrator}`,
+                      presets
+                    ),
+                  };
+                  const correctedFiles = normalizeScaffoldFiles(
+                    [...parsedFix.files, ...finalParsedFix.files],
+                    repairNormPreferred
+                  );
 
                   if (correctedFiles.length > 0) {
                     for (const file of correctedFiles) {
@@ -1154,11 +1222,11 @@ ${failLines.join('\n')}`;
                       controller.enqueue(sse({ type: 'file', file }));
                     }
                     // Re-lock stubs/CI after model repair so Gemini cannot re-break them.
-                    const repairProfile = detectScaffoldProfile(
-                      `${presets.cloud} ${presets.orchestrator}`,
-                      presets
+                    const repairProfile = repairNormPreferred.profile;
+                    let relocked = normalizeScaffoldFiles(
+                      currentFiles,
+                      repairNormPreferred
                     );
-                    let relocked = normalizeScaffoldFiles(currentFiles);
                     if (repairProfile) {
                       relocked = mergeLockedBaseFiles(relocked, repairProfile, {
                         fillMissing: false,
@@ -1166,7 +1234,10 @@ ${failLines.join('\n')}`;
                         presets,
                         scaffoldOptions,
                       }).files;
-                      relocked = normalizeScaffoldFiles(relocked);
+                      relocked = normalizeScaffoldFiles(
+                        relocked,
+                        repairNormPreferred
+                      );
                     }
                     const relockPaths = new Set(relocked.map((f) => f.path));
                     for (const f of currentFiles) {
