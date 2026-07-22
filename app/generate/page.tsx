@@ -864,6 +864,13 @@ export default function GeneratePage() {
     [isGenerating, sendMessage]
   );
 
+  /** Workspace picks up validate-stable repairs (safe outputs, pruned refs). */
+  const applyNormalizedFromChecks = useCallback((next: GeneratedFile[]) => {
+    if (!next.length) return;
+    setFiles(next);
+    filesRef.current = next;
+  }, []);
+
   const submitClarifyingAnswers = useCallback(() => {
     if (isGenerating || pendingQuestions.length === 0) return;
 
@@ -1431,6 +1438,7 @@ export default function GeneratePage() {
                 onApprove={approvePlan}
                 onDiscard={discardPlan}
                 onFixFailures={fixFailuresFromChecks}
+                onNormalizedFiles={applyNormalizedFromChecks}
               />
             </div>
           </section>

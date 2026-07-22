@@ -19,6 +19,8 @@ interface ScaffoldChecksPanelProps {
   onFixFailures?: (failReport: string) => void;
   /** Bubble check status up for the Validate step strip (not an error banner). */
   onStatusChange?: (status: 'idle' | 'running' | 'ok' | 'fail') => void;
+  /** Apply server-side normalize repairs into the workspace before checks run. */
+  onNormalizedFiles?: (files: GeneratedFile[]) => void;
 }
 
 type TermLine = { id: number; text: string; kind: 'out' | 'meta' | 'err' };
@@ -50,6 +52,7 @@ export function ScaffoldChecksPanel({
   autoRun = true,
   onFixFailures,
   onStatusChange,
+  onNormalizedFiles,
 }: ScaffoldChecksPanelProps) {
   const [lines, setLines] = useState<TermLine[]>([]);
   const [running, setRunning] = useState<ScaffoldCheckId | null>(null);
@@ -133,13 +136,19 @@ export function ScaffoldChecksPanel({
               error?: string;
               ok?: boolean;
               exitCode?: number;
+              files?: GeneratedFile[];
             };
             try {
               event = JSON.parse(dataLine.slice(6));
             } catch {
               continue;
             }
-            if (event.type === 'line' && event.text != null) {
+            if (event.type === 'normalized' && Array.isArray(event.files)) {
+              // Prevent autoRun loop when parent replaces workspace files.
+              autoRanForRef.current = filesFingerprint(event.files);
+              onNormalizedFiles?.(event.files);
+              append('Applied validate-stable Terraform repairs to workspace', 'meta');
+            } else if (event.type === 'line' && event.text != null) {
               append(event.text, 'out');
             } else if (event.type === 'status' && event.message) {
               append(event.message, 'meta');
@@ -170,7 +179,7 @@ export function ScaffoldChecksPanel({
         abortRef.current = null;
       }
     },
-    [append, files, isGenerating]
+    [append, files, isGenerating, onNormalizedFiles]
   );
 
   const collectFailReport = useCallback(() => {

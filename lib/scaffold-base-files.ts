@@ -750,6 +750,8 @@ export const FORCE_STUB_PATHS = new Set([
   // Helm helpers — missing templates fail helm lint/template
   'charts/app/templates/_helpers.tpl',
   'charts/app/Chart.yaml',
+  // Outputs that reference missing resources fail terraform validate hard
+  'terraform/outputs.tf',
 ]);
 
 function awsEcsBase(): BaseFileMap {

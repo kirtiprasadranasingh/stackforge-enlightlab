@@ -1,6 +1,7 @@
 import type { GeneratedFile } from '@/types';
 import { PATH_ALIASES } from '@/lib/scaffold-spec';
 import { getLanguageFromPath, validateFilePath } from '@/lib/utils';
+import { sanitizeTerraformForValidate } from '@/lib/terraform-validate-repair';
 
 /** Map alternate model paths → canonical PRD paths */
 const CANONICAL_PATH: Record<string, string> = {};
@@ -1700,6 +1701,14 @@ export function normalizeScaffoldFiles(
   stripCrossCloudBleed(byPath);
   ensureMinimalAppStubs(byPath);
 
+  // Force safe outputs, stub missing modules, rewrite undeclared refs
+  const sanitized = sanitizeTerraformForValidate(Array.from(byPath.values()));
+  byPath.clear();
+  for (const f of sanitized) byPath.set(f.path, f);
+  // Variables may reference new stubs — re-declare missing vars once more
+  ensureMissingTerraformVariables(byPath);
+  stripAlbAnnotationsWithoutController(byPath);
+
   return dedupeTerraformResources(Array.from(byPath.values()));
 }
 
@@ -1802,27 +1811,13 @@ function stripCrossCloudBleed(byPath: Map<string, GeneratedFile>): void {
     }
   }
 
-  // EKS / Helm scaffolds must not keep ECS-only terraform that confuses validate.
+  // EKS / Helm scaffolds: always drop ecs.tf (charts/ or EKS resources win).
   const isEks =
     /aws_eks_cluster|aws_eks_node_group|aws_eks_fargate/.test(tfBlob) ||
     [...byPath.keys()].some((p) => p.startsWith('charts/'));
-  const isEcsService = /aws_ecs_service|aws_ecs_task_definition/.test(tfBlob);
-  if (isEks && !isEcsService) {
-    for (const p of [...byPath.keys()]) {
-      if (/(^|\/)ecs\.tf$/.test(p)) byPath.delete(p);
-    }
-  }
-  // Misplaced kubernetes/helm provider-only ecs.tf on EKS (common Fix-failures hallucination)
   if (isEks) {
     for (const p of [...byPath.keys()]) {
-      if (!/(^|\/)ecs\.tf$/.test(p)) continue;
-      const c = byPath.get(p)!.content;
-      if (
-        /provider\s+"kubernetes"|provider\s+"helm"|aws_eks_cluster/.test(c) &&
-        !/aws_ecs_service|aws_ecs_task_definition/.test(c)
-      ) {
-        byPath.delete(p);
-      }
+      if (/(^|\/)ecs\.tf$/.test(p)) byPath.delete(p);
     }
   }
 }

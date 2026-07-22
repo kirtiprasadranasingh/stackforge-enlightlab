@@ -37,6 +37,7 @@ export async function OPTIONS(request: NextRequest) {
 /**
  * Client-triggered scaffold checks (allowlisted only — no free shell).
  * Streams stdout/stderr as SSE: line | status | done | error
+ * Also emits normalizedFiles so the workspace picks up validate-stable TF repairs.
  */
 export async function POST(request: NextRequest) {
   const origin = request.headers.get('origin');
@@ -80,6 +81,18 @@ export async function POST(request: NextRequest) {
       try {
         controller.enqueue(
           sse({ type: 'status', message: `Preparing scaffold for ${checkId}…` })
+        );
+        // Push repaired files to the client so the editor matches what we check.
+        controller.enqueue(
+          sse({
+            type: 'normalized',
+            files: normalizedFiles.map((f) => ({
+              path: f.path,
+              content: f.content,
+              language: f.language,
+              description: f.description,
+            })),
+          })
         );
         tempDir = await writeScaffoldTemp(normalizedFiles);
         const exitCode = await runScaffoldCheck(checkId, tempDir, (line) => {
