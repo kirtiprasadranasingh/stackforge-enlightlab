@@ -9,6 +9,20 @@ import type { GeneratedFile } from '@/types';
 import type { ScaffoldProfile, ScaffoldProfileId } from '@/lib/scaffold-spec';
 import { getLanguageFromPath } from '@/lib/utils';
 import { getMissingPaths } from '@/lib/scaffold-spec';
+import {
+  TF_EKS_VERSIONS,
+  TF_EKS_VARIABLES,
+  TF_EKS_MAIN,
+  TF_EKS_NETWORK,
+  TF_EKS_SECURITY,
+  TF_EKS_IAM,
+  TF_EKS_CLUSTER,
+  TF_EKS_DATABASE,
+  TF_EKS_OUTPUTS,
+  EKS_ENV_STAGING_TFVARS,
+  EKS_ENV_DEV_TFVARS,
+  EKS_README,
+} from '@/lib/locked-tf-aws-eks';
 
 type BaseFileMap = Record<string, string>;
 
@@ -532,7 +546,7 @@ version: 0.1.0
 appVersion: "1.0.0"
 `;
 
-const HELM_VALUES = `replicaCount: 2
+const HELM_VALUES = `replicaCount: 3
 
 image:
   repository: REPLACE_ME
@@ -544,6 +558,7 @@ service:
   port: 80
   targetPort: 3000
 
+# Private / internal only — ClusterIP; enable ingress later if needed.
 ingress:
   enabled: false
   className: nginx
@@ -556,8 +571,8 @@ ingress:
 
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 10
+  minReplicas: 3
+  maxReplicas: 5
   targetCPUUtilizationPercentage: 70
 
 resources:
@@ -758,6 +773,7 @@ export function shouldForceLockPath(path: string): boolean {
   if (FORCE_STUB_PATHS.has(path)) return true;
   // Optimal fix: never trust model Terraform — always use profile-validated TF
   if (path.startsWith('terraform/') && path.endsWith('.tf')) return true;
+  if (path.startsWith('environments/') && path.endsWith('.tfvars')) return true;
   return false;
 }
 
@@ -785,27 +801,17 @@ function awsEcsBase(): BaseFileMap {
 
 function awsEksBase(): BaseFileMap {
   return {
-    'terraform/versions.tf': `${TF_AWS_VERSIONS.replace(
-      'required_providers {\n    aws = {\n      source  = "hashicorp/aws"\n      version = "~> 5.84"\n    }\n  }',
-      `required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.84"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.17"
-    }
-  }`
-    )}`,
-    'terraform/variables.tf': TF_AWS_VARIABLES,
-    'terraform/main.tf': TF_PLACEHOLDER('EKS cluster + networking'),
-    'terraform/iam.tf': TF_PLACEHOLDER('IRSA + node/cluster roles'),
-    'terraform/outputs.tf': SAFE_TF_OUTPUTS,
+    'terraform/versions.tf': TF_EKS_VERSIONS,
+    'terraform/variables.tf': TF_EKS_VARIABLES,
+    'terraform/main.tf': TF_EKS_MAIN,
+    'terraform/network.tf': TF_EKS_NETWORK,
+    'terraform/security_groups.tf': TF_EKS_SECURITY,
+    'terraform/iam.tf': TF_EKS_IAM,
+    'terraform/eks.tf': TF_EKS_CLUSTER,
+    'terraform/database.tf': TF_EKS_DATABASE,
+    'terraform/outputs.tf': TF_EKS_OUTPUTS,
+    'environments/staging.tfvars': EKS_ENV_STAGING_TFVARS,
+    'environments/development.tfvars': EKS_ENV_DEV_TFVARS,
     '.github/workflows/deploy.yml': GHA_EKS_DEPLOY,
     'app/Dockerfile': NODE_DOCKERFILE_APP,
     'app/package.json': EXPRESS_PACKAGE_JSON,
@@ -831,7 +837,7 @@ metadata:
   {{- end }}
 {{- end }}
 `,
-    'README.md': README_STUB('AWS EKS + Helm Scaffold'),
+    'README.md': EKS_README,
   };
 }
 
