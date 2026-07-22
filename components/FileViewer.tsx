@@ -619,30 +619,54 @@ export function FileViewer({
             )}
           </div>
 
-          {/* Status bar */}
+          {/* Status bar — muted while streaming so ZIP/Copy don't look "ready" */}
           <div
             className={`h-[22px] text-[12px] px-3 flex items-center justify-between shrink-0 ${
-              isDark ? 'bg-[#007acc] text-white' : 'bg-[#007acc] text-white'
+              isGenerating
+                ? isDark
+                  ? 'bg-[#3c3c3c] text-[#cccccc]'
+                  : 'bg-slate-500 text-white'
+                : 'bg-[#007acc] text-white'
             }`}
           >
-            <div className="flex items-center gap-3">
-              <span>{selected?.path || ''}</span>
-              <span>Lines {lineCount}</span>
-              <span>UTF-8</span>
-              <span className="capitalize">{selected?.language || 'plain'}</span>
+            <div className="flex items-center gap-3 min-w-0">
+              {isGenerating ? (
+                <span className="truncate font-medium">
+                  Writing files… export available when generation finishes
+                </span>
+              ) : (
+                <>
+                  <span className="truncate">{selected?.path || ''}</span>
+                  <span>Lines {lineCount}</span>
+                  <span>UTF-8</span>
+                  <span className="capitalize">{selected?.language || 'plain'}</span>
+                </>
+              )}
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 shrink-0">
               <button
                 type="button"
                 onClick={() => void downloadAll()}
-                className="hover:underline cursor-pointer"
+                disabled={Boolean(isGenerating) || files.length === 0}
+                className="hover:underline cursor-pointer disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                title={
+                  isGenerating
+                    ? 'Wait until generation finishes'
+                    : 'Download all files as ZIP'
+                }
               >
                 ZIP
               </button>
               <button
                 type="button"
                 onClick={() => selected && void copyToClipboard(selected.content)}
-                className="hover:underline cursor-pointer"
+                disabled={Boolean(isGenerating) || !selected}
+                className="hover:underline cursor-pointer disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                title={
+                  isGenerating
+                    ? 'Wait until generation finishes'
+                    : 'Copy current file'
+                }
               >
                 Copy
               </button>
