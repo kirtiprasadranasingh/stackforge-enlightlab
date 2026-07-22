@@ -87,6 +87,12 @@ export function ScaffoldChecksPanel({
       abortRef.current?.abort();
       const ac = new AbortController();
       abortRef.current = ac;
+      let timedOut = false;
+      // Terraform validate on a 1-pod deploy can hang the whole API.
+      const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        ac.abort();
+      }, 4 * 60 * 1000);
       setRunning(check);
       setLastResult(null);
       setDismissed(false);
@@ -144,7 +150,6 @@ export function ScaffoldChecksPanel({
               continue;
             }
             if (event.type === 'normalized' && Array.isArray(event.files)) {
-              // Prevent autoRun loop when parent replaces workspace files.
               autoRanForRef.current = filesFingerprint(event.files);
               onNormalizedFiles?.(event.files);
               append('Applied validate-stable Terraform repairs to workspace', 'meta');
@@ -166,15 +171,36 @@ export function ScaffoldChecksPanel({
         } else if (exitOk === false) {
           setLastResult('fail');
           append('RESULT: FAILED', 'err');
+        } else {
+          setLastResult('fail');
+          append(
+            'RESULT: INCOMPLETE — connection closed before checks finished. Stop, hard-refresh if chat fails, then retry.',
+            'err'
+          );
         }
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') {
-          append('▸ Cancelled', 'meta');
+          if (timedOut) {
+            setLastResult('fail');
+            append(
+              '▸ Timed out after 4 minutes — terraform validate likely overloaded the pod. Restart stackforge, then retry checks.',
+              'err'
+            );
+          } else {
+            append('▸ Cancelled', 'meta');
+          }
         } else {
           setLastResult('fail');
-          append(e instanceof Error ? e.message : 'Check failed', 'err');
+          const msg = e instanceof Error ? e.message : 'Check failed';
+          append(
+            /fetch|network|failed to fetch/i.test(msg)
+              ? 'Could not reach validate API (pod overloaded or hung). Hard-refresh; if the page still spins, restart deployment/stackforge.'
+              : msg,
+            'err'
+          );
         }
       } finally {
+        window.clearTimeout(timeoutId);
         setRunning(null);
         abortRef.current = null;
       }

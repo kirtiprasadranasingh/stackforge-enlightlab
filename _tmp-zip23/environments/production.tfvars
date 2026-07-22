@@ -1,0 +1,9 @@
+aws_region = "us-east-1"
+environment  = "production"
+project_name = "stackforge"
+node_desired_size = 3
+node_min_size = 3
+node_max_size = 5
+enable_database = true
+db_engine = "postgres"
+db_multi_az = true
