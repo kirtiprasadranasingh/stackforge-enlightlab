@@ -70,12 +70,32 @@ function blockHasUndeclaredRef(
   return false;
 }
 
+/**
+ * Remove every `output` block from all .tf files (models put them in
+ * alb_controller.tf / iam.tf / etc.), then write a single safe outputs.tf.
+ */
 function forceSafeOutputs(files: GeneratedFile[]): GeneratedFile[] {
-  const out = files.filter(
-    (f) => !/\/outputs\.tf$|^outputs\.tf$/.test(normPath(f.path))
-  );
-  const hasTf = out.some((f) => normPath(f.path).endsWith('.tf'));
+  const hasTf = files.some((f) => normPath(f.path).endsWith('.tf'));
   if (!hasTf) return files;
+
+  const out: GeneratedFile[] = [];
+  for (const f of files) {
+    const p = normPath(f.path);
+    if (/\/outputs\.tf$|^outputs\.tf$/.test(p)) continue;
+    if (!p.endsWith('.tf')) {
+      out.push({ ...f, path: p });
+      continue;
+    }
+    const content = f.content
+      .replace(/\n*output\s+"[^"]+"\s*\{[\s\S]*?\n\}/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trimEnd()
+      .concat('\n');
+    // Drop files that become empty after stripping outputs-only content
+    if (!content.trim()) continue;
+    out.push({ ...f, path: p, content });
+  }
+
   out.push({
     path: 'terraform/outputs.tf',
     language: 'hcl',
@@ -276,8 +296,24 @@ export function collapseTerraformToValidatable(
   }));
 }
 
-/** Surgical sanitize applied on every normalize pass. */
+/**
+ * Surgical sanitize on every normalize pass.
+ *
+ * Do NOT prune resource blocks by default — that deleted valid IAM/EKS
+ * resources while leaving orphan outputs in sibling files (validate regression).
+ * Only force safe outputs + stub missing modules.
+ */
 export function sanitizeTerraformForValidate(
+  files: GeneratedFile[]
+): GeneratedFile[] {
+  let next = forceSafeOutputs(files);
+  next = stubUndeclaredModules(next);
+  next = forceSafeOutputs(next);
+  return next;
+}
+
+/** Explicit prune — used only when validate logs show undeclared-resource errors. */
+export function pruneUndeclaredTerraformRefs(
   files: GeneratedFile[]
 ): GeneratedFile[] {
   let next = forceSafeOutputs(files);
@@ -345,15 +381,13 @@ export function applyValidateErrorFixes(
     }
   }
 
-  if (
-    /Reference to undeclared (resource|module)/i.test(validateText) ||
-    /Duplicate output definition/i.test(validateText)
-  ) {
-    let next = Array.from(byPath.values());
-    next = stubUndeclaredModules(next);
-    next = pruneInconsistentBlocks(next);
-    next = forceSafeOutputs(next);
-    return next;
+  if (/Duplicate output definition/i.test(validateText)) {
+    return forceSafeOutputs(Array.from(byPath.values()));
+  }
+
+  if (/Reference to undeclared (resource|module)/i.test(validateText)) {
+    // Only prune when validate already failed on undeclared refs
+    return pruneUndeclaredTerraformRefs(Array.from(byPath.values()));
   }
 
   if (!changed) return null;

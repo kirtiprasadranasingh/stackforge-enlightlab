@@ -926,6 +926,13 @@ function patchAwsValidateSchema(content: string): string {
     '$1.id'
   );
 
+  // inline_policy on aws_iam_role is deprecated (warning noise / future break)
+  out = out.replace(
+    /resource\s+"aws_iam_role"\s+"[^"]+"\s*\{[\s\S]*?\n\}/g,
+    (block) =>
+      block.replace(/^[ \t]*inline_policy\s*\{[\s\S]*?\n[ \t]*\}\s*\r?\n/gm, '')
+  );
+
   return out;
 }
 
@@ -1750,6 +1757,12 @@ function stripEksWorkflowEcsBleed(byPath: Map<string, GeneratedFile>): void {
   }
 }
 
+/**
+ * Check #7 in validate-scaffold.sh fails if ANY file mentions
+ * aws-load-balancer-controller or alb.ingress.kubernetes.io without a
+ * terraform helm_release for the controller. Strip those refs when the
+ * controller install is missing (do not leave half-baked alb_controller.tf).
+ */
 function stripAlbAnnotationsWithoutController(
   byPath: Map<string, GeneratedFile>
 ): void {
@@ -1758,29 +1771,65 @@ function stripAlbAnnotationsWithoutController(
     .map(([, f]) => f.content)
     .join('\n');
   const hasController =
-    /helm_release/.test(tfBlob) && /aws-load-balancer-controller/.test(tfBlob);
+    /resource\s+"helm_release"/.test(tfBlob) &&
+    /aws-load-balancer-controller/.test(tfBlob);
   if (hasController) return;
 
-  for (const [path, file] of [...byPath.entries()]) {
-    if (!/charts\/.+\/templates\/ingress\.ya?ml$/i.test(path)) continue;
-    if (!/alb\.ingress\.kubernetes\.io/.test(file.content)) continue;
-    const cleaned = file.content
-      .replace(/^\s*kubernetes\.io\/ingress\.class:\s*alb\s*$/gm, '')
-      .replace(/^\s*alb\.ingress\.kubernetes\.io\/[^\n]*$/gm, '');
-    byPath.set(path, { ...file, content: cleaned });
+  const mentionsAlb = [...byPath.values()].some(
+    (f) =>
+      /aws-load-balancer-controller|alb\.ingress\.kubernetes\.io/.test(f.content)
+  );
+  if (!mentionsAlb) return;
+
+  // Drop incomplete ALB controller terraform (outputs/IAM without helm_release)
+  for (const p of [...byPath.keys()]) {
+    if (!p.endsWith('.tf')) continue;
+    const content = byPath.get(p)!.content;
+    if (!/aws-load-balancer-controller|alb_controller/.test(content)) continue;
+    if (/resource\s+"helm_release"/.test(content)) continue;
+    byPath.delete(p);
   }
 
   for (const [path, file] of [...byPath.entries()]) {
-    if (!/charts\/.+\/values\.ya?ml$/i.test(path)) continue;
-    if (!/alb\.ingress\.kubernetes\.io|className:\s*alb/.test(file.content)) {
-      continue;
+    let content = file.content;
+    const before = content;
+
+    if (/charts\/.+\/templates\/ingress\.ya?ml$/i.test(path)) {
+      content = content
+        .replace(/^\s*kubernetes\.io\/ingress\.class:\s*alb\s*$/gm, '')
+        .replace(/^\s*alb\.ingress\.kubernetes\.io\/[^\n]*$/gm, '');
     }
-    let content = file.content.replace(/className:\s*alb\b/g, 'className: nginx');
-    content = content.replace(
-      /(ingress:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+enabled:\s*)true/m,
-      '$1false'
-    );
-    byPath.set(path, { ...file, content });
+
+    if (/charts\/.+\/values\.ya?ml$/i.test(path)) {
+      content = content.replace(/className:\s*alb\b/g, 'className: nginx');
+      content = content.replace(
+        /(ingress:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+enabled:\s*)true/m,
+        '$1false'
+      );
+      // Clear annotation maps that still name ALB
+      content = content.replace(
+        /^[ \t]*alb\.ingress\.kubernetes\.io\/[^\n]*\r?\n/gm,
+        ''
+      );
+      content = content.replace(
+        /aws-load-balancer-controller/g,
+        'ingress-nginx'
+      );
+    }
+
+    // Scrub remaining trigger strings from README / workflows / leftover TF comments
+    if (
+      /aws-load-balancer-controller|alb\.ingress\.kubernetes\.io/.test(content)
+    ) {
+      content = content
+        .replace(/aws-load-balancer-controller/g, 'ingress-controller')
+        .replace(/alb\.ingress\.kubernetes\.io\/[^\s"']+/g, 'nginx.ingress.kubernetes.io/rewrite-target')
+        .replace(/alb\.ingress\.kubernetes\.io/g, 'nginx.ingress.kubernetes.io');
+    }
+
+    if (content !== before) {
+      byPath.set(path, { ...file, content });
+    }
   }
 }
 
