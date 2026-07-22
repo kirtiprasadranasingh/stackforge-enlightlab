@@ -53,17 +53,23 @@ export function parseScaffoldOptions(
   );
   if (regionMatch) out.region = regionMatch[1];
 
-  // Environments
-  const wantsDev = /\bdevelopment\b|\bdev\b/.test(t);
-  const wantsStaging = /\bstaging\b/.test(t);
-  const wantsProd = /\bproduction\b|\bprod\b/.test(t);
-  if (/\bone environment\b/.test(t) && !wantsDev && !wantsProd) {
+  // Environments — prefer explicit interview phrases; avoid matching
+  // "production-grade" / accidental "prod" substrings.
+  if (/\bdevelopment,\s*staging,\s*and\s*production\b/.test(t)) {
+    out.environments = ['development', 'staging', 'production'];
+  } else if (/\bdevelopment and staging\b/.test(t)) {
+    out.environments = ['development', 'staging'];
+  } else if (/\bdevelopment and production\b/.test(t)) {
+    out.environments = ['development', 'production'];
+  } else if (/\bone environment\b/.test(t)) {
     out.environments = ['staging'];
-  } else if (wantsDev || wantsStaging || wantsProd) {
+  } else {
     const envs: string[] = [];
-    if (wantsDev) envs.push('development');
-    if (wantsStaging) envs.push('staging');
-    if (wantsProd) envs.push('production');
+    if (/\bdevelopment\b/.test(t)) envs.push('development');
+    if (/\bstaging\b/.test(t)) envs.push('staging');
+    if (/\bproduction\b/.test(t) && !/\bproduction-grade\b|\bproduction ready\b/.test(t)) {
+      envs.push('production');
+    }
     if (envs.length) out.environments = envs;
   }
 
@@ -84,15 +90,17 @@ export function parseScaffoldOptions(
     out.database = 'postgres';
   }
 
-  // Database mode
-  if (/\bhigh availability\b|\bmulti-?az\b|\bha\b/.test(t)) {
-    out.databaseMode = 'ha';
-  }
-  if (/\b7-day\b|\bautomatic backups\b|\bbackup\b/.test(t)) {
-    out.databaseMode = 'ha_backup';
-  }
+  // Database mode — order matters: specific phrases beat generic "backup"
   if (/\bstandard private database\b/.test(t)) {
     out.databaseMode = 'standard';
+  } else if (
+    /\bprivate database with 7-day\b|\b7-day automatic backups\b|\bautomatic backups\b/.test(
+      t
+    )
+  ) {
+    out.databaseMode = 'ha_backup';
+  } else if (/\bhigh availability\b|\bmulti-?az\b/.test(t)) {
+    out.databaseMode = 'ha';
   }
 
   // Access

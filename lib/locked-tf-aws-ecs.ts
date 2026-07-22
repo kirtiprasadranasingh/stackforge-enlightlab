@@ -65,6 +65,11 @@ variable "enable_redis" {
   type    = bool
   default = false
 }
+variable "alb_internal" {
+  type        = bool
+  description = "true = private/internal ALB only"
+  default     = true
+}
 variable "vpc_cidr" {
   type    = string
   default = "10.50.0.0/16"
@@ -167,13 +172,13 @@ export const TF_ECS_SG = `resource "aws_security_group" "alb" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.alb_internal ? [var.vpc_cidr] : ["0.0.0.0/0"]
   }
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.alb_internal ? [var.vpc_cidr] : ["0.0.0.0/0"]
   }
   egress {
     from_port   = 0
@@ -271,10 +276,10 @@ resource "aws_iam_role" "ecs_task" {
 
 export const TF_ECS_ALB = `resource "aws_lb" "main" {
   name               = substr("\${local.name}-alb", 0, 32)
-  internal           = false
+  internal           = var.alb_internal
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
-  subnets            = aws_subnet.public[*].id
+  subnets            = var.alb_internal ? aws_subnet.private[*].id : aws_subnet.public[*].id
   tags               = local.tags
 }
 
@@ -389,8 +394,8 @@ resource "aws_ecs_service" "app" {
 }
 
 resource "aws_appautoscaling_target" "ecs" {
-  max_capacity       = 10
-  min_capacity       = 2
+  max_capacity       = var.desired_count >= 4 ? 20 : 10
+  min_capacity       = var.desired_count >= 4 ? 3 : 2
   resource_id        = "service/\${aws_ecs_cluster.main.name}/\${aws_ecs_service.app.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"

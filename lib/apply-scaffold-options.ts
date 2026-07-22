@@ -213,6 +213,7 @@ export function applyScaffoldOptions(
       options.databaseMode === 'ha' || options.databaseMode === 'ha_backup';
     c = patchDefault(c, 'db_multi_az', multiAz);
     c = patchDefault(c, 'db_ha', multiAz);
+    c = patchDefault(c, 'alb_internal', options.access === 'private');
     byPath.set(p, { ...f, content: c });
   }
 
@@ -269,10 +270,21 @@ export function applyScaffoldOptions(
   const chosen = ciSkeleton(presets.ci, presets);
   // Keep richer locked GHA if present and user chose github-actions
   if (presets.ci === 'github-actions' && byPath.has('.github/workflows/deploy.yml')) {
-    // still remove competing CI files
     for (const p of ciPaths) {
       if (p !== '.github/workflows/deploy.yml') byPath.delete(p);
     }
+    const wf = byPath.get('.github/workflows/deploy.yml')!;
+    let w = wf.content;
+    // Align region fallback with interview answer (e.g. eu-west-1)
+    w = w.replace(
+      /AWS_REGION:\s*\$\{\{\s*vars\.AWS_REGION\s*\|\|\s*'[^']+'\s*\}\}/g,
+      `AWS_REGION: \${{ vars.AWS_REGION || '${options.region}' }}`
+    );
+    w = w.replace(
+      /aws-region:\s*\$\{\{\s*env\.AWS_REGION\s*\}\}/g,
+      'aws-region: ${{ env.AWS_REGION }}'
+    );
+    byPath.set('.github/workflows/deploy.yml', { ...wf, content: w });
   } else {
     for (const p of ciPaths) byPath.delete(p);
     set(byPath, chosen.path, chosen.content);
