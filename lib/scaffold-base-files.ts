@@ -43,7 +43,9 @@ import {
   TF_CR_NETWORK,
   TF_CR_DATABASE,
   TF_CR_CLOUDRUN,
+  TF_CR_IAM,
   TF_CR_OUTPUTS,
+  CLOUDRUN_README,
 } from '@/lib/locked-tf-gcp-cloudrun';
 import {
   TF_ACA_VERSIONS,
@@ -907,13 +909,15 @@ function gcpCloudRunBase(): BaseFileMap {
     'terraform/network.tf': TF_CR_NETWORK,
     'terraform/database.tf': TF_CR_DATABASE,
     'terraform/cloudrun.tf': TF_CR_CLOUDRUN,
+    'terraform/iam.tf': TF_CR_IAM,
     'terraform/outputs.tf': TF_CR_OUTPUTS,
-    'environments/staging.tfvars': `region = "us-central1"\nenvironment = "staging"\n# project_id = "YOUR_GCP_PROJECT"\n`,
+    'environments/staging.tfvars': `region = "us-central1"\nenvironment = "staging"\ndb_engine = "postgres"\n# project_id = "YOUR_GCP_PROJECT"\n`,
+    'environments/development.tfvars': `region = "us-central1"\nenvironment = "development"\ndb_engine = "postgres"\n# project_id = "YOUR_GCP_PROJECT"\n`,
     '.gitlab-ci.yml': GITLAB_CI,
     Dockerfile: PYTHON_DOCKERFILE,
     'requirements.txt': FASTAPI_REQUIREMENTS,
     'main.py': FASTAPI_MAIN,
-    'README.md': README_STUB('GCP Cloud Run Scaffold'),
+    'README.md': CLOUDRUN_README,
   };
 }
 

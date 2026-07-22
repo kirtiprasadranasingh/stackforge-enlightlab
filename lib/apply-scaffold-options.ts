@@ -214,6 +214,12 @@ export function applyScaffoldOptions(
     c = patchDefault(c, 'db_multi_az', multiAz);
     c = patchDefault(c, 'db_ha', multiAz);
     c = patchDefault(c, 'alb_internal', options.access === 'private');
+    const publicAccess =
+      options.access === 'public_https' || options.access === 'public_basic';
+    c = patchDefault(c, 'allow_public_access', publicAccess);
+    if (options.databaseMode === 'ha_backup') {
+      c = patchDefault(c, 'backup_retention_count', 7);
+    }
     byPath.set(p, { ...f, content: c });
   }
 
@@ -228,7 +234,13 @@ export function applyScaffoldOptions(
       `project_name = "stackforge"`,
     ];
     if (presets.cloud === 'gcp') {
-      lines.unshift(`# set project_id in CI / tfvars`);
+      lines.push(`db_engine = "${options.database === 'mysql' ? 'mysql' : 'postgres'}"`);
+      lines.push(
+        `allow_public_access = ${options.access === 'public_https' || options.access === 'public_basic'}`
+      );
+      if (options.databaseMode === 'ha_backup') {
+        lines.push('backup_retention_count = 7');
+      }
       lines.push(`# project_id = "YOUR_GCP_PROJECT"`);
     }
     if (presets.cloud === 'oracle') {

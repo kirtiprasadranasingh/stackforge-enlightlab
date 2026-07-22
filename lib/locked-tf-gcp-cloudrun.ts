@@ -50,6 +50,15 @@ variable "db_ha" {
   type    = bool
   default = true
 }
+variable "allow_public_access" {
+  type        = bool
+  description = "When true, grant allUsers run.invoker (public HTTP URL)"
+  default     = true
+}
+variable "backup_retention_count" {
+  type    = number
+  default = 7
+}
 `;
 
 export const TF_CR_MAIN = `resource "google_project_service" "apis" {
@@ -131,7 +140,12 @@ export const TF_CR_DATABASE = `resource "google_sql_database_instance" "main" {
     tier              = "db-custom-1-3840"
     availability_type = var.db_ha ? "REGIONAL" : "ZONAL"
     backup_configuration {
-      enabled = true
+      enabled                        = true
+      point_in_time_recovery_enabled = true
+      backup_retention_settings {
+        retained_backups = var.backup_retention_count
+        retention_unit   = "COUNT"
+      }
     }
     ip_configuration {
       ipv4_enabled    = false
@@ -159,7 +173,7 @@ resource "google_sql_user" "app" {
 export const TF_CR_CLOUDRUN = `resource "google_cloud_run_v2_service" "app" {
   name     = "\${var.service_name}-\${var.environment}"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  ingress  = var.allow_public_access ? "INGRESS_TRAFFIC_ALL" : "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   template {
     service_account = google_service_account.runtime.email
@@ -189,10 +203,42 @@ export const TF_CR_CLOUDRUN = `resource "google_cloud_run_v2_service" "app" {
 }
 
 resource "google_cloud_run_v2_service_iam_member" "public" {
+  count    = var.allow_public_access ? 1 : 0
   name     = google_cloud_run_v2_service.app.name
   location = google_cloud_run_v2_service.app.location
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+`;
+
+export const TF_CR_IAM = `resource "google_service_account" "gitlab_ci" {
+  account_id   = substr("\${var.service_name}-\${var.environment}-gl", 0, 28)
+  display_name = "GitLab CI deployer (least privilege)"
+}
+
+resource "google_project_iam_member" "runtime_cloudsql_client" {
+  count   = var.enable_database ? 1 : 0
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:\${google_service_account.runtime.email}"
+}
+
+resource "google_project_iam_member" "gitlab_artifact_writer" {
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = "serviceAccount:\${google_service_account.gitlab_ci.email}"
+}
+
+resource "google_project_iam_member" "gitlab_run_developer" {
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:\${google_service_account.gitlab_ci.email}"
+}
+
+resource "google_project_iam_member" "gitlab_sa_user" {
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:\${google_service_account.gitlab_ci.email}"
 }
 `;
 
@@ -205,4 +251,28 @@ output "artifact_registry" {
 output "sql_connection_name" {
   value = try(google_sql_database_instance.main[0].connection_name, null)
 }
+output "runtime_service_account" {
+  value = google_service_account.runtime.email
+}
+output "gitlab_ci_service_account" {
+  value = google_service_account.gitlab_ci.email
+}
+`;
+
+export const CLOUDRUN_README = `# GCP Cloud Run + FastAPI + Cloud SQL + GitLab CI
+
+Reviewable StackForge scaffold: private Cloud SQL (Postgres), public Cloud Run URL
+(no custom domain), GitLab CI build/deploy, and least-privilege IAM for runtime
+and GitLab deployer service accounts.
+
+## Apply per environment
+
+\`\`\`bash
+terraform init
+terraform apply -var-file=environments/staging.tfvars -var="project_id=YOUR_PROJECT"
+terraform apply -var-file=environments/development.tfvars -var="project_id=YOUR_PROJECT"
+\`\`\`
+
+Set GitLab CI variables: \`GCP_PROJECT_ID\`, \`GCP_REGION\`, \`AR_REPO\`, and workload
+federation / key for \`gitlab_ci\` service account.
 `;
