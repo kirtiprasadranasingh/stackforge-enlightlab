@@ -1110,15 +1110,24 @@ export function mergeLockedBaseFiles(
   for (const [path, content] of Object.entries(base)) {
     const exists = byPath.has(path);
     const isTf = path.startsWith('terraform/') && path.endsWith('.tf');
+    // Never force-lock GitHub Actions over a non-GHA interview CI pick
+    // (applyScaffoldOptions writes buildspec/Jenkins/etc.; force stub was
+    // re-adding deploy.yml afterward — ZIP 25 CodePipeline leftover).
+    const skipGhaForce =
+      path === '.github/workflows/deploy.yml' &&
+      Boolean(options.presets?.ci) &&
+      options.presets!.ci !== 'github-actions';
     const shouldForce =
       forceStubs &&
       shouldForceLockPath(path) &&
-      (!terraformOnly || isTf);
+      (!terraformOnly || isTf) &&
+      !skipGhaForce;
     const shouldFill = missing.includes(path) || (!exists && fillMissing);
     const existing = byPath.get(path);
     const emptyExisting = exists && !(existing?.content || '').trim();
 
     if (!shouldForce && !shouldFill && !emptyExisting) continue;
+    if (skipGhaForce && !exists) continue;
 
     byPath.set(path, {
       path,

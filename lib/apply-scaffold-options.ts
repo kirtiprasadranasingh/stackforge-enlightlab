@@ -364,6 +364,10 @@ export function applyScaffoldOptions(
     for (const p of ciPaths) {
       if (p !== '.github/workflows/deploy.yml') byPath.delete(p);
     }
+    // Drop model-invented alternate CI trees
+    for (const p of [...byPath.keys()]) {
+      if (p.startsWith('aws-codepipeline/')) byPath.delete(p);
+    }
     const wf = byPath.get('.github/workflows/deploy.yml')!;
     let w = wf.content;
     // Align region fallback with interview answer (e.g. eu-west-1)
@@ -378,6 +382,11 @@ export function applyScaffoldOptions(
     byPath.set('.github/workflows/deploy.yml', { ...wf, content: w });
   } else {
     for (const p of ciPaths) byPath.delete(p);
+    // Remove all GHA workflows + nested CodePipeline copies the model invents
+    for (const p of [...byPath.keys()]) {
+      if (p.startsWith('.github/workflows/')) byPath.delete(p);
+      if (p.startsWith('aws-codepipeline/')) byPath.delete(p);
+    }
     // GKE + Cloud Build: build app/ context and push to Artifact Registry placeholder
     if (presets.ci === 'gcp-cloud-build' && presets.orchestrator === 'gke') {
       set(
@@ -412,6 +421,12 @@ images:
     } else {
       set(byPath, chosen.path, chosen.content);
     }
+  }
+
+  // Model sometimes invents a second app tree alongside locked app/
+  for (const p of [...byPath.keys()]) {
+    if (p === 'application' || p.startsWith('application/')) byPath.delete(p);
+    if (p === 'container_app' || p.startsWith('container_app/')) byPath.delete(p);
   }
 
   // Runtime stubs — swap when interview picks a language

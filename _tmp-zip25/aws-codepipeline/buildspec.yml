@@ -1,0 +1,31 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      # Install any necessary build tools here, e.g., npm if not pre-installed
+      # For standard:6.0 image, npm is typically available.
+      - echo "Installing dependencies..."
+      - npm install
+  pre_build:
+    commands:
+      - echo "Running tests and linting..."
+      # Minimal placeholder for unit tests or linting
+      - npm test || echo "No tests configured. Proceeding..." # Placeholder, replace with actual tests
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+  build:
+    commands:
+      - echo "Building the Docker image..."
+      - docker build -t $ECR_REPOSITORY_URI:latest -f application/Dockerfile application/
+      - docker tag $ECR_REPOSITORY_URI:latest $ECR_REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION
+  post_build:
+    commands:
+      - echo "Pushing the Docker images to ECR..."
+      - docker push $ECR_REPOSITORY_URI:latest
+      - docker push $ECR_REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - echo "Creating imagedefinitions.json file..."
+      - printf '[{"name":"%s","imageUri":"%s"}]' $CONTAINER_NAME $ECR_REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION > imagedefinitions.json
+artifacts:
+  files:
+    - imagedefinitions.json

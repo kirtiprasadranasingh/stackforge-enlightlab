@@ -1,0 +1,11 @@
+version: 0.2
+phases:
+  build:
+    commands:
+      - echo Build for ECS/EKS
+  post_build:
+    commands:
+      - echo Deploy
+artifacts:
+  files:
+    - '**/*'

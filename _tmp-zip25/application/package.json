@@ -1,0 +1,13 @@
+{
+  "name": "express-health-api",
+  "version": "1.0.0",
+  "description": "A minimal Express.js API for health checks.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"No tests specified for this minimal stub\" && exit 0"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
