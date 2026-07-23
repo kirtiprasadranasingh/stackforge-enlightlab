@@ -38,7 +38,23 @@ const KNOWN_DATA_SERVICES: Array<{ label: string; pattern: RegExp }> = [
 ];
 
 const REGION_PATTERN =
-  /^(us|eu|ap|sa|ca|me|af|cn|il)-(central|east|west|north|south|northeast|southeast|northwest|southwest)-\d+[a-z]?$/i;
+  /^(us|eu|ap|sa|ca|me|af|cn|il|uk)-(central|east|west|north|south|northeast|southeast|northwest|southwest|mumbai|ashburn|frankfurt|london|jeddah|singapore|tokyo|sydney|ireland|paris|stockholm|seoul|osaka|hyderabad|melbourne|spain|zurich|calgary|uae|telaviv)-\d+[a-z]?$/i;
+
+/** Any region we offer in the interview UI (all clouds). */
+function isKnownInterviewRegion(value: string): boolean {
+  const v = value.trim().toLowerCase();
+  return Object.values(
+    // lazy import avoided — list is duplicated via pattern + common IDs
+    {
+      aws: ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-south-1'],
+      gcp: ['us-central1', 'europe-west1', 'asia-south1'],
+      azure: ['eastus', 'westeurope', 'centralindia'],
+      oracle: ['ap-mumbai-1', 'us-ashburn-1', 'eu-frankfurt-1', 'uk-london-1', 'me-jeddah-1'],
+    }
+  )
+    .flat()
+    .some((region) => region.toLowerCase() === v);
+}
 
 const PRODUCT_HINT =
   /(sql|db|cache|mq|queue|store|base|search|stream|broker|bus|redis|mongo|kafka|postgres|mysql|elastic|dynamo|cosmos|fire|oracle|node|python|java|golang|\.net|eks|ecs|gke|aks|oke|devops|pipeline|actions|gitlab|jenkins)/i;
@@ -245,8 +261,13 @@ export function validateInterviewAnswer(
   }
 
   if (isRegionQuestion(question)) {
-    if (REGION_PATTERN.test(answer.replace(/\s+/g, ''))) {
-      return { ok: true, normalized: answer.replace(/\s+/g, '') };
+    const compact = answer.replace(/\s+/g, '');
+    if (
+      REGION_PATTERN.test(compact) ||
+      isKnownInterviewRegion(compact) ||
+      listedOptions.some((opt) => opt.toLowerCase() === answer.toLowerCase())
+    ) {
+      return { ok: true, normalized: compact };
     }
     if (looksLikeGibberish(answer)) {
       return { ok: false, error: GIBBERISH_ERROR };
@@ -255,12 +276,6 @@ export function validateInterviewAnswer(
     if (answer.length < 3 || !/[a-z]/i.test(answer) || !/[aeiouy]/i.test(answer)) {
       return { ok: false, error: GIBBERISH_ERROR };
     }
-    if (!/\s|-/.test(answer) && answer.length >= 10 && !PRODUCT_HINT.test(answer)) {
-      // Long single token without region shape → mash
-      if (looksLikeGibberish(answer) || new Set(answer.toLowerCase()).size <= 6) {
-        return { ok: false, error: GIBBERISH_ERROR };
-      }
-    }
   }
 
   // Setup / CI / env / access / traffic: prefer list; always block mash
@@ -268,13 +283,19 @@ export function validateInterviewAnswer(
     if (looksLikeGibberish(answer)) {
       return { ok: false, error: GIBBERISH_ERROR };
     }
+    // Allow known cloud regions even when the listed options are stale (AWS list
+    // after the UI adapted to Oracle — QA #6 Continue stuck).
+    if (isKnownInterviewRegion(answer.replace(/\s+/g, '')) || REGION_PATTERN.test(answer.replace(/\s+/g, ''))) {
+      return { ok: true, normalized: answer.replace(/\s+/g, '') };
+    }
     // Single opaque token on a multiple-choice question → force list
     if (
       listedOptions.length > 0 &&
       !/\s/.test(answer) &&
       answer.length >= 6 &&
       !PRODUCT_HINT.test(answer) &&
-      !REGION_PATTERN.test(answer)
+      !REGION_PATTERN.test(answer) &&
+      !isKnownInterviewRegion(answer)
     ) {
       return {
         ok: false,

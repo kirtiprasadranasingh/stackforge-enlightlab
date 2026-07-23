@@ -703,7 +703,7 @@ CMD ["node", "server.js"]
   }
   if (options.database === 'mongodb') {
     notes.push(
-      'MongoDB was selected — StackForge does **not** scaffold full MongoDB/DocumentDB/Atlas infrastructure. This scaffold uses a **PostgreSQL** managed database as a validate-safe relational stand-in. Replace with DocumentDB, Atlas, or your own MongoDB after review; do not treat terraform as production MongoDB.'
+      'MongoDB was selected — StackForge does **not** scaffold full MongoDB/DocumentDB/Atlas infrastructure. This scaffold uses a **PostgreSQL** managed database as a validate-safe relational stand-in (`enable_database = true`, engine postgres). Replace with DocumentDB, Atlas, or your own MongoDB after review; do not treat terraform as production MongoDB.'
     );
   }
   // Strip any model-invented MongoDB / DocumentDB / Atlas Terraform files
@@ -735,10 +735,14 @@ CMD ["node", "server.js"]
   if (notes.length) {
     const readme = byPath.get('README.md');
     if (readme) {
+      // Drop prior notes blocks so multi-pass apply does not triple-append
+      const base = readme.content
+        .replace(/\n*## Scaffold options notes\n[\s\S]*$/i, '')
+        .trimEnd();
       byPath.set('README.md', {
         ...readme,
         content:
-          readme.content +
+          base +
           `\n\n## Scaffold options notes\n\n${notes.map((n) => `- ${n}`).join('\n')}\n`,
       });
     }

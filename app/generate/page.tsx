@@ -28,6 +28,7 @@ import {
   type InterviewChoiceItem,
 } from '@/lib/interview-choices';
 import {
+  adaptClarifyingQuestions,
   interviewAlreadyChoseCi,
   isCiSystemQuestion,
   parseClarifyingQuestion,
@@ -906,8 +907,12 @@ export default function GeneratePage() {
   const submitClarifyingAnswers = useCallback(() => {
     if (isGenerating || pendingQuestions.length === 0) return;
 
-    const incomplete = pendingQuestions.some((question, index) => {
-      // Already chose CI via "Change CI/CD: …" — don't require the later CI question
+    // Validate against adapted questions (region/CI lists follow cloud/CI picks).
+    // Using the raw API list rejects Oracle regions after OCI DevOps (Continue stuck).
+    const adapted = adaptClarifyingQuestions(pendingQuestions, questionAnswers);
+
+    let blockedReason: string | null = null;
+    const incomplete = adapted.some((question, index) => {
       if (
         isCiSystemQuestion(question) &&
         interviewAlreadyChoseCi(questionAnswers)
@@ -915,9 +920,16 @@ export default function GeneratePage() {
         return false;
       }
       const answer = questionAnswers[index]?.trim() || '';
-      if (!answer) return true;
-      if (answer === 'Change the cloud') return true;
+      if (!answer) {
+        blockedReason = blockedReason || 'Answer every question before continuing';
+        return true;
+      }
+      if (answer === 'Change the cloud') {
+        blockedReason = blockedReason || 'Select a cloud and hosting platform';
+        return true;
+      }
       if (answer.startsWith('Change the cloud:') && !/\|\s*Hosting:/i.test(answer)) {
+        blockedReason = blockedReason || 'Select a hosting platform';
         return true;
       }
       if (
@@ -926,13 +938,21 @@ export default function GeneratePage() {
         answer === 'Another service' ||
         answer.endsWith(': Other')
       ) {
+        blockedReason = blockedReason || 'Finish the follow-up choice for this question';
         return true;
       }
       const { options } = parseClarifyingQuestion(question);
       const validation = validateInterviewAnswer(question, answer, options);
-      return !validation.ok;
+      if (!validation.ok) {
+        blockedReason = blockedReason || validation.error;
+        return true;
+      }
+      return false;
     });
-    if (incomplete) return;
+    if (incomplete) {
+      setError(blockedReason || 'Finish the interview answers before continuing');
+      return;
+    }
 
     const choices = buildInterviewChoiceItems(pendingQuestions, questionAnswers);
     const formattedAnswers = formatInterviewAnswersForPlan(
@@ -941,6 +961,7 @@ export default function GeneratePage() {
     );
     lastInterviewAnswersRef.current = formattedAnswers;
     setLastInterviewAnswers(formattedAnswers);
+    setError(null);
     void sendMessage(formattedAnswers, { phase: 'plan', interviewChoices: choices });
   }, [isGenerating, pendingQuestions, questionAnswers, sendMessage]);
 

@@ -74,32 +74,37 @@ export function parseScaffoldOptions(
     if (envs.length) out.environments = envs;
   }
 
-  // Database kind — interview phrases first. Do not let Terraform ternaries
-  // like `db_engine == "mysql"` win over an explicit "Redis cache" pick.
-  if (
-    /\bno data service\b|\bno database\b|\bwithout (a )?database\b|\bstateless\b/.test(
-      t
-    )
-  ) {
-    out.database = 'none';
-  } else if (/\bredis\s*cache\b|\bvalkey\s*cache\b|\bcache(?:\s+only)?\s*:\s*redis\b/.test(t)) {
-    out.database = 'redis';
-  } else if (/\bmongodb\b|\bmongo\b/.test(t)) {
+  // Database kind — explicit service picks MUST beat plan prose like "stateless"
+  // (QA #4: MongoDB was wiped to database=none because Assumptions said "stateless").
+  const askedNoData =
+    /\bno data service\b/.test(t) ||
+    /\bwithout (a )?database\b/.test(t) ||
+    /database\s*\(client override\):\s*none\b/.test(t) ||
+    /→\s*no data service\b/.test(t);
+  const askedMongo = /\bmongodb\b|\bmongo\b/.test(t);
+  const askedRedis =
+    /\bredis\s*cache\b|\bvalkey\s*cache\b|\bcache(?:\s+only)?\s*:\s*redis\b/.test(t) ||
+    (/\bredis\b|\bvalkey\b/.test(t) &&
+      !/\b(postgres|postgresql|mysql|mariadb|mongo)\b/.test(t));
+  const askedMysql = /\bmysql\b|\bmariadb\b/.test(t);
+  const askedPostgres =
+    /\bpostgres\b|\bpostgresql\b/.test(t) ||
+    /postgresql stand-in/i.test(t) ||
+    /postgres stand-in/i.test(t);
+
+  if (askedMongo) {
+    // MongoDB is not first-class — keep kind=mongodb so apply enables RDS Postgres stand-in
     out.database = 'mongodb';
-  } else if (
-    /\bredis\b|\bvalkey\b/.test(t) &&
-    !/\b(postgres|postgresql|mysql|mariadb)\b/.test(t)
-  ) {
+  } else if (askedRedis) {
     out.database = 'redis';
-  } else if (/\bmysql\b|\bmariadb\b/.test(t) && !/\bredis\b|\bvalkey\b/.test(t)) {
+  } else if (askedMysql && !askedPostgres) {
     out.database = 'mysql';
-  } else if (/\bpostgres\b|\bpostgresql\b/.test(t) && !/\bredis\b|\bvalkey\b/.test(t)) {
+  } else if (askedPostgres) {
     out.database = 'postgres';
-  } else if (/\bmysql\b|\bmariadb\b/.test(t)) {
-    out.database = 'mysql';
-  } else if (/\bpostgres\b|\bpostgresql\b/.test(t)) {
-    out.database = 'postgres';
+  } else if (askedNoData) {
+    out.database = 'none';
   }
+  // else keep default (postgres) — do NOT treat "stateless" as no database
 
   // Database mode — order matters: specific phrases beat generic "backup"
   if (/\bstandard private database\b/.test(t)) {

@@ -340,6 +340,15 @@ export function ClarifyingInterview({
 
   const selectPrimary = (option: string) => {
     onAnswer(currentIndex, option);
+    // Native CI on "Which CI/CD…" retargets region/hosting lists via adaptClarifyingQuestions
+    if (
+      isCiSystemQuestion(steps[stepIndex].question) &&
+      (option === 'OCI DevOps' ||
+        option === 'Google Cloud Build' ||
+        option === 'AWS CodePipeline')
+    ) {
+      clearStaleRegionIfNeeded(option);
+    }
   };
 
   const selectCloudFollowUp = (option: string) => {

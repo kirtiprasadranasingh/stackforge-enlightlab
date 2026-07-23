@@ -123,6 +123,24 @@ export function cloudFromInterviewAnswer(
     return detectCloudLabel(choice);
   }
 
+  // "Change CI/CD: OCI DevOps | Cloud: Oracle … | Hosting: OKE"
+  if (/^Change CI\/CD:/i.test(text)) {
+    const cloudPart = text
+      .split(/\s*\|\s*/)
+      .find((part) => /^Cloud:\s*/i.test(part))
+      ?.replace(/^Cloud:\s*/i, '')
+      .trim();
+    if (cloudPart) {
+      const fromCloud = detectCloudLabel(cloudPart);
+      if (fromCloud) return fromCloud;
+    }
+    const ci = text.replace(/^Change CI\/CD:\s*/i, '').split(/\s*\|\s*/)[0];
+    if (/oci\s*devops|oracle/i.test(ci)) return 'oracle';
+    if (/cloud\s*build|google/i.test(ci)) return 'gcp';
+    if (/code\s*pipeline|codepipeline/i.test(ci)) return 'aws';
+    if (/azure\s*devops/i.test(ci)) return 'azure';
+  }
+
   if (text.startsWith('Change the hosting platform:')) {
     const choice = text.slice('Change the hosting platform:'.length).toLowerCase();
     if (choice.includes('oke') || choice.includes('oracle')) return 'oracle';
@@ -144,6 +162,12 @@ export function cloudFromInterviewAnswer(
       return 'aws';
     }
   }
+
+  // Bare CI pick on "Which CI/CD system should we use?"
+  if (/^OCI DevOps$/i.test(text)) return 'oracle';
+  if (/^Google Cloud Build$/i.test(text)) return 'gcp';
+  if (/^AWS CodePipeline$/i.test(text)) return 'aws';
+  if (/^Azure DevOps Pipelines$/i.test(text)) return 'azure';
 
   // Direct pick from "Which cloud should we use?" (no Change the cloud: prefix)
   return detectCloudLabel(text);
@@ -183,7 +207,15 @@ export function adaptClarifyingQuestions(
   questions: string[],
   answers: Record<number, string>
 ): string[] {
-  const chosenCloud = cloudFromInterviewAnswer(answers[0]);
+  // Prefer the latest explicit cloud signal (CI/cloud/hosting), not only answers[0]
+  let chosenCloud: Presets['cloud'] | null = null;
+  const indices = Object.keys(answers)
+    .map(Number)
+    .sort((a, b) => a - b);
+  for (const index of indices) {
+    const cloud = cloudFromInterviewAnswer(answers[index]);
+    if (cloud) chosenCloud = cloud;
+  }
   if (!chosenCloud) return questions;
 
   const regions = REGION_OPTIONS_BY_CLOUD[chosenCloud].join(' / ');
