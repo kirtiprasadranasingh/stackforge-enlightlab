@@ -48,14 +48,71 @@ function stripOptionMenus(text: string): string {
   return text.replace(/\(options:\s*[^)]+\)/gi, ' ');
 }
 
+/** Interview "Confirmed choices" block only — ignore plan/stack prose. */
+function extractConfirmedChoicesBlock(text: string): string {
+  const m = text.match(
+    /Confirmed choices:\s*\n[\s\S]*?(?=\n##\s|\nArchitecture\b|\nGreat —|\nStack summary\b|$)/i
+  );
+  return m ? m[0] : '';
+}
+
 function runtimeFromPhrase(phrase: string): RuntimeKind | null {
-  const v = phrase.toLowerCase();
+  const v = phrase.toLowerCase().trim();
+  // Order: more specific tokens first; bare "go" only as whole answer / word
   if (/\bpython\b|\bfastapi\b|\bdjango\b|\bflask\b/.test(v)) return 'python';
-  if (/\bgolang\b|\bgo\b|\bgin\b/.test(v)) return 'go';
+  if (/\bgolang\b|(^|[^\w])go([^\w]|$)/.test(v) || /\bgin\b/.test(v)) return 'go';
   if (/\bjava\b|\bspring\b/.test(v)) return 'java';
   if (/\.net\b|\bdotnet\b|\bc#\b|\basp\.?\s*net\b/.test(v)) return 'dotnet';
   if (/\bnode\.?js\b|\bnodejs\b|\bexpress\b|\bnext\.?js\b|\bnestjs\b/.test(v)) {
     return 'node';
+  }
+  return null;
+}
+
+/** Language from Confirmed choices / client overrides — never from plan leftovers. */
+function parseRuntimeFromText(raw: string): RuntimeKind | null {
+  const confirmed = extractConfirmedChoicesBlock(raw);
+  const scope = confirmed || raw;
+
+  // LAST Language (client override) in scope wins (interview after any stale plan text)
+  const overrides = [
+    ...scope.matchAll(
+      /language(?:\/framework)?\s*\(client override\):\s*([^\n]+)/gi
+    ),
+  ];
+  if (overrides.length) {
+    for (let i = overrides.length - 1; i >= 0; i--) {
+      const rt = runtimeFromPhrase(overrides[i][1]);
+      if (rt) return rt;
+    }
+  }
+
+  // Arrow answers — only inside Confirmed choices when that block exists
+  const arrowScope = confirmed || '';
+  if (arrowScope) {
+    let last: RuntimeKind | null = null;
+    for (const m of arrowScope.matchAll(/→\s*([^\n]+)/g)) {
+      const phrase = m[1].trim();
+      // Accept explicit override lines or bare language chip answers only
+      if (
+        /language(?:\/framework)?\s*\(client override\)/i.test(phrase) ||
+        /^(node\.?js|go|golang|python|java|\.net|spring(?:\s*boot)?)\b/i.test(
+          phrase
+        )
+      ) {
+        last = runtimeFromPhrase(phrase) || last;
+      }
+    }
+    if (last) return last;
+  }
+
+  // No confirmed block: fall back to prompt keywords (menus stripped)
+  if (!confirmed) {
+    const t = stripOptionMenus(raw).toLowerCase();
+    return (
+      runtimeFromPhrase(t) ||
+      (/\bnode\.?js\b|\bexpress\b|\bnext\.?js\b/.test(t) ? 'node' : null)
+    );
   }
   return null;
 }
@@ -206,41 +263,9 @@ export function parseScaffoldOptions(
     out.scale = 'high';
   }
 
-  // Runtime — Language (client override) always wins over option menus / plan prose
-  const langOverride = raw.match(
-    /language(?:\/framework)?\s*\(client override\):\s*([^\n]+)/i
-  );
-  const langFromOverride = langOverride
-    ? runtimeFromPhrase(langOverride[1])
-    : null;
-  // Confirmed choices: "→ Language (client override): Node.js..." or bare "→ Python"
-  const langArrowMatches = [
-    ...raw.matchAll(
-      /(?:which language[^\n]*\n\s*)?→\s*((?:language(?:\/framework)?\s*\(client override\):\s*)?[^\n]+)/gi
-    ),
-  ];
-  let langFromArrow: RuntimeKind | null = null;
-  for (const m of langArrowMatches) {
-    const phrase = m[1];
-    if (
-      /language\s*\(client override\)|node\.?js|\bpython\b|\bgo\b|\bjava\b|\.net\b/i.test(
-        phrase
-      )
-    ) {
-      langFromArrow = runtimeFromPhrase(phrase) || langFromArrow;
-    }
-  }
-
-  if (langFromOverride) {
-    out.runtime = langFromOverride;
-  } else if (langFromArrow) {
-    out.runtime = langFromArrow;
-  } else {
-    const rt =
-      runtimeFromPhrase(t) ||
-      (/\bnode\.?js\b|\bexpress\b|\bnext\.?js\b/.test(t) ? 'node' : null);
-    if (rt) out.runtime = rt;
-  }
+  // Runtime — Confirmed choices / Language (client override) only (never plan leftovers)
+  const rt = parseRuntimeFromText(raw);
+  if (rt) out.runtime = rt;
 
   return out;
 }

@@ -338,7 +338,22 @@ export async function POST(request: NextRequest) {
     // Infer from plan + history too — client overrides live in interview answers,
     // not only in the short approve/generate prompt.
     const presets = inferPresetsFromPrompt(optionsText, rawPresets as Presets);
-    const scaffoldOptions = parseScaffoldOptions(optionsText, presets);
+    // Interview Confirmed choices are authoritative for runtime/DB/region — plan
+    // leftovers previously overwrote language after the first successful generate.
+    let scaffoldOptions = parseScaffoldOptions(optionsText, presets);
+    if (interviewAnswers && /Confirmed choices:/i.test(interviewAnswers)) {
+      const fromInterview = parseScaffoldOptions(interviewAnswers, presets);
+      scaffoldOptions = {
+        ...scaffoldOptions,
+        runtime: fromInterview.runtime,
+        database: fromInterview.database,
+        databaseMode: fromInterview.databaseMode,
+        region: fromInterview.region,
+        environments: fromInterview.environments,
+        access: fromInterview.access,
+        scale: fromInterview.scale,
+      };
+    }
     const lowerPrompt = prompt.toLowerCase().trim();
     let phase: WorkflowPhase = requestedPhase || 'generate';
 
