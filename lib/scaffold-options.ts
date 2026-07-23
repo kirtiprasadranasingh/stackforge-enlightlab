@@ -39,12 +39,47 @@ export function defaultScaffoldOptions(presets: Presets): ScaffoldOptions {
   };
 }
 
+/**
+ * Clarifying questions embed menus like `(options: Node.js / Go / Python / …)`.
+ * Matching those lists made every interview look like Python + Redis were chosen.
+ * Strip menus before keyword scans; prefer explicit client overrides.
+ */
+function stripOptionMenus(text: string): string {
+  return text.replace(/\(options:\s*[^)]+\)/gi, ' ');
+}
+
+function runtimeFromPhrase(phrase: string): RuntimeKind | null {
+  const v = phrase.toLowerCase();
+  if (/\bpython\b|\bfastapi\b|\bdjango\b|\bflask\b/.test(v)) return 'python';
+  if (/\bgolang\b|\bgo\b|\bgin\b/.test(v)) return 'go';
+  if (/\bjava\b|\bspring\b/.test(v)) return 'java';
+  if (/\.net\b|\bdotnet\b|\bc#\b|\basp\.?\s*net\b/.test(v)) return 'dotnet';
+  if (/\bnode\.?js\b|\bnodejs\b|\bexpress\b|\bnext\.?js\b|\bnestjs\b/.test(v)) {
+    return 'node';
+  }
+  return null;
+}
+
+function databaseFromPhrase(phrase: string): DatabaseKind | null {
+  const v = phrase.toLowerCase();
+  if (/\bno data service\b|\bnone\b|\bwithout (a )?database\b/.test(v)) {
+    return 'none';
+  }
+  if (/\bmongodb\b|\bmongo\b|\bdocumentdb\b/.test(v)) return 'mongodb';
+  if (/\bredis\b|\bvalkey\b/.test(v)) return 'redis';
+  if (/\bmysql\b|\bmariadb\b/.test(v)) return 'mysql';
+  if (/\bpostgres\b|\bpostgresql\b/.test(v)) return 'postgres';
+  return null;
+}
+
 /** Merge prompt + plan + chat text into concrete scaffold options. */
 export function parseScaffoldOptions(
   text: string,
   presets: Presets
 ): ScaffoldOptions {
-  const t = text.toLowerCase();
+  const raw = text;
+  // Ignore option menus so listed alternatives cannot override the real pick.
+  const t = stripOptionMenus(raw).toLowerCase();
   const out = defaultScaffoldOptions(presets);
 
   // Region
@@ -74,37 +109,64 @@ export function parseScaffoldOptions(
     if (envs.length) out.environments = envs;
   }
 
-  // Database kind — explicit service picks MUST beat plan prose like "stateless"
-  // (QA #4: MongoDB was wiped to database=none because Assumptions said "stateless").
-  const askedNoData =
-    /\bno data service\b/.test(t) ||
-    /\bwithout (a )?database\b/.test(t) ||
-    /database\s*\(client override\):\s*none\b/.test(t) ||
-    /→\s*no data service\b/.test(t);
-  const askedMongo = /\bmongodb\b|\bmongo\b/.test(t);
-  const askedRedis =
-    /\bredis\s*cache\b|\bvalkey\s*cache\b|\bcache(?:\s+only)?\s*:\s*redis\b/.test(t) ||
-    (/\bredis\b|\bvalkey\b/.test(t) &&
-      !/\b(postgres|postgresql|mysql|mariadb|mongo)\b/.test(t));
-  const askedMysql = /\bmysql\b|\bmariadb\b/.test(t);
-  const askedPostgres =
-    /\bpostgres\b|\bpostgresql\b/.test(t) ||
-    /postgresql stand-in/i.test(t) ||
-    /postgres stand-in/i.test(t);
-
-  if (askedMongo) {
-    // MongoDB is not first-class — keep kind=mongodb so apply enables RDS Postgres stand-in
-    out.database = 'mongodb';
-  } else if (askedRedis) {
-    out.database = 'redis';
-  } else if (askedMysql && !askedPostgres) {
-    out.database = 'mysql';
-  } else if (askedPostgres) {
-    out.database = 'postgres';
-  } else if (askedNoData) {
-    out.database = 'none';
+  // Database — client override / Confirmed-choices arrows beat plan prose + menus
+  const dataOverride = raw.match(
+    /data service\s*\(client override\):\s*([^\n.]+)/i
+  );
+  const dbFromOverride = dataOverride
+    ? databaseFromPhrase(dataOverride[1])
+    : null;
+  // Scan every → answer line (first → is often cloud/CI, not data)
+  let dbFromArrow: DatabaseKind | null = null;
+  for (const m of raw.matchAll(/→\s*([^\n]+)/g)) {
+    const arrowText = m[1];
+    if (
+      !/data service|no data service|postgres|postgresql|mysql|redis|mongo|mongodb|valkey/i.test(
+        arrowText
+      )
+    ) {
+      continue;
+    }
+    const parsed = databaseFromPhrase(arrowText);
+    if (parsed) dbFromArrow = parsed;
   }
-  // else keep default (postgres) — do NOT treat "stateless" as no database
+
+  if (dbFromOverride) {
+    out.database = dbFromOverride;
+  } else if (dbFromArrow) {
+    out.database = dbFromArrow;
+  } else {
+    // Keyword scan on text with option menus stripped (QA #4: don't wipe Mongo via "stateless")
+    const askedNoData =
+      /\bno data service\b/.test(t) ||
+      /\bwithout (a )?database\b/.test(t) ||
+      /database\s*\(client override\):\s*none\b/.test(t) ||
+      /→\s*no data service\b/.test(t);
+    const askedMongo = /\bmongodb\b|\bmongo\b/.test(t);
+    const askedRedis =
+      /\bredis\s*cache\b|\bvalkey\s*cache\b|\bcache(?:\s+only)?\s*:\s*redis\b/.test(
+        t
+      ) ||
+      (/\bredis\b|\bvalkey\b/.test(t) &&
+        !/\b(postgres|postgresql|mysql|mariadb|mongo)\b/.test(t));
+    const askedMysql = /\bmysql\b|\bmariadb\b/.test(t);
+    const askedPostgres =
+      /\bpostgres\b|\bpostgresql\b/.test(t) ||
+      /postgresql stand-in/i.test(t) ||
+      /postgres stand-in/i.test(t);
+
+    if (askedMongo) {
+      out.database = 'mongodb';
+    } else if (askedRedis) {
+      out.database = 'redis';
+    } else if (askedMysql && !askedPostgres) {
+      out.database = 'mysql';
+    } else if (askedPostgres) {
+      out.database = 'postgres';
+    } else if (askedNoData) {
+      out.database = 'none';
+    }
+  }
 
   // Database mode — order matters: specific phrases beat generic "backup"
   if (/\bstandard private database\b/.test(t)) {
@@ -144,12 +206,41 @@ export function parseScaffoldOptions(
     out.scale = 'high';
   }
 
-  // Runtime
-  if (/\bpython\b|\bfastapi\b|\bdjango\b|\bflask\b/.test(t)) out.runtime = 'python';
-  else if (/\bgolang\b|\b\bgo\b|\bgin\b/.test(t)) out.runtime = 'go';
-  else if (/\bjava\b|\bspring\b/.test(t)) out.runtime = 'java';
-  else if (/\.net\b|\bdotnet\b|\bc#\b/.test(t)) out.runtime = 'dotnet';
-  else if (/\bnode\.?js\b|\bexpress\b|\bnext\.?js\b/.test(t)) out.runtime = 'node';
+  // Runtime — Language (client override) always wins over option menus / plan prose
+  const langOverride = raw.match(
+    /language(?:\/framework)?\s*\(client override\):\s*([^\n]+)/i
+  );
+  const langFromOverride = langOverride
+    ? runtimeFromPhrase(langOverride[1])
+    : null;
+  // Confirmed choices: "→ Language (client override): Node.js..." or bare "→ Python"
+  const langArrowMatches = [
+    ...raw.matchAll(
+      /(?:which language[^\n]*\n\s*)?→\s*((?:language(?:\/framework)?\s*\(client override\):\s*)?[^\n]+)/gi
+    ),
+  ];
+  let langFromArrow: RuntimeKind | null = null;
+  for (const m of langArrowMatches) {
+    const phrase = m[1];
+    if (
+      /language\s*\(client override\)|node\.?js|\bpython\b|\bgo\b|\bjava\b|\.net\b/i.test(
+        phrase
+      )
+    ) {
+      langFromArrow = runtimeFromPhrase(phrase) || langFromArrow;
+    }
+  }
+
+  if (langFromOverride) {
+    out.runtime = langFromOverride;
+  } else if (langFromArrow) {
+    out.runtime = langFromArrow;
+  } else {
+    const rt =
+      runtimeFromPhrase(t) ||
+      (/\bnode\.?js\b|\bexpress\b|\bnext\.?js\b/.test(t) ? 'node' : null);
+    if (rt) out.runtime = rt;
+  }
 
   return out;
 }

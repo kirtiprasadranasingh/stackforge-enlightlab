@@ -2286,22 +2286,69 @@ function ensureEcsScaffoldCompleteness(byPath: Map<string, GeneratedFile>): void
   );
   let dockerPaths = ['Dockerfile', 'app/Dockerfile'].filter((p) => byPath.has(p));
 
-  // Synthesize a minimal Express Dockerfile when the model omitted it
+  // Synthesize a minimal Dockerfile only when missing — match existing language, do not invent Node over Python/Go
   if (dockerPaths.length === 0) {
-    const target = hasAppSources ? 'app/Dockerfile' : 'Dockerfile';
-    const entry = byPath.has('app/server.js')
-      ? 'server.js'
-      : byPath.has('app/index.js') || byPath.has('index.js')
-        ? 'index.js'
-        : 'server.js';
-    byPath.set(target, {
-      path: target,
-      language: 'dockerfile',
-      content: DEFAULT_ECS_EXPRESS_DOCKERFILE.replace(
-        'CMD ["node", "server.js"]',
-        `CMD ["node", "${entry}"]`
-      ),
-    });
+    const isPython =
+      byPath.has('app/main.py') ||
+      byPath.has('main.py') ||
+      byPath.has('app/requirements.txt') ||
+      byPath.has('requirements.txt');
+    const isGo =
+      byPath.has('app/main.go') ||
+      byPath.has('main.go') ||
+      byPath.has('app/go.mod') ||
+      byPath.has('go.mod');
+    const target = hasAppSources || isPython || isGo ? 'app/Dockerfile' : 'Dockerfile';
+    if (isPython) {
+      byPath.set(target, {
+        path: target,
+        language: 'dockerfile',
+        content: `# hadolint ignore=DL3008
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV PORT=8080
+EXPOSE 8080
+USER nobody
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+`,
+      });
+    } else if (isGo) {
+      byPath.set(target, {
+        path: target,
+        language: 'dockerfile',
+        content: `# hadolint ignore=DL3008
+FROM golang:1.22-alpine AS build
+WORKDIR /src
+COPY go.mod ./
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/app .
+FROM gcr.io/distroless/static-debian12
+WORKDIR /
+COPY --from=build /out/app /app
+ENV PORT=8080
+EXPOSE 8080
+USER nonroot:nonroot
+CMD ["/app"]
+`,
+      });
+    } else {
+      const entry = byPath.has('app/server.js')
+        ? 'server.js'
+        : byPath.has('app/index.js') || byPath.has('index.js')
+          ? 'index.js'
+          : 'server.js';
+      byPath.set(target, {
+        path: target,
+        language: 'dockerfile',
+        content: DEFAULT_ECS_EXPRESS_DOCKERFILE.replace(
+          'CMD ["node", "server.js"]',
+          `CMD ["node", "${entry}"]`
+        ),
+      });
+    }
     dockerPaths = [target];
   }
 

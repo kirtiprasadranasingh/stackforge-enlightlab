@@ -42,7 +42,161 @@ function patchDefault(
   return content;
 }
 
-function ciSkeleton(ci: CIProvider, presets: Presets): { path: string; content: string } {
+/** Drop model-invented sibling app trees and wrong-language leftovers. */
+function stripCompetingAppTrees(
+  byPath: Map<string, GeneratedFile>,
+  runtime?: ScaffoldOptions['runtime']
+): void {
+  const competingPrefixes = [
+    'python-app/',
+    'python_app/',
+    'nodejs-app/',
+    'node-app/',
+    'go-app/',
+    'golang-app/',
+    'java-app/',
+    'dotnet-app/',
+    'webapp/',
+    'web-app/',
+    'api-app/',
+    'fastapi-app/',
+    'express-app/',
+  ];
+  for (const p of [...byPath.keys()]) {
+    if (
+      competingPrefixes.some(
+        (pre) => p === pre.slice(0, -1) || p.startsWith(pre)
+      )
+    ) {
+      byPath.delete(p);
+    }
+  }
+
+  const hasAppTree = [...byPath.keys()].some((p) => p.startsWith('app/'));
+  if (hasAppTree) {
+    for (const p of [...byPath.keys()]) {
+      if (!(p === 'src' || p.startsWith('src/'))) continue;
+      if (
+        /\.(py|js|ts|mjs|cjs|go|java|cs)$/i.test(p) ||
+        /(^|\/)(Dockerfile|package\.json|package-lock\.json|requirements\.txt|go\.mod|go\.sum)$/i.test(
+          p
+        )
+      ) {
+        byPath.delete(p);
+      }
+    }
+    const rootDupes = [
+      'server.js',
+      'index.js',
+      'app.js',
+      'main.js',
+      'package.json',
+      'package-lock.json',
+      'main.py',
+      'requirements.txt',
+      'main.go',
+      'go.mod',
+      'go.sum',
+      'Dockerfile',
+    ];
+    for (const p of rootDupes) {
+      const inApp =
+        p === 'Dockerfile'
+          ? byPath.has('app/Dockerfile')
+          : byPath.has(`app/${p}`) ||
+            (p === 'server.js' &&
+              (byPath.has('app/main.py') || byPath.has('app/main.go')));
+      if (inApp || (p === 'Dockerfile' && byPath.has('app/Dockerfile'))) {
+        byPath.delete(p);
+      }
+    }
+  }
+
+  const drop = (paths: string[]) => {
+    for (const p of paths) byPath.delete(p);
+  };
+  if (runtime === 'python') {
+    drop([
+      'app/server.js',
+      'app/index.js',
+      'app/package.json',
+      'app/package-lock.json',
+      'app/main.go',
+      'app/go.mod',
+      'app/go.sum',
+      'server.js',
+      'index.js',
+      'package.json',
+      'package-lock.json',
+      'main.go',
+      'go.mod',
+      'go.sum',
+    ]);
+  } else if (runtime === 'go') {
+    drop([
+      'app/server.js',
+      'app/index.js',
+      'app/package.json',
+      'app/package-lock.json',
+      'app/main.py',
+      'app/requirements.txt',
+      'server.js',
+      'index.js',
+      'package.json',
+      'package-lock.json',
+      'main.py',
+      'requirements.txt',
+    ]);
+  } else if (runtime === 'node') {
+    drop([
+      'app/main.py',
+      'app/requirements.txt',
+      'app/main.go',
+      'app/go.mod',
+      'app/go.sum',
+      'main.py',
+      'requirements.txt',
+      'main.go',
+      'go.mod',
+      'go.sum',
+    ]);
+  }
+}
+
+const CI_CANONICAL: Record<CIProvider, string> = {
+  'github-actions': '.github/workflows/deploy.yml',
+  'gitlab-ci': '.gitlab-ci.yml',
+  'azure-devops': 'azure-pipelines.yml',
+  jenkins: 'Jenkinsfile',
+  'aws-codepipeline': 'buildspec.yml',
+  'gcp-cloud-build': 'cloudbuild.yaml',
+  'oci-devops': 'build_spec.yaml',
+};
+
+/** Keep exactly one CI format matching presets.ci. */
+function enforceSingleCi(
+  byPath: Map<string, GeneratedFile>,
+  ci: CIProvider
+): void {
+  const keep = CI_CANONICAL[ci];
+  const known = new Set(Object.values(CI_CANONICAL));
+  for (const p of [...byPath.keys()]) {
+    if (p.startsWith('.github/workflows/')) {
+      if (ci !== 'github-actions' || p !== keep) byPath.delete(p);
+      continue;
+    }
+    if (known.has(p) && p !== keep) byPath.delete(p);
+    if (p.startsWith('aws-codepipeline/') || p.startsWith('.devops/')) {
+      byPath.delete(p);
+    }
+  }
+}
+
+function ciSkeleton(
+  ci: CIProvider,
+  presets: Presets,
+  region: string
+): { path: string; content: string } {
   const regionHint =
     presets.cloud === 'aws'
       ? 'AWS_REGION'
@@ -112,15 +266,36 @@ stages:
       return {
         path: 'buildspec.yml',
         content: `version: 0.2
+env:
+  variables:
+    AWS_DEFAULT_REGION: ${region}
 phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY
+      - IMAGE_TAG=\${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}
   build:
     commands:
-      - echo Build for ECS/EKS
+      - echo Build started on $(date)
+      - |
+        if [ -f app/Dockerfile ]; then
+          docker build -t $REPOSITORY_URI:$IMAGE_TAG ./app
+        elif [ -f Dockerfile ]; then
+          docker build -t $REPOSITORY_URI:$IMAGE_TAG .
+        else
+          echo "No Dockerfile found" && exit 1
+        fi
   post_build:
     commands:
-      - echo Deploy
+      - echo Pushing image...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - printf '[{"name":"app","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      - echo "Update ECS service with new task definition image after pipeline deploy stage"
 artifacts:
   files:
+    - imagedefinitions.json
     - '**/*'
 `,
       };
@@ -141,11 +316,21 @@ images:
         path: 'build_spec.yaml',
         content: `version: 0.1
 component: build
-timeoutInSeconds: 600
+timeoutInSeconds: 1200
 steps:
   - type: Command
-    name: Build
-    command: echo "OCI DevOps build for OKE"
+    name: BuildAndPush
+    command: |
+      set -euo pipefail
+      echo "OCI DevOps build — push image then deploy to ${presets.orchestrator} on ${presets.cloud}"
+      if [ -f app/Dockerfile ]; then
+        docker build -t app:local ./app
+      elif [ -f Dockerfile ]; then
+        docker build -t app:local .
+      else
+        echo "No Dockerfile found" && exit 1
+      fi
+      echo "Configure OCIR/ECR push + cluster deploy credentials in the OCI DevOps pipeline UI"
 `,
       };
     default:
@@ -348,7 +533,7 @@ export function applyScaffoldOptions(
     byPath.set(valuesPath, { ...byPath.get(valuesPath)!, content: v });
   }
 
-  // CI swap — remove other CI skeletons, write selected one (keep existing GHA if already good for github)
+  // CI swap — exactly one pipeline format for the chosen provider
   const ciPaths = [
     '.github/workflows/deploy.yml',
     '.gitlab-ci.yml',
@@ -358,19 +543,19 @@ export function applyScaffoldOptions(
     'cloudbuild.yaml',
     'build_spec.yaml',
   ];
-  const chosen = ciSkeleton(presets.ci, presets);
-  // Keep richer locked GHA if present and user chose github-actions
-  if (presets.ci === 'github-actions' && byPath.has('.github/workflows/deploy.yml')) {
-    for (const p of ciPaths) {
-      if (p !== '.github/workflows/deploy.yml') byPath.delete(p);
-    }
-    // Drop model-invented alternate CI trees
-    for (const p of [...byPath.keys()]) {
-      if (p.startsWith('aws-codepipeline/')) byPath.delete(p);
-    }
-    const wf = byPath.get('.github/workflows/deploy.yml')!;
-    let w = wf.content;
-    // Align region fallback with interview answer (e.g. eu-west-1)
+  const chosen = ciSkeleton(presets.ci, presets, options.region);
+  const existingGha =
+    presets.ci === 'github-actions'
+      ? byPath.get('.github/workflows/deploy.yml')
+      : undefined;
+  for (const p of ciPaths) byPath.delete(p);
+  for (const p of [...byPath.keys()]) {
+    if (p.startsWith('.github/workflows/')) byPath.delete(p);
+    if (p.startsWith('aws-codepipeline/')) byPath.delete(p);
+    if (p.startsWith('.devops/')) byPath.delete(p);
+  }
+  if (presets.ci === 'github-actions' && existingGha) {
+    let w = existingGha.content;
     w = w.replace(
       /AWS_REGION:\s*\$\{\{\s*vars\.AWS_REGION\s*\|\|\s*'[^']+'\s*\}\}/g,
       `AWS_REGION: \${{ vars.AWS_REGION || '${options.region}' }}`
@@ -379,20 +564,12 @@ export function applyScaffoldOptions(
       /aws-region:\s*\$\{\{\s*env\.AWS_REGION\s*\}\}/g,
       'aws-region: ${{ env.AWS_REGION }}'
     );
-    byPath.set('.github/workflows/deploy.yml', { ...wf, content: w });
-  } else {
-    for (const p of ciPaths) byPath.delete(p);
-    // Remove all GHA workflows + nested CodePipeline copies the model invents
-    for (const p of [...byPath.keys()]) {
-      if (p.startsWith('.github/workflows/')) byPath.delete(p);
-      if (p.startsWith('aws-codepipeline/')) byPath.delete(p);
-    }
-    // GKE + Cloud Build: build app/ context and push to Artifact Registry placeholder
-    if (presets.ci === 'gcp-cloud-build' && presets.orchestrator === 'gke') {
-      set(
-        byPath,
-        'cloudbuild.yaml',
-        `steps:
+    byPath.set('.github/workflows/deploy.yml', { ...existingGha, content: w });
+  } else if (presets.ci === 'gcp-cloud-build' && presets.orchestrator === 'gke') {
+    set(
+      byPath,
+      'cloudbuild.yaml',
+      `steps:
   - name: gcr.io/cloud-builders/docker
     args:
       - build
@@ -417,11 +594,11 @@ substitutions:
 images:
   - \${_REGION}-docker.pkg.dev/$PROJECT_ID/\${_REPO}/app:$SHORT_SHA
 `
-      );
-    } else {
-      set(byPath, chosen.path, chosen.content);
-    }
+    );
+  } else {
+    set(byPath, chosen.path, chosen.content);
   }
+  enforceSingleCi(byPath, presets.ci);
 
   // Model sometimes invents a second app tree alongside locked app/
   for (const p of [...byPath.keys()]) {
@@ -670,11 +847,34 @@ CMD ["node", "server.js"]
     }
   }
 
+  // After runtime swap: one app tree + one language only (any prompt/option mix)
+  stripCompetingAppTrees(byPath, options.runtime);
+  enforceSingleCi(byPath, presets.ci);
+
   // Capability honesty — document unsupported DB/runtime for this cloud profile
   const notes: string[] = [];
   notes.push(
     `Applied from interview: region=${options.region}; envs=${options.environments.join(', ')}; access=${options.access}; database=${options.database}; scale=${options.scale}; runtime=${options.runtime}; ci=${presets.ci}.`
   );
+  if (options.access === 'public_https' || options.access === 'public_basic') {
+    notes.push(
+      `Access is **public** (internet-facing load balancer / ingress). This locked template uses an **HTTP:80** listener by default so \`terraform validate\` stays certificate-free. For production HTTPS, attach an ACM (or cloud-equivalent) certificate and an HTTPS:443 listener — do not treat HTTP:80 as the final product choice.`
+    );
+  }
+  if (options.access === 'private') {
+    notes.push(
+      'Access is **private** (internal ALB / ingress disabled or private networking). Confirm VPC/VPN/private DNS before exposing the service.'
+    );
+  }
+  if (presets.ci === 'aws-codepipeline') {
+    notes.push(
+      'CI is **AWS CodePipeline / CodeBuild** (`buildspec.yml` only). Competing formats (GitHub Actions, GitLab CI, etc.) are intentionally omitted — wire Source → CodeBuild → ECS/EKS deploy in the AWS console or extra Terraform.'
+    );
+  } else if (presets.ci !== 'github-actions') {
+    notes.push(
+      `CI is **${presets.ci}** only (\`${CI_CANONICAL[presets.ci]}\`). Other pipeline formats are omitted so the scaffold matches the interview choice.`
+    );
+  }
   const redisSupported =
     (presets.cloud === 'aws' && presets.orchestrator === 'ecs') ||
     (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run');
