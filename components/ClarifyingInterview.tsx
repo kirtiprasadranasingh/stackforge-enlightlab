@@ -618,13 +618,10 @@ export function ClarifyingInterview({
           type="button"
           onClick={goNext}
           disabled={!canContinue}
+          title={continueHint || undefined}
           className="flex-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
         >
-          {continueHint
-            ? continueHint
-            : isLast
-              ? 'Continue to architecture plan'
-              : 'Next question'}
+          {isLast ? 'Continue to architecture plan' : 'Next question'}
         </button>
       </div>
     </section>

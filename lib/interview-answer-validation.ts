@@ -1,10 +1,14 @@
 /**
  * Validate free-text interview answers so gibberish like "efewwe" / "wewer"
- * cannot slip into the plan as fake requirements (then silently become Node/Postgres).
+ * (and longer keyboard mash) cannot slip into the plan as fake requirements.
  */
 
 const KNOWN_RUNTIMES: Array<{ label: string; pattern: RegExp }> = [
-  { label: 'Node.js', pattern: /^(node\.?js|nodejs|node|express|nestjs|next\.?js|javascript|typescript|js|ts)$/i },
+  {
+    label: 'Node.js',
+    pattern:
+      /^(node\.?js|nodejs|node|express|nestjs|next\.?js|javascript|typescript|js|ts)$/i,
+  },
   { label: 'Go', pattern: /^(go|golang|gin)$/i },
   { label: 'Python', pattern: /^(python|fastapi|django|flask|py)$/i },
   { label: 'Java', pattern: /^(java|spring(?:\s*boot)?)$/i },
@@ -12,7 +16,10 @@ const KNOWN_RUNTIMES: Array<{ label: string; pattern: RegExp }> = [
 ];
 
 const KNOWN_DATA_SERVICES: Array<{ label: string; pattern: RegExp }> = [
-  { label: 'PostgreSQL', pattern: /^(postgres(?:ql)?|rds\s*postgres|aurora\s*postgres)$/i },
+  {
+    label: 'PostgreSQL',
+    pattern: /^(postgres(?:ql)?|rds\s*postgres|aurora\s*postgres)$/i,
+  },
   { label: 'MySQL', pattern: /^(mysql|aurora\s*mysql|mariadb)$/i },
   { label: 'Redis', pattern: /^(redis(?:\s*cache)?|elasticache\s*redis)$/i },
   { label: 'MongoDB', pattern: /^(mongo(?:db)?|documentdb)$/i },
@@ -30,50 +37,97 @@ const KNOWN_DATA_SERVICES: Array<{ label: string; pattern: RegExp }> = [
   { label: 'Oracle DB', pattern: /^(oracle(?:\s*db)?|autonomous\s*database)$/i },
 ];
 
+const REGION_PATTERN =
+  /^(us|eu|ap|sa|ca|me|af|cn|il)-(central|east|west|north|south|northeast|southeast|northwest|southwest)-\d+[a-z]?$/i;
+
+const PRODUCT_HINT =
+  /(sql|db|cache|mq|queue|store|base|search|stream|broker|bus|redis|mongo|kafka|postgres|mysql|elastic|dynamo|cosmos|fire|oracle|node|python|java|golang|\.net|eks|ecs|gke|aks|oke|devops|pipeline|actions|gitlab|jenkins)/i;
+
 export function isLanguageQuestion(question: string): boolean {
   return /which language should the health-check service use/i.test(question);
 }
 
 export function isDataServiceQuestion(question: string): boolean {
-  return /need stored data or a cache|how should .+ be configured/i.test(question);
+  return /need stored data or a cache|how should .+ be configured/i.test(
+    question
+  );
 }
 
+export function isRegionQuestion(question: string): boolean {
+  return /^Where should we host it\?/i.test(question.trim());
+}
+
+export function isStrictOptionQuestion(question: string): boolean {
+  return (
+    /does this setup match what you need/i.test(question) ||
+    /which (ci\/cd system|environments) do you need|which ci\/cd system should we use/i.test(
+      question
+    ) ||
+    /who should be able to access the api/i.test(question) ||
+    /how much traffic should we plan for/i.test(question)
+  );
+}
+
+/** Keyboard mash / nonsense — length-independent. */
 export function looksLikeGibberish(raw: string): boolean {
   const t = raw.trim().toLowerCase().replace(/[^a-z0-9\s.+#-]/g, '');
   const letters = t.replace(/[^a-z]/g, '');
   if (!letters) return true;
   if (letters.length < 2) return true;
   if (/^(.)\1{3,}$/.test(letters)) return true;
-  // No vowels in a short token → keyboard mash (e.g. "wewer" has vowels; "efewwe" has e)
+
+  // Repeated blocks: sdfsdf, asdasd, wdwefwdwef
+  if (letters.length >= 6 && /(.{2,5})\1{1,}/i.test(letters)) return true;
+
   const vowels = (letters.match(/[aeiouy]/g) || []).length;
   const vowelRatio = vowels / letters.length;
+  const unique = new Set(letters.split('')).size;
+  const uniqueRatio = unique / letters.length;
+
+  // Low vowel density on any length ≥5
   if (letters.length >= 5 && vowelRatio < 0.2) return true;
-  // Alternating nonsense without spaces and no known product shape
+
+  // Long single-token mash (the bug: old code only blocked ≤12 chars)
+  if (!/\s/.test(t) && letters.length >= 8) {
+    if (uniqueRatio <= 0.45) return true;
+    if (vowelRatio <= 0.4 && !PRODUCT_HINT.test(t)) return true;
+    // Mostly consonant clusters with few unique letters (sdsafsdfsdfsdfsdf)
+    if (unique <= 6 && vowelRatio <= 0.45) return true;
+  }
+
+  // Medium mash without product shape
   if (
     letters.length >= 5 &&
-    letters.length <= 10 &&
     !/\s/.test(t) &&
-    vowelRatio <= 0.35 &&
-    !/(sql|db|cache|mq|queue|store|base|search|stream)/i.test(t)
+    vowelRatio <= 0.4 &&
+    !PRODUCT_HINT.test(t)
   ) {
-    // "efewwe", "wewer", "asdfgh" style — reject unless it matches a known list later
-    const unique = new Set(letters.split('')).size;
-    if (unique <= letters.length * 0.55) return true;
+    if (uniqueRatio <= 0.55) return true;
+    if (/(.)\1/.test(letters) && unique <= Math.max(4, letters.length * 0.5)) {
+      return true;
+    }
   }
-  // Common smash patterns
-  if (/^(asdf|qwer|zxcv|test|xxx|aaa|bbb|abc|abcd|foo|bar|baz|n\/a|na|idk|asdfgh|qwerty)+$/i.test(letters)) {
+
+  // Common smash patterns (any length / repeated)
+  if (
+    /^(asdf|qwer|zxcv|test|xxx|aaa|bbb|abc|abcd|foo|bar|baz|n\/a|na|idk|asdfgh|qwerty|sdf|asd|wef|dfs)+$/i.test(
+      letters
+    )
+  ) {
     return true;
   }
-  // Short nonsense tokens with repeated letters (efewwe, wewer-like mash)
+
+  // Short nonsense with repeated letters (efewwe)
   if (
     letters.length >= 4 &&
     letters.length <= 8 &&
     !/\s/.test(t) &&
     /(.)\1/.test(letters) &&
-    new Set(letters.split('')).size <= 3
+    unique <= 3
   ) {
     return true;
   }
+
   return false;
 }
 
@@ -102,6 +156,9 @@ export type InterviewValidationResult =
   | { ok: true; normalized?: string }
   | { ok: false; error: string };
 
+const GIBBERISH_ERROR =
+  'That does not look like a valid option — pick from the list or type a clear answer';
+
 /**
  * Validate a free-text / custom interview answer in context of the question.
  * Option-card picks that exactly match listed options are always OK.
@@ -122,6 +179,16 @@ export function validateInterviewAnswer(
     return { ok: true, normalized: answer };
   }
 
+  // Partial match of a long option label (user typed a clear subset)
+  const softMatch = listedOptions.find(
+    (opt) =>
+      opt.toLowerCase() === answer.toLowerCase() ||
+      (answer.length >= 8 &&
+        opt.toLowerCase().includes(answer.toLowerCase()) &&
+        !looksLikeGibberish(answer))
+  );
+  if (softMatch) return { ok: true, normalized: softMatch };
+
   // Structured "Another service: X"
   if (/^another service:\s*/i.test(answer)) {
     const detail = answer.replace(/^another service:\s*/i, '').trim();
@@ -137,10 +204,8 @@ export function validateInterviewAnswer(
           'Enter a real data service (e.g. MongoDB, DynamoDB, Kafka) — random text is not accepted',
       };
     }
-    // Unknown single-token mash (e.g. "efewwe") — require a known service or a clear product-like name
     const isMultiWord = /\s/.test(detail.trim());
-    const hasProductHint =
-      /(db|sql|cache|queue|mq|stream|store|search|base|broker|bus)/i.test(detail);
+    const hasProductHint = PRODUCT_HINT.test(detail);
     if (!isMultiWord && !hasProductHint) {
       return {
         ok: false,
@@ -162,7 +227,8 @@ export function validateInterviewAnswer(
     if (known) return { ok: true, normalized: known };
     return {
       ok: false,
-      error: 'Pick Node.js, Go, Python, Java, or .NET — unsupported languages are not accepted',
+      error:
+        'Pick Node.js, Go, Python, Java, or .NET — unsupported languages are not accepted',
     };
   }
 
@@ -178,16 +244,51 @@ export function validateInterviewAnswer(
     }
   }
 
-  // Generic custom answers on other questions: block obvious mash
+  if (isRegionQuestion(question)) {
+    if (REGION_PATTERN.test(answer.replace(/\s+/g, ''))) {
+      return { ok: true, normalized: answer.replace(/\s+/g, '') };
+    }
+    if (looksLikeGibberish(answer)) {
+      return { ok: false, error: GIBBERISH_ERROR };
+    }
+    // Allow clear region-like custom answers (e.g. "Mumbai", "Frankfurt")
+    if (answer.length < 3 || !/[a-z]/i.test(answer) || !/[aeiouy]/i.test(answer)) {
+      return { ok: false, error: GIBBERISH_ERROR };
+    }
+    if (!/\s|-/.test(answer) && answer.length >= 10 && !PRODUCT_HINT.test(answer)) {
+      // Long single token without region shape → mash
+      if (looksLikeGibberish(answer) || new Set(answer.toLowerCase()).size <= 6) {
+        return { ok: false, error: GIBBERISH_ERROR };
+      }
+    }
+  }
+
+  // Setup / CI / env / access / traffic: prefer list; always block mash
+  if (isStrictOptionQuestion(question) || listedOptions.length > 0) {
+    if (looksLikeGibberish(answer)) {
+      return { ok: false, error: GIBBERISH_ERROR };
+    }
+    // Single opaque token on a multiple-choice question → force list
+    if (
+      listedOptions.length > 0 &&
+      !/\s/.test(answer) &&
+      answer.length >= 6 &&
+      !PRODUCT_HINT.test(answer) &&
+      !REGION_PATTERN.test(answer)
+    ) {
+      return {
+        ok: false,
+        error: 'Pick an option from the list — random text is not accepted',
+      };
+    }
+  }
+
+  // Generic custom answers: block mash at any length (was capped at ≤12)
   if (
     !listedOptions.some((opt) => answer.startsWith(`${opt}:`)) &&
-    looksLikeGibberish(answer) &&
-    answer.length <= 12
+    looksLikeGibberish(answer)
   ) {
-    return {
-      ok: false,
-      error: 'That does not look like a valid option — pick from the list or type a clear answer',
-    };
+    return { ok: false, error: GIBBERISH_ERROR };
   }
 
   return { ok: true };
