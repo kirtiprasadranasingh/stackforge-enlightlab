@@ -696,6 +696,8 @@ Always format your response by wrapping the chat reply in the following markers:
         let summarySent = false;
         let warningsSent = false;
         const collectedFiles: GeneratedFile[] = [];
+        /** Authoritative file set flushed to the client via `sync` before `done`. */
+        let syncFiles: GeneratedFile[] = [];
         let anyOutput = false;
 
         // Wall-clock budget so post-generation work (missing-file completion +
@@ -854,15 +856,26 @@ Always format your response by wrapping the chat reply in the following markers:
             // Profile-first: seed locked stubs / missing required paths before
             // asking the model to complete — QA stability across clouds.
             if (profile) {
+              const beforePaths = new Set(
+                collectedFiles.map((f) => f.path.replace(/\\/g, '/'))
+              );
               const merged = mergeLockedBaseFiles(collectedFiles, profile, {
                 fillMissing: true,
                 forceStubs: true,
                 presets,
                 scaffoldOptions,
               });
-              // Full replace — seeded-only sync left competing CI (ZIP 28 GHA+GitLab)
+              // Full replace — seeded-only sync left competing CI (ZIP 28/29/30 GHA leftovers)
               collectedFiles.length = 0;
               collectedFiles.push(...merged.files);
+              const afterPaths = new Set(
+                merged.files.map((f) => f.path.replace(/\\/g, '/'))
+              );
+              for (const path of beforePaths) {
+                if (!afterPaths.has(path)) {
+                  controller.enqueue(sse({ type: 'delete', path }));
+                }
+              }
               if (merged.seeded.length > 0) {
                 controller.enqueue(
                   sse({
@@ -1095,6 +1108,29 @@ Always format your response by wrapping the chat reply in the following markers:
               // Keep the full workspace for validate/repair (not just the delta).
               collectedFiles.length = 0;
               collectedFiles.push(...finalized);
+              syncFiles = [...finalized];
+
+              // Always drop competing CI paths from the client — priorPaths alone
+              // missed GHA when an earlier merge already cleaned collectedFiles
+              // (ZIP 29/30: README said Jenkins/OCI but ZIP still had deploy.yml).
+              for (const path of [
+                '.github/workflows/deploy.yml',
+                '.gitlab-ci.yml',
+                'azure-pipelines.yml',
+                'Jenkinsfile',
+                'buildspec.yml',
+                'cloudbuild.yaml',
+                'build_spec.yaml',
+              ]) {
+                if (!finalPathSet.has(path)) {
+                  controller.enqueue(sse({ type: 'delete', path }));
+                }
+              }
+              if (presets.ci !== 'github-actions') {
+                controller.enqueue(
+                  sse({ type: 'delete', path: '.github/workflows/deploy.yml' })
+                );
+              }
 
               const currentFiles = [...finalized];
               const MAX_VALIDATION_ATTEMPTS = 3; // 1 validate + up to 2 auto-repair passes (bounded by the wall-clock budget below)
@@ -1275,6 +1311,7 @@ ${failLines.join('\n')}`;
                     }
                     currentFiles.length = 0;
                     currentFiles.push(...relocked);
+                    syncFiles = [...relocked];
                     for (const file of relocked) {
                       controller.enqueue(sse({ type: 'file', file }));
                     }
@@ -1318,6 +1355,14 @@ ${failLines.join('\n')}`;
                   console.error('README write error:', e);
                 }
               }
+              syncFiles = [...currentFiles];
+            }
+            // Full replace so the ZIP cannot keep stale GHA/CI from early stream chunks.
+            if (syncFiles.length === 0 && collectedFiles.length > 0) {
+              syncFiles = [...collectedFiles];
+            }
+            if (syncFiles.length > 0) {
+              controller.enqueue(sse({ type: 'sync', files: syncFiles }));
             }
             controller.enqueue(sse({ type: 'done' }));
           }

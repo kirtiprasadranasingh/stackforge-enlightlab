@@ -662,6 +662,7 @@ export default function GeneratePage() {
             let event: {
               type: string;
               file?: GeneratedFile;
+              files?: GeneratedFile[];
               path?: string;
               summary?: string;
               warnings?: string[];
@@ -710,9 +711,30 @@ export default function GeneratePage() {
                   setHasGeneratedFiles(true);
                 }
                 break;
+              case 'sync':
+                // Authoritative final file set — drops stale CI (GHA leftovers) from early stream.
+                if (event.files && Array.isArray(event.files)) {
+                  const next = event.files.map((file) => ({
+                    ...file,
+                    language:
+                      !file.language ||
+                      file.language === 'plaintext' ||
+                      file.language === 'text' ||
+                      file.language === 'plain'
+                        ? getLanguageFromPath(file.path)
+                        : file.language,
+                  }));
+                  setFiles(next);
+                  filesRef.current = next;
+                  if (next.length > 0) setHasGeneratedFiles(true);
+                }
+                break;
               case 'delete':
                 if (event.path) {
-                  setFiles((prev) => prev.filter((f) => f.path !== event.path));
+                  const path = event.path.replace(/\\/g, '/');
+                  setFiles((prev) =>
+                    prev.filter((f) => f.path.replace(/\\/g, '/') !== path)
+                  );
                 }
                 break;
               case 'plan':

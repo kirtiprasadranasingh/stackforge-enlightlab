@@ -1761,11 +1761,18 @@ export function normalizeScaffoldFiles(
                 : profile.id.includes('container-apps')
                   ? 'container-apps'
                   : 'oke',
-      ci: profile.id.includes('cloudrun')
-        ? 'gitlab-ci'
-        : profile.id.includes('container-apps')
-          ? 'azure-devops'
-          : 'github-actions',
+      ci: (() => {
+        if (byPath.has('Jenkinsfile')) return 'jenkins' as const;
+        if (byPath.has('build_spec.yaml')) return 'oci-devops' as const;
+        if (byPath.has('buildspec.yml')) return 'aws-codepipeline' as const;
+        if (byPath.has('cloudbuild.yaml')) return 'gcp-cloud-build' as const;
+        if (byPath.has('.gitlab-ci.yml')) return 'gitlab-ci' as const;
+        if (byPath.has('azure-pipelines.yml')) return 'azure-devops' as const;
+        // Prefer CI already present over silent GHA default (ZIP 29/30).
+        if (profile.id.includes('cloudrun')) return 'gitlab-ci' as const;
+        if (profile.id.includes('container-apps')) return 'azure-devops' as const;
+        return 'github-actions' as const;
+      })(),
     };
     const locked = mergeLockedBaseFiles(Array.from(byPath.values()), profile, {
       fillMissing: true,

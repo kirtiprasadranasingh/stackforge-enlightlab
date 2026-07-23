@@ -286,10 +286,54 @@ stages:
         path: 'Jenkinsfile',
         content: `pipeline {
   agent any
+  environment {
+    AWS_REGION = '${region}'
+    IMAGE_TAG = "\${env.GIT_COMMIT.take(7)}"
+  }
   stages {
-    stage('Test') { steps { sh 'echo ok' } }
-    stage('Build') { steps { sh 'echo build' } }
-    stage('Deploy') { steps { sh 'echo deploy ${presets.orchestrator}' } }
+    stage('Test') {
+      steps { sh 'echo health-stub-ok' }
+    }
+    stage('Build') {
+      steps {
+        sh '''
+          set -euo pipefail
+          if [ -f app/Dockerfile ]; then docker build -t stackforge:\${IMAGE_TAG} ./app
+          elif [ -f Dockerfile ]; then docker build -t stackforge:\${IMAGE_TAG} .
+          else echo "No Dockerfile found" && exit 1
+          fi
+        '''
+      }
+    }
+    stage('Push ECR') {
+      steps {
+        sh '''
+          set -euo pipefail
+          echo "Configure AWS credentials + aws ecr get-login-password, then docker push"
+          echo "Target: ${presets.cloud}/${presets.orchestrator} in \${AWS_REGION}"
+        '''
+      }
+    }
+    stage('Deploy Dev') {
+      steps { sh 'echo "Update ECS/K8s service in development (wire AWS CLI / kubectl here)"' }
+    }
+    stage('Approve Staging') {
+      steps { input message: 'Promote to staging?' }
+    }
+    stage('Deploy Staging') {
+      steps { sh 'echo "Deploy staging"' }
+    }
+    stage('Approve Production') {
+      steps { input message: 'Promote to production?' }
+    }
+    stage('Deploy Production') {
+      steps { sh 'echo "Deploy production"' }
+    }
+  }
+  post {
+    failure {
+      echo 'Deployment failed — roll back via ECS circuit breaker / previous task definition'
+    }
   }
 }
 `,
@@ -362,7 +406,7 @@ steps:
       else
         echo "No Dockerfile found" && exit 1
       fi
-      echo "Configure OCIR/ECR push + cluster deploy credentials in the OCI DevOps pipeline UI"
+      echo "Configure OCIR push + OKE deploy credentials in the OCI DevOps pipeline UI"
 `,
       };
     default:
@@ -629,6 +673,39 @@ images:
     );
   } else {
     set(byPath, chosen.path, chosen.content);
+  }
+  // OCI DevOps expects build + per-env deploy specs (plan file manifest).
+  if (presets.ci === 'oci-devops') {
+    const deployBody = (env: string) => `version: 0.1
+component: deploy
+timeoutInSeconds: 900
+steps:
+  - type: Command
+    name: HelmUpgrade${env[0].toUpperCase()}${env.slice(1)}
+    command: |
+      set -euo pipefail
+      echo "Deploying to OKE namespace ${env} via helm upgrade --install"
+      if [ -d charts/app ]; then
+        helm upgrade --install app charts/app \\
+          --namespace ${env} --create-namespace \\
+          --set image.tag=\${OCI_IMAGE_TAG:-latest} \\
+          --wait --timeout 10m
+      else
+        echo "charts/app missing — add Helm chart before production deploy"
+        exit 1
+      fi
+`;
+    set(byPath, 'deploy_dev_spec.yaml', deployBody('development'));
+    set(byPath, 'deploy_staging_spec.yaml', deployBody('staging'));
+    set(byPath, 'deploy_prod_spec.yaml', deployBody('production'));
+  } else {
+    for (const p of [
+      'deploy_dev_spec.yaml',
+      'deploy_staging_spec.yaml',
+      'deploy_prod_spec.yaml',
+    ]) {
+      byPath.delete(p);
+    }
   }
   enforceSingleCi(byPath, presets.ci);
 
@@ -974,9 +1051,29 @@ CMD ["node", "server.js"]
     const readme = byPath.get('README.md');
     if (readme) {
       // Drop prior notes blocks so multi-pass apply does not triple-append
-      const base = readme.content
+      let base = readme.content
         .replace(/\n*## Scaffold options notes\n[\s\S]*$/i, '')
         .trimEnd();
+      // Model often hardcodes "GitHub Actions" in the intro — rewrite to chosen CI.
+      if (presets.ci !== 'github-actions') {
+        const ciLabel =
+          presets.ci === 'jenkins'
+            ? 'Jenkins'
+            : presets.ci === 'oci-devops'
+              ? 'OCI DevOps'
+              : presets.ci === 'gitlab-ci'
+                ? 'GitLab CI'
+                : presets.ci === 'azure-devops'
+                  ? 'Azure DevOps'
+                  : presets.ci === 'aws-codepipeline'
+                    ? 'AWS CodePipeline'
+                    : presets.ci === 'gcp-cloud-build'
+                      ? 'Google Cloud Build'
+                      : presets.ci;
+        base = base
+          .replace(/Terraform\s*\+\s*GitHub Actions\s*\+/gi, `Terraform + ${ciLabel} +`)
+          .replace(/\bGitHub Actions\b/gi, ciLabel);
+      }
       byPath.set('README.md', {
         ...readme,
         content:

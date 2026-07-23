@@ -1,0 +1,39 @@
+replicaCount: 3
+
+image:
+  repository: "iad.ocir.io/<your-tenancy-namespace>/<your-repo-name>/node-health-check" # Placeholder, updated by CI/CD
+  pullPolicy: IfNotPresent
+  tag: "latest" # Placeholder, updated by CI/CD
+
+service:
+  type: LoadBalancer # OCI Load Balancer will be provisioned automatically by OKE
+  port: 80
+  targetPort: 3000
+
+ingress:
+  enabled: true
+  className: "nginx" # OCI OKE uses a default Ingress controller or you can install NGINX
+  annotations:
+    # Example annotations for OCI Load Balancer via Ingress Controller
+    # These might vary based on your Ingress Controller and OCI setup.
+    # If using OKE's native Ingress controller, check OCI documentation.
+    # "kubernetes.io/ingress.class": "oci-public-lb" # Example if using specific OKE LB controller
+    # "oci-load-balancer.oraclecloud.com/ssl-mode": "TERMINATE" # Example for SSL termination
+    # "oci-load-balancer.oraclecloud.com/protocol": "HTTPS"
+  host: # Hostname will be the OCI Load Balancer's public IP/hostname
+  path: /
+  pathType: Prefix
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+serviceAccount:
+  create: true
+  name: "default" # Can be overridden
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

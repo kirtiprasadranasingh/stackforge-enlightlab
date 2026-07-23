@@ -1,0 +1,9 @@
+environment = "staging"
+vpc_cidr    = "10.20.0.0/16"
+public_subnet_cidrs = ["10.20.1.0/24", "10.20.2.0/24"]
+private_subnet_cidrs = ["10.20.101.0/24", "10.20.102.0/24"]
+desired_count = 2
+min_capacity = 2
+max_capacity = 5
+db_instance_type = "db.t3.medium"
+db_allocated_storage = 20

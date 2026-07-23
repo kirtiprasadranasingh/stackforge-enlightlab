@@ -1,0 +1,9 @@
+environment = "dev"
+vpc_cidr    = "10.10.0.0/16"
+public_subnet_cidrs = ["10.10.1.0/24", "10.10.2.0/24"]
+private_subnet_cidrs = ["10.10.101.0/24", "10.10.102.0/24"]
+desired_count = 1
+min_capacity = 1
+max_capacity = 3
+db_instance_type = "db.t3.micro"
+db_allocated_storage = 10

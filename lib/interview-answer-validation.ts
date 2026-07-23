@@ -111,22 +111,23 @@ export function looksLikeGibberish(raw: string): boolean {
     if (unique <= 6 && vowelRatio <= 0.45) return true;
   }
 
-  // Medium mash without product shape
+  // Medium mash without product shape (covers "wewer", "asdas", "qweqw")
   if (
     letters.length >= 5 &&
     !/\s/.test(t) &&
-    vowelRatio <= 0.4 &&
     !PRODUCT_HINT.test(t)
   ) {
-    if (uniqueRatio <= 0.55) return true;
+    if (vowelRatio <= 0.45 && uniqueRatio <= 0.7) return true;
     if (/(.)\1/.test(letters) && unique <= Math.max(4, letters.length * 0.5)) {
       return true;
     }
+    // Alternating / keyboard-ish short tokens with few unique letters
+    if (unique <= 4 && letters.length >= 5) return true;
   }
 
   // Common smash patterns (any length / repeated)
   if (
-    /^(asdf|qwer|zxcv|test|xxx|aaa|bbb|abc|abcd|foo|bar|baz|n\/a|na|idk|asdfgh|qwerty|sdf|asd|wef|dfs)+$/i.test(
+    /^(asdf|qwer|zxcv|test|xxx|aaa|bbb|abc|abcd|foo|bar|baz|n\/a|na|idk|asdfgh|qwerty|sdf|asd|wef|dfs|wewer|efewwe|wewe|werwer)+$/i.test(
       letters
     )
   ) {
@@ -289,13 +290,19 @@ export function validateInterviewAnswer(
       return { ok: true, normalized: answer.replace(/\s+/g, '') };
     }
     // Single opaque token on a multiple-choice question → force list
+    // (length ≥4 so "wewer" / "asdf" cannot slip through)
     if (
       listedOptions.length > 0 &&
       !/\s/.test(answer) &&
-      answer.length >= 6 &&
+      answer.length >= 4 &&
       !PRODUCT_HINT.test(answer) &&
       !REGION_PATTERN.test(answer) &&
-      !isKnownInterviewRegion(answer)
+      !isKnownInterviewRegion(answer) &&
+      !listedOptions.some(
+        (opt) =>
+          opt.toLowerCase() === answer.toLowerCase() ||
+          answer.toLowerCase().startsWith(`${opt.toLowerCase()}:`)
+      )
     ) {
       return {
         ok: false,
