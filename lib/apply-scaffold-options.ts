@@ -147,7 +147,7 @@ function stripCompetingAppTrees(
       'main.py',
       'requirements.txt',
     ]);
-  } else if (runtime === 'node') {
+  } else if (runtime === 'node' || runtime === 'java' || runtime === 'dotnet') {
     drop([
       'app/main.py',
       'app/requirements.txt',
@@ -807,8 +807,12 @@ CMD ["/app"]
     }
   }
 
-  // Node runtime — re-seed Express stub when interview picks Node (e.g. after Cloud Run Python default)
-  if (options.runtime === 'node') {
+  // Node runtime — also used as validate-safe stand-in for Java / .NET (language only)
+  if (
+    options.runtime === 'node' ||
+    options.runtime === 'java' ||
+    options.runtime === 'dotnet'
+  ) {
     const serverJs = `const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;

@@ -357,9 +357,17 @@ export function sanitizePlanAgainstInterview(
       /\bASP\.NET(?:\s+Core)?\b(?!\s*\(not confirmed)/gi,
       '.NET (ASP.NET not confirmed)'
     );
+    out = out.replace(
+      /^([-*]\s*)?Runtime Stub:\s*Node\.js[^\n]*/gim,
+      '$1Runtime Stub: **.NET** (language only — ASP.NET not confirmed; Node `/health` stub is a build placeholder)'
+    );
+    out = out.replace(
+      /^([-*]\s*)?Health-check service language:\s*\.NET[^\n]*/gim,
+      '$1Health-check service language: **.NET** (framework not confirmed)'
+    );
     out = prependAssumption(
       out,
-      '.NET was selected as the **language** only — ASP.NET was not chosen; any stub is a placeholder, not a confirmed framework.'
+      '.NET was selected as the **language** only — ASP.NET was not chosen; any stub is a Node/Python/Go `/health` placeholder, not a confirmed framework.'
     );
   }
 

@@ -12,7 +12,7 @@ const KNOWN_RUNTIMES: Array<{ label: string; pattern: RegExp }> = [
   { label: 'Go', pattern: /^(go|golang|gin)$/i },
   { label: 'Python', pattern: /^(python|fastapi|django|flask|py)$/i },
   { label: 'Java', pattern: /^(java|spring(?:\s*boot)?)$/i },
-  { label: '.NET', pattern: /^(\.net|dotnet|c#|csharp|asp\.?net)$/i },
+  { label: '.NET', pattern: /^(\.net|dotnet|c#|csharp|asp\.?net|net)$/i },
 ];
 
 const KNOWN_DATA_SERVICES: Array<{ label: string; pattern: RegExp }> = [

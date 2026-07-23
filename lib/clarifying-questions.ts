@@ -253,7 +253,14 @@ export function isCiSystemQuestion(question: string): boolean {
 
 /** Expand interview picks into explicit requirements for the plan model. */
 export function formatInterviewAnswerForPlan(rawAnswer: string): string {
-  const answer = rawAnswer.trim().replace(/\.+$/, '').trim();
+  // Do not strip trailing dots from ".NET" — only remove a single trailing period
+  // used as sentence punctuation (e.g. "GitLab CI.").
+  let answer = rawAnswer.trim();
+  if (/^\.NET$/i.test(answer)) {
+    // keep exact chip
+  } else if (/\.$/.test(answer) && !/\.\w+$/.test(answer)) {
+    answer = answer.replace(/\.$/, '').trim();
+  }
   if (!answer) return answer;
 
   if (answer === 'Yes, use this setup') {
@@ -338,7 +345,7 @@ export function formatInterviewAnswerForPlan(rawAnswer: string): string {
   if (/^Spring(\s*Boot)?$/i.test(answer)) {
     return `Language/framework (client override): Spring Boot (Java). Spring Boot may appear under Confirmed requirements.`;
   }
-  if (/^\.NET$/i.test(answer)) {
+  if (/^(\.NET|dotnet|net)$/i.test(answer)) {
     return `Language (client override): .NET only. Do NOT confirm ASP.NET Controllers/Services or a full web framework unless the client explicitly named one. Put any stub choice under Assumptions as a placeholder.`;
   }
   if (/^Node\.js$/i.test(answer)) {

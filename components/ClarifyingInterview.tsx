@@ -19,6 +19,8 @@ interface ClarifyingInterviewProps {
   questions: string[];
   answers: Record<number, string>;
   disabled?: boolean;
+  /** Shown when parent submit validation fails (was silent before). */
+  submitError?: string | null;
   onAnswer: (questionIndex: number, answer: string) => void;
   onSubmit: () => void;
 }
@@ -205,6 +207,7 @@ export function ClarifyingInterview({
   questions,
   answers,
   disabled = false,
+  submitError = null,
   onAnswer,
   onSubmit,
 }: ClarifyingInterviewProps) {
@@ -612,8 +615,14 @@ export function ClarifyingInterview({
         </div>
       )}
 
-      <div className="flex gap-2">
-        {currentIndex > 0 && !isAdvancing && (
+      <div className="flex flex-col gap-2">
+        {(continueHint || submitError) && (
+          <p className="text-[11px] font-medium text-red-600" role="alert">
+            {submitError || continueHint}
+          </p>
+        )}
+        <div className="flex gap-2">
+        {stepIndex > 0 && !isAdvancing && (
           <button
             type="button"
             disabled={disabled}
@@ -632,6 +641,7 @@ export function ClarifyingInterview({
         >
           {isLast ? 'Continue to architecture plan' : 'Next question'}
         </button>
+        </div>
       </div>
     </section>
   );

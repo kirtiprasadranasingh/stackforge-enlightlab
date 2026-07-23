@@ -294,6 +294,8 @@ export default function GeneratePage() {
   const [pendingPlan, setPendingPlan] = useState<string | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<string[]>([]);
   const [questionAnswers, setQuestionAnswers] = useState<Record<number, string>>({});
+  const questionAnswersRef = useRef<Record<number, string>>({});
+  const [interviewSubmitError, setInterviewSubmitError] = useState<string | null>(null);
   const [lastStackPrompt, setLastStackPrompt] = useState('');
   const [lastInterviewAnswers, setLastInterviewAnswers] = useState('');
   const [awaitingApproval, setAwaitingApproval] = useState(false);
@@ -503,6 +505,8 @@ export default function GeneratePage() {
       if (phase === 'plan' || phase === 'clarify') {
         setPendingQuestions([]);
         setQuestionAnswers({});
+        questionAnswersRef.current = {};
+        setInterviewSubmitError(null);
         // Always clear prior scaffolds when planning — never show "N files generated"
         // while the architecture is still being drafted.
         setFiles([]);
@@ -534,6 +538,8 @@ export default function GeneratePage() {
         setAwaitingApproval(false);
         setPendingQuestions([]);
         setQuestionAnswers({});
+        questionAnswersRef.current = {};
+        setInterviewSubmitError(null);
       }
 
       const originalRequestPresets = inferPresetsFromPrompt(
@@ -723,6 +729,8 @@ export default function GeneratePage() {
                   setPendingPlan(cleaned);
                   setPendingQuestions([]);
                   setQuestionAnswers({});
+                  questionAnswersRef.current = {};
+                  setInterviewSubmitError(null);
                   setAwaitingApproval(true);
                 }
                 break;
@@ -735,6 +743,8 @@ export default function GeneratePage() {
                   }
                   setPendingQuestions(event.questions);
                   setQuestionAnswers({});
+                  questionAnswersRef.current = {};
+                  setInterviewSubmitError(null);
                   setAwaitingApproval(false);
                   setPendingPlan(null);
                 }
@@ -907,19 +917,22 @@ export default function GeneratePage() {
   const submitClarifyingAnswers = useCallback(() => {
     if (isGenerating || pendingQuestions.length === 0) return;
 
+    // Use ref so the last chip click (.NET / Go / …) is never lost to a stale closure
+    const answers = questionAnswersRef.current;
+
     // Validate against adapted questions (region/CI lists follow cloud/CI picks).
     // Using the raw API list rejects Oracle regions after OCI DevOps (Continue stuck).
-    const adapted = adaptClarifyingQuestions(pendingQuestions, questionAnswers);
+    const adapted = adaptClarifyingQuestions(pendingQuestions, answers);
 
     let blockedReason: string | null = null;
     const incomplete = adapted.some((question, index) => {
       if (
         isCiSystemQuestion(question) &&
-        interviewAlreadyChoseCi(questionAnswers)
+        interviewAlreadyChoseCi(answers)
       ) {
         return false;
       }
-      const answer = questionAnswers[index]?.trim() || '';
+      const answer = answers[index]?.trim() || '';
       if (!answer) {
         blockedReason = blockedReason || 'Answer every question before continuing';
         return true;
@@ -950,20 +963,32 @@ export default function GeneratePage() {
       return false;
     });
     if (incomplete) {
-      setError(blockedReason || 'Finish the interview answers before continuing');
+      const msg = blockedReason || 'Finish the interview answers before continuing';
+      setInterviewSubmitError(msg);
+      setError(msg);
       return;
     }
 
-    const choices = buildInterviewChoiceItems(pendingQuestions, questionAnswers);
+    const choices = buildInterviewChoiceItems(pendingQuestions, answers);
     const formattedAnswers = formatInterviewAnswersForPlan(
       pendingQuestions,
-      questionAnswers
+      answers
     );
     lastInterviewAnswersRef.current = formattedAnswers;
     setLastInterviewAnswers(formattedAnswers);
+    setInterviewSubmitError(null);
     setError(null);
     void sendMessage(formattedAnswers, { phase: 'plan', interviewChoices: choices });
-  }, [isGenerating, pendingQuestions, questionAnswers, sendMessage]);
+  }, [isGenerating, pendingQuestions, sendMessage]);
+
+  const setInterviewAnswer = useCallback((index: number, answer: string) => {
+    questionAnswersRef.current = {
+      ...questionAnswersRef.current,
+      [index]: answer,
+    };
+    setQuestionAnswers(questionAnswersRef.current);
+    setInterviewSubmitError(null);
+  }, []);
 
   const handleStop = () => {
     abortController.current?.abort();
@@ -995,6 +1020,8 @@ export default function GeneratePage() {
     setPendingPlan(null);
     setPendingQuestions([]);
     setQuestionAnswers({});
+    questionAnswersRef.current = {};
+    setInterviewSubmitError(null);
     setLastStackPrompt('');
     lastStackPromptRef.current = '';
     setLastInterviewAnswers('');
@@ -1176,6 +1203,8 @@ export default function GeneratePage() {
     setPendingPlan(null);
     setPendingQuestions([]);
     setQuestionAnswers({});
+    questionAnswersRef.current = {};
+    setInterviewSubmitError(null);
     setLastStackPrompt('');
     lastStackPromptRef.current = '';
     setLastInterviewAnswers('');
@@ -1334,12 +1363,8 @@ export default function GeneratePage() {
                     key={pendingQuestions.join('||')}
                     questions={pendingQuestions}
                     answers={questionAnswers}
-                    onAnswer={(index, answer) =>
-                      setQuestionAnswers((current) => ({
-                        ...current,
-                        [index]: answer,
-                      }))
-                    }
+                    submitError={interviewSubmitError}
+                    onAnswer={setInterviewAnswer}
                     onSubmit={submitClarifyingAnswers}
                   />
                 )}
@@ -1585,12 +1610,8 @@ export default function GeneratePage() {
                   key={pendingQuestions.join('||')}
                   questions={pendingQuestions}
                   answers={questionAnswers}
-                  onAnswer={(index, answer) =>
-                    setQuestionAnswers((current) => ({
-                      ...current,
-                      [index]: answer,
-                    }))
-                  }
+                  submitError={interviewSubmitError}
+                  onAnswer={setInterviewAnswer}
                   onSubmit={submitClarifyingAnswers}
                 />
               )}
