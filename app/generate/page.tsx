@@ -914,27 +914,34 @@ export default function GeneratePage() {
     filesRef.current = next;
   }, []);
 
+  const setInterviewAnswer = useCallback((index: number, answer: string) => {
+    // Always return a new object — reusing questionAnswersRef.current as state
+    // made React bail out of re-renders, so chips looked selected only briefly
+    // (or not at all) and Continue still saw empty answers.
+    setQuestionAnswers((current) => {
+      const next = { ...current, [index]: answer };
+      questionAnswersRef.current = next;
+      return next;
+    });
+    setInterviewSubmitError(null);
+  }, []);
+
   const submitClarifyingAnswers = useCallback(() => {
     if (isGenerating || pendingQuestions.length === 0) return;
 
-    // Use ref so the last chip click (.NET / Go / …) is never lost to a stale closure
-    const answers = questionAnswersRef.current;
+    const answers = { ...questionAnswersRef.current };
 
-    // Validate against adapted questions (region/CI lists follow cloud/CI picks).
-    // Using the raw API list rejects Oracle regions after OCI DevOps (Continue stuck).
     const adapted = adaptClarifyingQuestions(pendingQuestions, answers);
+    const skipCi = interviewAlreadyChoseCi(answers);
 
     let blockedReason: string | null = null;
     const incomplete = adapted.some((question, index) => {
-      if (
-        isCiSystemQuestion(question) &&
-        interviewAlreadyChoseCi(answers)
-      ) {
-        return false;
-      }
+      if (skipCi && isCiSystemQuestion(question)) return false;
       const answer = answers[index]?.trim() || '';
       if (!answer) {
-        blockedReason = blockedReason || 'Answer every question before continuing';
+        const label = parseClarifyingQuestion(question).prompt.replace(/\?$/, '');
+        blockedReason =
+          blockedReason || `Please answer: ${label}`;
         return true;
       }
       if (answer === 'Change the cloud') {
@@ -965,7 +972,6 @@ export default function GeneratePage() {
     if (incomplete) {
       const msg = blockedReason || 'Finish the interview answers before continuing';
       setInterviewSubmitError(msg);
-      setError(msg);
       return;
     }
 
@@ -980,15 +986,6 @@ export default function GeneratePage() {
     setError(null);
     void sendMessage(formattedAnswers, { phase: 'plan', interviewChoices: choices });
   }, [isGenerating, pendingQuestions, sendMessage]);
-
-  const setInterviewAnswer = useCallback((index: number, answer: string) => {
-    questionAnswersRef.current = {
-      ...questionAnswersRef.current,
-      [index]: answer,
-    };
-    setQuestionAnswers(questionAnswersRef.current);
-    setInterviewSubmitError(null);
-  }, []);
 
   const handleStop = () => {
     abortController.current?.abort();

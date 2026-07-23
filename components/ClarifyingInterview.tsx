@@ -565,7 +565,8 @@ export function ClarifyingInterview({
                 }}
                 placeholder="Type the service name…"
                 aria-label="Custom data service"
-                aria-invalid={Boolean(customDataService) && !answerValidation.ok}
+                spellCheck={false}
+                autoComplete="off"
                 className="w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
               {Boolean(customDataService) && !answerValidation.ok && (
@@ -584,6 +585,8 @@ export function ClarifyingInterview({
                 type="text"
                 value={selectedOption ? '' : currentAnswer}
                 disabled={disabled}
+                spellCheck={false}
+                autoComplete="off"
                 onChange={(event) => onAnswer(currentIndex, event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
@@ -593,11 +596,6 @@ export function ClarifyingInterview({
                 }}
                 placeholder="Or type a different answer…"
                 aria-label={`Custom answer for question ${currentIndex + 1}`}
-                aria-invalid={
-                  Boolean(currentAnswer.trim()) &&
-                  !selectedOption &&
-                  !answerValidation.ok
-                }
                 className="mt-3 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
             )}
@@ -616,11 +614,11 @@ export function ClarifyingInterview({
       )}
 
       <div className="flex flex-col gap-2">
-        {(continueHint || submitError) && (
+        {submitError ? (
           <p className="text-[11px] font-medium text-red-600" role="alert">
-            {submitError || continueHint}
+            {submitError}
           </p>
-        )}
+        ) : null}
         <div className="flex gap-2">
         {stepIndex > 0 && !isAdvancing && (
           <button
