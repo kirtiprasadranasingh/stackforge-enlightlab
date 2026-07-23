@@ -482,13 +482,31 @@ cloud/platform when the client overrode it.
 **Java / .NET language ≠ framework (critical):**
 - Interview answer **"Java"** confirms the **language** only. Do **NOT** list Spring Boot, Quarkus,
   Micronaut, \`DemoApplication.java\`, Maven Spring starters, or a "Spring Boot-based health endpoint"
-  under Confirmed requirements unless the client explicitly named that framework.
-- Put the stub choice under **Assumptions**, e.g. "Minimal \`/health\` placeholder only (not a chosen
+  under Confirmed requirements, Stack summary, Tools and workflows, File manifest, or Implement stage
+  unless the client explicitly named that framework.
+- Confirmed / Stack summary must say: **Java (language only — framework not confirmed)**.
+- Put the stub choice under **Assumptions** only, e.g. "Minimal \`/health\` placeholder (not a chosen
   Java framework); Spring Boot is **not** selected — replace stub with your real Java service."
   Prefer a tiny plain Java HTTP stub or a Node/Go/Python stand-in with README honesty — never present
   Spring Boot as the confirmed runtime.
+- File manifest must **not** include \`DemoApplication.java\`, \`pom.xml\` Spring Boot trees, or
+  \`application.properties\` Spring configs when only Java was chosen.
 - Same for **".NET"**: do not invent ASP.NET Controllers/Services as confirmed unless named.
 - Only if the client wrote "Spring Boot" (or similar) may Confirmed requirements name that framework.
+
+**Unasked defaults are Assumptions — never Confirmed (critical):**
+- If the interview never asked / answered **language**, do **not** put "Runtime Stub: Node.js"
+  (or any language) under Confirmed requirements. Put it under **Assumptions** as
+  "default scaffold placeholder — language not confirmed".
+- If the interview never asked / answered **database / data service**, do **not** put
+  PostgreSQL / Cloud SQL / RDS under Confirmed requirements. Mark under **Assumptions** as
+  "default generated database scaffold — data service not confirmed".
+- Mid-chat cloud changes (e.g. "Actually use Google Cloud Run instead") that skip the rest of
+  the interview: Confirmed requirements = only what the client actually said (cloud/compute).
+  Everything else (runtime, DB, region, CI details beyond what they named) → **Assumptions**.
+- CI pipeline *file contents* are always a generated scaffold; Confirmed may name the CI *system*
+  only when the client chose it (or the original prompt did). Do not over-confirm every pipeline stage
+  as a client decision.
 
 If **critical** decisions are still missing after chat (cloud / compute / CI unclear), emit
 <<<QUESTIONS>>> with 3–5 focused questions and leave <<<PLAN>>> empty. QUESTIONS must be a valid

@@ -43,6 +43,7 @@ import {
 } from '@/lib/scaffold-spec';
 import { mergeLockedBaseFiles, shouldForceLockPath } from '@/lib/scaffold-base-files';
 import { parseScaffoldOptions } from '@/lib/scaffold-options';
+import { sanitizePlanAgainstInterview } from '@/lib/sanitize-plan';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
 import path from 'path';
@@ -184,7 +185,8 @@ async function streamPlanningPhase(params: {
           }
           if (!conversational && parsed.plan && parsed.plan.length > 40 && !planSent) {
             planSent = true;
-            controller.enqueue(sse({ type: 'plan', plan: parsed.plan }));
+            const cleaned = sanitizePlanAgainstInterview(parsed.plan, userPrompt);
+            controller.enqueue(sse({ type: 'plan', plan: cleaned }));
           }
           if (parsed.summary && !summarySent) {
             summarySent = true;
@@ -199,7 +201,8 @@ async function streamPlanningPhase(params: {
         }
         if (!conversational && finalParsed.plan && finalParsed.plan.length > 40 && !planSent) {
           planSent = true;
-          controller.enqueue(sse({ type: 'plan', plan: finalParsed.plan }));
+          const cleaned = sanitizePlanAgainstInterview(finalParsed.plan, userPrompt);
+          controller.enqueue(sse({ type: 'plan', plan: cleaned }));
         }
         if (finalParsed.summary && !summarySent) {
           summarySent = true;
@@ -216,7 +219,11 @@ async function streamPlanningPhase(params: {
             /file manifest|assumptions|resources|terraform|ci\/cd/i.test(cleaned) ||
             cleaned.length > 200
           ) {
-            controller.enqueue(sse({ type: 'plan', plan: cleaned.slice(0, 18000) }));
+            const planBody = sanitizePlanAgainstInterview(
+              cleaned.slice(0, 18000),
+              userPrompt
+            );
+            controller.enqueue(sse({ type: 'plan', plan: planBody }));
             planSent = true;
           } else if (cleaned) {
             const qLines = cleaned
