@@ -42,6 +42,7 @@ import {
   parseFileManifestFromPlan,
 } from '@/lib/scaffold-spec';
 import { mergeLockedBaseFiles, shouldForceLockPath } from '@/lib/scaffold-base-files';
+import { adaptRequiredPathsForCi } from '@/lib/apply-scaffold-options';
 import { parseScaffoldOptions } from '@/lib/scaffold-options';
 import { sanitizePlanAgainstInterview } from '@/lib/sanitize-plan';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
@@ -826,12 +827,14 @@ Always format your response by wrapping the chat reply in the following markers:
                 : prompt;
             const profile = detectScaffoldProfile(profileDetectText, presets);
             const planPaths = parseFileManifestFromPlan(approvedPlan || '');
-            const requiredPaths =
+            const requiredPaths = adaptRequiredPathsForCi(
               planPaths.length >= 4
                 ? planPaths
                 : profile
                   ? [...profile.requiredPaths]
-                  : [];
+                  : [],
+              presets.ci
+            );
 
             // Profile-first: seed locked stubs / missing required paths before
             // asking the model to complete — QA stability across clouds.
@@ -842,6 +845,9 @@ Always format your response by wrapping the chat reply in the following markers:
                 presets,
                 scaffoldOptions,
               });
+              // Full replace — seeded-only sync left competing CI (ZIP 28 GHA+GitLab)
+              collectedFiles.length = 0;
+              collectedFiles.push(...merged.files);
               if (merged.seeded.length > 0) {
                 controller.enqueue(
                   sse({
@@ -849,15 +855,10 @@ Always format your response by wrapping the chat reply in the following markers:
                     message: `Seeding ${merged.seeded.length} locked profile base file(s)…`,
                   })
                 );
-                for (const path of merged.seeded) {
-                  const file = merged.files.find((f) => f.path === path);
-                  if (!file) continue;
-                  const idx = collectedFiles.findIndex((f) => f.path === path);
-                  if (idx >= 0) collectedFiles[idx] = file;
-                  else collectedFiles.push(file);
-                  anyOutput = true;
-                  controller.enqueue(sse({ type: 'file', file }));
-                }
+              }
+              for (const file of merged.files) {
+                anyOutput = true;
+                controller.enqueue(sse({ type: 'file', file }));
               }
             }
 
@@ -904,12 +905,15 @@ Always format your response by wrapping the chat reply in the following markers:
                       presets,
                       scaffoldOptions,
                     });
-                    for (const path of rem.seeded) {
-                      const file = rem.files.find((f) => f.path === path);
-                      if (!file) continue;
-                      const idx = collectedFiles.findIndex((f) => f.path === path);
-                      if (idx >= 0) collectedFiles[idx] = file;
-                      else collectedFiles.push(file);
+                    const keep = new Set(rem.files.map((f) => f.path.replace(/\\/g, '/')));
+                    for (const f of [...collectedFiles]) {
+                      if (!keep.has(f.path.replace(/\\/g, '/'))) {
+                        controller.enqueue(sse({ type: 'delete', path: f.path }));
+                      }
+                    }
+                    collectedFiles.length = 0;
+                    collectedFiles.push(...rem.files);
+                    for (const file of rem.files) {
                       controller.enqueue(sse({ type: 'file', file }));
                     }
                   }

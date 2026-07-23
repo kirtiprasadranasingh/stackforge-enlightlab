@@ -173,23 +173,55 @@ const CI_CANONICAL: Record<CIProvider, string> = {
   'oci-devops': 'build_spec.yaml',
 };
 
+export function canonicalCiPath(ci: CIProvider): string {
+  return CI_CANONICAL[ci];
+}
+
 /** Keep exactly one CI format matching presets.ci. */
-function enforceSingleCi(
+export function enforceSingleCi(
   byPath: Map<string, GeneratedFile>,
   ci: CIProvider
 ): void {
   const keep = CI_CANONICAL[ci];
   const known = new Set(Object.values(CI_CANONICAL));
   for (const p of [...byPath.keys()]) {
-    if (p.startsWith('.github/workflows/')) {
-      if (ci !== 'github-actions' || p !== keep) byPath.delete(p);
+    const norm = p.replace(/\\/g, '/');
+    if (norm.startsWith('.github/workflows/')) {
+      if (ci !== 'github-actions' || norm !== keep) byPath.delete(p);
       continue;
     }
-    if (known.has(p) && p !== keep) byPath.delete(p);
-    if (p.startsWith('aws-codepipeline/') || p.startsWith('.devops/')) {
+    if (known.has(norm) && norm !== keep) byPath.delete(p);
+    if (norm.startsWith('aws-codepipeline/') || norm.startsWith('.devops/')) {
       byPath.delete(p);
     }
   }
+}
+
+/**
+ * Rewrite profile requiredPaths so completion does not re-demand GitHub Actions
+ * when the interview chose GitLab / CodePipeline / etc.
+ */
+export function adaptRequiredPathsForCi(
+  requiredPaths: readonly string[],
+  ci: CIProvider
+): string[] {
+  const keep = CI_CANONICAL[ci];
+  const allCi = new Set(Object.values(CI_CANONICAL));
+  const out: string[] = [];
+  let injected = false;
+  for (const p of requiredPaths) {
+    const norm = p.replace(/\\/g, '/');
+    if (allCi.has(norm) || norm.startsWith('.github/workflows/')) {
+      if (!injected) {
+        out.push(keep);
+        injected = true;
+      }
+      continue;
+    }
+    out.push(norm);
+  }
+  if (!injected) out.push(keep);
+  return out;
 }
 
 function ciSkeleton(
@@ -898,7 +930,9 @@ CMD ["node", "server.js"]
   }
   if (options.runtime === 'java' || options.runtime === 'dotnet') {
     notes.push(
-      `${options.runtime === 'java' ? 'Java' : '.NET'} was selected as the **language** only — Spring Boot / ASP.NET were not confirmed. This scaffold keeps a minimal \`/health\` stub in a supported runtime (Node/Python/Go) so image build and probes pass. Replace the stub with your real ${options.runtime} service before production.`
+      options.runtime === 'java'
+        ? 'Java was selected as the **language** only — Spring Boot / Quarkus were not confirmed. This scaffold keeps a minimal `/health` stub in a supported runtime (Node/Python/Go) so image build and probes pass. Replace the stub with your real Java service before production.'
+        : '.NET was selected as the **language** only — ASP.NET Controllers/Services were not confirmed. This scaffold keeps a minimal `/health` stub in a supported runtime (Node/Python/Go) so image build and probes pass. Replace the stub with your real .NET service before production.'
     );
   }
   if (options.database === 'mongodb') {

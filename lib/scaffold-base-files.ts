@@ -89,7 +89,7 @@ import {
 } from '@/lib/locked-tf-oracle-oke';
 import type { ScaffoldOptions } from '@/lib/scaffold-options';
 import type { Presets } from '@/types';
-import { applyScaffoldOptions } from '@/lib/apply-scaffold-options';
+import { applyScaffoldOptions, enforceSingleCi } from '@/lib/apply-scaffold-options';
 
 type BaseFileMap = Record<string, string>;
 
@@ -1126,8 +1126,14 @@ export function mergeLockedBaseFiles(
     const existing = byPath.get(path);
     const emptyExisting = exists && !(existing?.content || '').trim();
 
+    if (skipGhaForce) {
+      // Actively drop profile/model GHA when interview chose another CI
+      byPath.delete(path);
+      seeded.push(`removed:${path}`);
+      continue;
+    }
+
     if (!shouldForce && !shouldFill && !emptyExisting) continue;
-    if (skipGhaForce && !exists) continue;
 
     byPath.set(path, {
       path,
@@ -1138,6 +1144,16 @@ export function mergeLockedBaseFiles(
         : 'Locked base file (profile-first seed)',
     });
     seeded.push(path);
+  }
+
+  // Drop every competing workflow when CI is not GitHub Actions
+  if (options.presets?.ci && options.presets.ci !== 'github-actions') {
+    for (const p of [...byPath.keys()]) {
+      if (p.replace(/\\/g, '/').startsWith('.github/workflows/')) {
+        byPath.delete(p);
+        seeded.push(`removed:${p}`);
+      }
+    }
   }
 
   // Drop model-invented terraform files that are not part of the locked set
@@ -1178,6 +1194,13 @@ export function mergeLockedBaseFiles(
       options.presets,
       options.scaffoldOptions
     );
+  } else if (options.presets?.ci) {
+    // Even without full scaffold options, never ship dual CI
+    const map = new Map(
+      merged.map((f) => [f.path.replace(/\\/g, '/'), { ...f, path: f.path.replace(/\\/g, '/') }])
+    );
+    enforceSingleCi(map, options.presets.ci);
+    merged = Array.from(map.values());
   }
 
   return { files: merged, seeded };
