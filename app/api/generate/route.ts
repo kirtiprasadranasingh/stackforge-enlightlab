@@ -32,6 +32,7 @@ import {
   isJailbreakPrompt,
   isOffTopicPrompt,
   isGreetingOnlyPrompt,
+  isVagueStackPrompt,
 } from '@/lib/stack-intent';
 import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import {
@@ -622,14 +623,15 @@ Always format your response by wrapping the chat reply in the following markers:
 
     // Clients that skip workflow phases — interview first, then plan (never invent silently).
     // Never bounce validation-fix / iterative edits with files back into clarify/plan.
+    // Vague "Deploy my app" must NEVER generate with silent AWS/EKS defaults.
     const skipGateForRepair =
       isValidationFixPrompt(prompt) ||
       (existingFiles.length > 0 && isIterativeEditPrompt(prompt));
     if (
       phase === 'generate' &&
-      gated &&
       !approvedPlan?.trim() &&
-      !skipGateForRepair
+      !skipGateForRepair &&
+      (gated || isVagueStackPrompt(prompt) || isFullStackPrompt(prompt))
     ) {
       const hasPriorAssistant = history.some((m) => m.role === 'assistant');
       phase = hasPriorAssistant ? 'plan' : 'clarify';

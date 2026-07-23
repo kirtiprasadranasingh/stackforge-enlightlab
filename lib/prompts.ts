@@ -244,6 +244,7 @@ instead.
 - Pin \`required_providers\` versions in every Terraform stack (\`aws ~> 5.84\`, \`helm ~> 2.17\`, \`kubernetes ~> 2.23\`, \`google ~> 5.0\` as applicable). Never leave providers unpinned so \`terraform init\` grabs latest major (aws v6 / helm v3). \`terraform validate\` must succeed with \`-backend=false\`.
 - Prefer constructing deploy image URIs as \`\$REGISTRY/\$REPO:\$TAG\` consistently across cloud providers.
 - GitHub Actions YAML: never put \`with:\` under a \`run:\` step; never emit a second job-level \`steps:\` without a new job id (rollback must be its own job).
+- **MongoDB is not a first-class scaffold target**: If the client asked for MongoDB, emit managed **PostgreSQL** (RDS / Cloud SQL / Flexible Server) as a stand-in, document that clearly in README, and **never** emit \`terraform/mongodb.tf\`, \`aws_docdb_*\`, Atlas, or full MongoDB networking/IAM as if it were supported.
 
 ### B7. Final self-verification pass
 Before returning any response, re-read every file specifically hunting for:
@@ -284,6 +285,8 @@ export function getCloudPrompt(cloud: string, orchestrator: string): string {
 - Terraform: hashicorp/aws provider — pin a real 5.x version (e.g. 5.84.0) in required_providers; include provider "aws" { region = ... }
 - Prefer local state or documented -backend-config; do not leave only placeholder S3 backend bucket names as the sole versions.tf content
 - VPC public+private subnets, **internal** ALB in private subnets when access is private/internal, Fargate tasks in private, SG: ALB→tasks on container_port only; Redis/ElastiCache in private subnets with ingress from ECS task SG on 6379 (no SG cycles)
+- ALWAYS include ECS Service Auto Scaling: aws_appautoscaling_target + aws_appautoscaling_policy (CPU target tracking; optional memory). Never ship fixed desired_count alone for a DevOps/startup scaffold.
+- Public access without custom domain: internet-facing ALB; prefer HTTPS listener on the default ALB DNS (ACM) when feasible — document TLS vs temporary HTTP:80 in README/Assumptions; do not treat plain HTTP as the confirmed product choice
 - ECR + CloudWatch log group; ecs task execution role + least-privilege task role (no unused SSM on Resource *)
 - aws_ecs_service: deployment_circuit_breaker { enable = true, rollback = true }; lifecycle ignore_changes = [task_definition] when CI owns deploys
 - Container healthCheck must match Dockerfile capabilities (install curl if used); ALB target group path must match app /health
@@ -384,8 +387,8 @@ export function getCIProviderPrompt(ci: string): string {
       return `OCI DevOps:
 - Path: build_spec.yaml (or .devops/build_spec.yaml) plus README wiring to OCI DevOps project/pipeline
 - Stages: build → test → push OCIR → deploy to OKE → rollback guidance
+- Target Oracle only: OCIR registry + OKE cluster/namespace from Terraform — NEVER AWS ECR, EKS, IAM OIDC-to-AWS, or access keys for AWS
 - Use OCI resource principal / instance principal placeholders — never hardcode auth tokens
-- OCIR path and OKE cluster/namespace must match Terraform outputs
 - Do NOT also emit GitHub Actions / GitLab / Jenkins files unless the user asked for them`;
     default:
       return 'Use GitHub Actions with pinned official actions.';
@@ -435,6 +438,58 @@ If an answer says "Cloud provider (client override)" or "Hosting platform (clien
 those values are mandatory for the plan and file manifest — never keep the originally suggested
 cloud/platform when the client overrode it.
 
+**Invalid / nonsense interview answers (critical):**
+- If the client typed gibberish or an unsupported value for language/runtime (e.g. "wewer") or data
+  service (e.g. "efewwe"), do **NOT** silently assume Node.js, PostgreSQL, or any other default.
+- Do **NOT** invent technical justifications for unsupported choices.
+- Instead emit <<<QUESTIONS>>> asking them to pick a supported option (Node.js / Go / Python / Java / .NET
+  for runtime; PostgreSQL / MySQL / Redis / MongoDB / DynamoDB / Kafka / etc. for data — or "No data service"),
+  and leave <<<PLAN>>> empty until they answer clearly.
+- Never list both an invalid typed value AND an assumed substitute in Confirmed requirements.
+
+**MongoDB / DocumentDB / Atlas (capability honesty):**
+- If the client selected MongoDB (or Another service → MongoDB), the plan MUST state that StackForge
+  will scaffold a **PostgreSQL stand-in**, not full MongoDB infrastructure.
+- File manifest must NOT include \`terraform/mongodb.tf\`, DocumentDB clusters, or Atlas resources.
+- Put a clear Assumptions / Out of scope bullet: MongoDB requires manual DocumentDB/Atlas after review.
+- Confirmed requirements may say "MongoDB requested → PostgreSQL stand-in in this scaffold".
+
+**CI ↔ cloud consistency (critical — never invent cross-cloud wiring):**
+- Presets above are authoritative when interview answers set them. Do not keep silent AWS/EKS defaults
+  after the client chose a native CI on another cloud.
+- **OCI DevOps** → Oracle Cloud + OKE + OCIR only. Never plan AWS ECR, EKS, IAM OIDC-to-AWS, or
+  CodeBuild-style deploy paths unless the client *explicitly* asked for a multi-cloud bridge.
+- **Google Cloud Build** → GCP + GKE/Cloud Run + Artifact Registry (not ECR/EKS).
+- **AWS CodePipeline** → AWS + EKS/ECS + ECR.
+- **Azure DevOps** → Azure + AKS/Container Apps + ACR when cloud was not otherwise named.
+- If only CI was chosen and cloud/compute were never confirmed, either follow the pairing above
+  (preferred) or emit <<<QUESTIONS>>> — do **not** present cross-cloud deploy details as confirmed.
+
+**Plan honesty — environments, access, scale (do not over-confirm):**
+- Selecting multiple environments (dev/staging/prod) does **not** mean the client confirmed
+  independent databases. Put "one managed DB per environment via separate terraform apply /
+  tfvars" under **Assumptions** (or say it is configurable / shared DB is an alternative) —
+  never under Confirmed requirements unless they explicitly asked for separate DBs.
+- **"Public without a custom domain"** means internet-facing on the **default load-balancer
+  hostname**. Prefer **HTTPS on the ALB/LB default DNS** (ACM/managed cert when practical) or
+  state clearly in Assumptions whether TLS is on the default endpoint vs temporary plain HTTP —
+  never write "HTTP is assumed public" as if plain HTTP were a confirmed choice.
+- **"Public with secure HTTPS"** → custom domain + TLS is the confirmed path.
+- Always include **autoscaling** in Architecture / Resources / Implement stage: ECS →
+  \`aws_appautoscaling_target\` + CPU (and optionally memory) target-tracking policies; EKS/GKE/AKS/OKE →
+  HPA enabled by default. A DevOps/startup scaffold without scale-out is incomplete.
+
+**Java / .NET language ≠ framework (critical):**
+- Interview answer **"Java"** confirms the **language** only. Do **NOT** list Spring Boot, Quarkus,
+  Micronaut, \`DemoApplication.java\`, Maven Spring starters, or a "Spring Boot-based health endpoint"
+  under Confirmed requirements unless the client explicitly named that framework.
+- Put the stub choice under **Assumptions**, e.g. "Minimal \`/health\` placeholder only (not a chosen
+  Java framework); Spring Boot is **not** selected — replace stub with your real Java service."
+  Prefer a tiny plain Java HTTP stub or a Node/Go/Python stand-in with README honesty — never present
+  Spring Boot as the confirmed runtime.
+- Same for **".NET"**: do not invent ASP.NET Controllers/Services as confirmed unless named.
+- Only if the client wrote "Spring Boot" (or similar) may Confirmed requirements name that framework.
+
 If **critical** decisions are still missing after chat (cloud / compute / CI unclear), emit
 <<<QUESTIONS>>> with 3–5 focused questions and leave <<<PLAN>>> empty. QUESTIONS must be a valid
 JSON array of plain, unnumbered strings; do not put \`1.\`, \`2.\`, bullets, or nested JSON inside
@@ -445,7 +500,8 @@ Plan must use these headings exactly (markdown ## / ### / - bullets; no marker l
 ## Confirmed requirements
 - Bullet list of what the client asked for and answered
 ## Stack summary
-- Cloud, region (assumed if needed), compute, CI, runtime stub, database
+- Cloud, region (assumed if needed), compute, CI, language/runtime stub (language only unless a
+  framework was explicitly chosen), database
 ## Architecture approach
 - How pieces fit: network → compute → data → ingress → CI deploy path (2–4 short bullets)
 ## Tools and workflows
@@ -454,9 +510,11 @@ Plan must use these headings exactly (markdown ## / ### / - bullets; no marker l
 - Include the chosen CI exactly once: GitHub Actions → \`.github/workflows/\`; GitLab → \`.gitlab-ci.yml\`; Jenkins → \`Jenkinsfile\`; Azure DevOps → \`azure-pipelines.yml\`; AWS CodePipeline → \`buildspec.yml\`; Google Cloud Build → \`cloudbuild.yaml\`; OCI DevOps → \`build_spec.yaml\`. Never emit a second competing pipeline format.
 - For each tool, one line: what it does in this scaffold (e.g. GitHub Actions → build/push/deploy; Helm → K8s manifests; Terraform → cloud resources).
 ## Assumptions
-- Explicit assumptions the client can challenge (region, sizing, TLS, secrets placeholders)
+- Explicit assumptions the client can challenge (region, sizing, TLS on default LB hostname vs
+  custom domain, whether each env gets its own DB vs shared, secrets placeholders)
+- Mark inventable defaults as Assumptions — not Confirmed requirements
 ## Resources to create
-- Concrete cloud resources (VPC, cluster, DB, IAM roles, registry, etc.)
+- Concrete cloud resources (VPC, cluster, DB, IAM roles, registry, **autoscaling target/policy or HPA**, etc.)
 ## File manifest
 - Exact paths that will be generated (Terraform, pipeline, Dockerfile, Helm/K8s, README, minimal stub only)
 ## Implement stage (what Approve & Generate will do)
@@ -523,12 +581,20 @@ ${planBlock}## Scope boundary (hard)
   (no Next.js app router tree, no .NET Controllers/Services, no Spring Boot layers).
 - Prefer the language from the plan. If the user asked for Next.js/Node, emit a Node \`/health\` stub — not .NET/Java/Python unless they chose that runtime.
   (no auth systems, CRUD domains, UI apps, or business features).
+- **Java means language, not Spring Boot**: unless the client explicitly asked for Spring Boot, do not
+  emit Spring Boot apps (\`DemoApplication.java\`, spring-boot starters, fat framework trees). Use a
+  minimal \`/health\` stub (plain Java HTTP or Node/Go/Python stand-in) and state that clearly in README.
+- **.NET means language, not a full ASP.NET product**: no Controllers/Services layers unless asked.
 - Label the result as a reviewable starting scaffold — not drop-in production.
+- **MongoDB request → PostgreSQL stand-in only**: never emit \`mongodb.tf\` / DocumentDB / Atlas full stacks. README must say MongoDB is not scaffolded and PostgreSQL is the stand-in.
 
 ## Resolved stack target (must match the user request; free-text wins when it names cloud/compute/CI)
 - Cloud: ${presets.cloud}
 - Orchestrator: ${presets.orchestrator}
 - CI Provider: ${presets.ci}
+
+Hard consistency: CI must deploy to this cloud/orchestrator only. OCI DevOps never targets AWS ECR/EKS;
+Cloud Build never targets ECR/EKS; keep registry + cluster on the same cloud as the presets.
 
 ## Cloud / orchestrator guidance
 ${getCloudPrompt(presets.cloud, presets.orchestrator)}
@@ -579,11 +645,12 @@ Do NOT invent EKS/Helm/AWS files for this stack.`;
     return `## Required artifact set (AWS ECS Fargate — emit ALL)
 1. terraform/versions.tf — required_providers aws pinned + provider "aws" { region = var.aws_region }; avoid placeholder-only S3 backend
 2. terraform/variables.tf, terraform/vpc.tf, terraform/ecs.tf, terraform/alb.tf, terraform/iam.tf, terraform/security_groups.tf, terraform/redis.tf (when Redis requested), terraform/cloudwatch.tf, terraform/outputs.tf
-3. Internal ALB when access is private; VPC public+private subnets; ECS cluster/service/task with autoscaling; ECR; CloudWatch log group; ElastiCache Redis in private subnets; circuit breaker + lifecycle ignore_changes on task_definition when CI deploys
+3. Internal ALB when access is private; VPC public+private subnets; ECS cluster/service/task with **required** aws_appautoscaling_target + aws_appautoscaling_policy (CPU target tracking); ECR; CloudWatch log group; ElastiCache Redis in private subnets; circuit breaker + lifecycle ignore_changes on task_definition when CI deploys
 4. Security groups: ALB→ECS on container_port; data-store SGs (Redis/MongoDB/RDS) allow inbound from ECS task SG only — NEVER mutual SG ingress (no ecs_tasks↔mongodb/redis cycles)
-5. .github/workflows/deploy.yml — step id set-image-uri writes image_uri to GITHUB_OUTPUT; services-stable wait; rollback; use \${{ env.* }} never \${var.*}
-6. app/Dockerfile (COPY must be two-arg e.g. COPY . .), app/server.js or app/index.js, app/package.json, app/package-lock.json — non-root USER, /health on PORT
-7. README.md — reviewable scaffold disclaimer
+5. Access: for "public without custom domain", internet-facing ALB; document in README whether listener is temporary HTTP:80 or HTTPS with ACM on the default ALB DNS — never present plain HTTP as the silent confirmed choice
+6. .github/workflows/deploy.yml — step id set-image-uri writes image_uri to GITHUB_OUTPUT; services-stable wait; rollback; use \${{ env.* }} never \${var.*}
+7. app/Dockerfile (COPY must be two-arg e.g. COPY . .), app/server.js or app/index.js, app/package.json, app/package-lock.json — non-root USER, /health on PORT
+8. README.md — reviewable scaffold disclaimer
 Apply PART B8 rules. Do NOT emit Helm charts or Azure/GCP-only files for this stack.`;
   }
 

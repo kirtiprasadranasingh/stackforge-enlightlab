@@ -261,12 +261,34 @@ export function formatInterviewAnswerForPlan(rawAnswer: string): string {
     return `Cloud provider (client override): ${cloud}. Use this instead of the originally suggested cloud.`;
   }
 
+  if (answer.startsWith('Change CI/CD:')) {
+    const rest = answer.slice('Change CI/CD:'.length).trim();
+    const parts = rest.split(/\s*\|\s*/).map((part) => part.trim());
+    const cloudPart = parts
+      .find((part) => /^Cloud:\s*/i.test(part))
+      ?.replace(/^Cloud:\s*/i, '')
+      .trim();
+    const hostingPart = parts
+      .find((part) => /^Hosting:\s*/i.test(part))
+      ?.replace(/^Hosting:\s*/i, '')
+      .trim();
+    const ci = parts
+      .filter((part) => !/^Cloud:\s*/i.test(part) && !/^Hosting:\s*/i.test(part))
+      .join(' | ')
+      .trim();
+    if (ci && cloudPart && hostingPart) {
+      return `CI/CD system (client override): ${ci}. Cloud provider (client override): ${cloudPart}. Hosting platform (client override): ${hostingPart}. Use these instead of the originally suggested values. Native CI must target its own cloud — never wire OCI DevOps to AWS ECR/EKS (or Cloud Build to EKS, etc.).`;
+    }
+    if (ci) {
+      return `CI/CD system (client override): ${ci}. Use this instead of the originally suggested value. Pair it with that provider's native cloud/registry (OCI DevOps → Oracle/OKE/OCIR; Cloud Build → GCP/GKE; CodePipeline → AWS).`;
+    }
+  }
+
   const changeMatchers: Array<{ prefix: string; label: string }> = [
     {
       prefix: 'Change the hosting platform:',
       label: 'Hosting platform (client override)',
     },
-    { prefix: 'Change CI/CD:', label: 'CI/CD system (client override)' },
     { prefix: 'Another service:', label: 'Data service (client override)' },
   ];
 
@@ -275,6 +297,23 @@ export function formatInterviewAnswerForPlan(rawAnswer: string): string {
       const choice = answer.slice(prefix.length).trim();
       return `${label}: ${choice}. Use this instead of the originally suggested value.`;
     }
+  }
+
+  // Language picks — Java/.NET are languages, not frameworks
+  if (/^Java$/i.test(answer)) {
+    return `Language (client override): Java only. Do NOT confirm Spring Boot, Quarkus, Micronaut, DemoApplication.java, or a Spring Boot health endpoint unless the client explicitly named that framework. Put any stub choice under Assumptions as a placeholder.`;
+  }
+  if (/^Spring(\s*Boot)?$/i.test(answer)) {
+    return `Language/framework (client override): Spring Boot (Java). Spring Boot may appear under Confirmed requirements.`;
+  }
+  if (/^\.NET$/i.test(answer)) {
+    return `Language (client override): .NET only. Do NOT confirm ASP.NET Controllers/Services or a full web framework unless the client explicitly named one. Put any stub choice under Assumptions as a placeholder.`;
+  }
+  if (/^Node\.js$/i.test(answer)) {
+    return `Language (client override): Node.js. Prefer a minimal /health stub (e.g. Express listener) — not a full Next.js product app unless asked.`;
+  }
+  if (/^(Go|Python)$/i.test(answer)) {
+    return `Language (client override): ${answer}. Minimal /health stub only — not a full product framework unless asked.`;
   }
 
   return answer;
@@ -452,14 +491,14 @@ export function buildClarifyingQuestions(
         setupQuestion,
         `Where should we host it? (options: ${regionOptions})`,
         buildEnvironmentsQuestion(environments),
-        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
+        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain (HTTPS on default load-balancer hostname) / Private and internal only)',
       ]
     : [
         setupQuestion,
         'Which hosting platform should we use? (options: Managed Kubernetes / Serverless containers)',
         `Where should we host it? (options: ${regionOptions})`,
         buildEnvironmentsQuestion(environments),
-        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain / Private and internal only)',
+        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain (HTTPS on default load-balancer hostname) / Private and internal only)',
       ];
 
   // If the prompt did not name a CI system, ask explicitly — include AWS / GCP / OCI native options.
@@ -482,6 +521,7 @@ export function buildClarifyingQuestions(
   }
 
   if (!runtime) {
+    // Java/.NET = language only; plan must not invent Spring Boot / ASP.NET as confirmed
     questions.push(
       'Which language should the health-check service use? (options: Node.js / Go / Python / Java / .NET)'
     );

@@ -212,6 +212,26 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
     cloud = 'gcp';
   }
 
+  // Native cloud CI must not stay paired with silent AWS/EKS UI defaults.
+  // e.g. "Change CI/CD: OCI DevOps" alone → Oracle + OKE + OCIR (never AWS ECR/EKS).
+  if (ci === 'oci-devops' && !mentionsAws && !mentionsAzure && !mentionsGcp) {
+    cloud = 'oracle';
+    orchestrator = 'oke';
+  }
+  if (ci === 'gcp-cloud-build' && !mentionsAws && !mentionsAzure && !mentionsOracle) {
+    cloud = 'gcp';
+    orchestrator =
+      overrides.orchestrator === 'cloud-run' || /\bcloud\s*run\b/.test(t)
+        ? 'cloud-run'
+        : 'gke';
+  }
+  if (ci === 'aws-codepipeline' && !mentionsAzure && !mentionsGcp && !mentionsOracle) {
+    cloud = 'aws';
+  }
+  if (ci === 'azure-devops' && !mentionsAws && !mentionsGcp && !mentionsOracle) {
+    cloud = 'azure';
+  }
+
   return {
     cloud: cloud as CloudProvider,
     orchestrator: orchestrator as Orchestrator,

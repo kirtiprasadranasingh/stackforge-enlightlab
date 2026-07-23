@@ -11,6 +11,7 @@ import {
   isCiSystemQuestion,
   parseClarifyingQuestion,
 } from '@/lib/clarifying-questions';
+import { validateInterviewAnswer } from '@/lib/interview-answer-validation';
 
 export { parseClarifyingQuestion };
 
@@ -48,11 +49,6 @@ const CI_FOLLOW_UP_DEFAULT: FollowUp = {
     'Azure DevOps Pipelines',
     'OCI DevOps',
   ],
-};
-
-const DATA_FOLLOW_UP: FollowUp = {
-  prompt: 'Which data service do you need?',
-  options: ['MongoDB', 'Redis cache', 'Message queue', 'Other'],
 };
 
 const ALL_HOSTING_OPTIONS = [
@@ -97,13 +93,18 @@ function parseStructuredAnswer(
 function parseCompoundDetail(detail: string): {
   primary: string;
   hosting: string;
+  cloud: string;
 } {
   const parts = detail.split(/\s*\|\s*/).map((part) => part.trim());
   const hostingPart = parts.find((part) => /^Hosting:\s*/i.test(part));
-  const primaryParts = parts.filter((part) => !/^Hosting:\s*/i.test(part));
+  const cloudPart = parts.find((part) => /^Cloud:\s*/i.test(part));
+  const primaryParts = parts.filter(
+    (part) => !/^Hosting:\s*/i.test(part) && !/^Cloud:\s*/i.test(part)
+  );
   return {
     primary: primaryParts.join(' | ').trim(),
     hosting: hostingPart ? hostingPart.replace(/^Hosting:\s*/i, '').trim() : '',
+    cloud: cloudPart ? cloudPart.replace(/^Cloud:\s*/i, '').trim() : '',
   };
 }
 
@@ -264,21 +265,20 @@ export function ClarifyingInterview({
   const ciChoice = isCiChange
     ? ciFollowUp.options.find((option) => option === followUpPrimary) || null
     : null;
-  const dataChoice = isDataOther
-    ? DATA_FOLLOW_UP.options.find((option) => option === followUpPrimary) ||
-      (followUpPrimary && !DATA_FOLLOW_UP.options.includes(followUpPrimary)
-        ? 'Other'
-        : null)
-    : null;
 
   const hostingOptions = isCloudChange
     ? hostingOptionsForCloud(cloudChoice)
     : ALL_HOSTING_OPTIONS;
 
-  const needsOtherText =
-    isDataOther &&
-    (dataChoice === 'Other' ||
-      Boolean(followUpPrimary && !DATA_FOLLOW_UP.options.includes(followUpPrimary)));
+  // "Another service" → free-text only (no Redis/MongoDB sub-question — those are already on the main list)
+  const customDataService =
+    isDataOther && detail.trim() && detail !== 'Other' ? detail.trim() : '';
+
+  const answerValidation = validateInterviewAnswer(
+    steps[stepIndex].question,
+    currentAnswer,
+    options
+  );
 
   const answerComplete = (() => {
     if (isCloudChange) {
@@ -291,8 +291,9 @@ export function ClarifyingInterview({
       return Boolean(ciChoice);
     }
     if (isDataOther) {
-      return Boolean(followUpPrimary.trim()) && followUpPrimary !== 'Other';
+      return Boolean(customDataService) && answerValidation.ok;
     }
+    if (!answerValidation.ok) return false;
     return Boolean(selectedOption) || Boolean(currentAnswer.trim());
   })();
 
@@ -362,13 +363,26 @@ export function ClarifyingInterview({
 
   const selectCiFollowUp = (option: string) => {
     if (!selectedOption) return;
-    onAnswer(currentIndex, `${selectedOption}: ${option}`);
-  };
-
-  const selectDataFollowUp = (option: string) => {
-    if (!selectedOption) return;
-    if (option === 'Other') {
-      onAnswer(currentIndex, `${selectedOption}: Other`);
+    // Native CI implies its cloud — never leave silent AWS/EKS when user picks OCI DevOps etc.
+    if (option === 'OCI DevOps') {
+      onAnswer(
+        currentIndex,
+        `${selectedOption}: ${option} | Cloud: Oracle Cloud Infrastructure | Hosting: Oracle Kubernetes Engine (OKE)`
+      );
+      return;
+    }
+    if (option === 'Google Cloud Build') {
+      onAnswer(
+        currentIndex,
+        `${selectedOption}: ${option} | Cloud: Google Cloud | Hosting: Google Kubernetes Engine (GKE)`
+      );
+      return;
+    }
+    if (option === 'AWS CodePipeline') {
+      onAnswer(
+        currentIndex,
+        `${selectedOption}: ${option} | Cloud: AWS | Hosting: Amazon EKS`
+      );
       return;
     }
     onAnswer(currentIndex, `${selectedOption}: ${option}`);
@@ -396,8 +410,8 @@ export function ClarifyingInterview({
     }
     if (isHostingChange && !hostingChoice) return 'Select a hosting platform first';
     if (isCiChange && !ciChoice) return 'Select a CI/CD option first';
-    if (isDataOther && !followUpPrimary.trim()) return 'Select a data service first';
-    if (isDataOther && followUpPrimary === 'Other') return 'Type the service name first';
+    if (isDataOther && !customDataService) return 'Type the service name first';
+    if (!answerValidation.ok) return answerValidation.error;
     return null;
   })();
 
@@ -508,39 +522,46 @@ export function ClarifyingInterview({
           )}
 
           {isDataOther && (
-            <>
-              <FollowUpPanel
-                prompt={DATA_FOLLOW_UP.prompt}
-                hint="Pick one option below, then continue."
-                options={DATA_FOLLOW_UP.options}
-                selected={dataChoice}
+            <div className="mt-3 space-y-2">
+              <p className="text-[11px] font-medium text-gray-700">
+                Which data service do you need?
+              </p>
+              <p className="text-[10px] leading-relaxed text-gray-500">
+                Type the service name (for example MongoDB, DynamoDB, or a message
+                queue). Redis and SQL options are already listed above.
+              </p>
+              <input
+                type="text"
+                value={customDataService}
                 disabled={disabled}
-                onSelect={selectDataFollowUp}
+                autoFocus
+                onChange={(event) => {
+                  if (!selectedOption) return;
+                  const value = event.target.value.trimStart();
+                  onAnswer(
+                    currentIndex,
+                    value
+                      ? `${selectedOption}: ${value}`
+                      : selectedOption
+                  );
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    goNext();
+                  }
+                }}
+                placeholder="Type the service name…"
+                aria-label="Custom data service"
+                aria-invalid={Boolean(customDataService) && !answerValidation.ok}
+                className="w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
-              {needsOtherText && (
-                <input
-                  type="text"
-                  value={followUpPrimary === 'Other' ? '' : followUpPrimary}
-                  disabled={disabled}
-                  onChange={(event) => {
-                    if (!selectedOption) return;
-                    onAnswer(
-                      currentIndex,
-                      `${selectedOption}: ${event.target.value}`
-                    );
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      goNext();
-                    }
-                  }}
-                  placeholder="Type the service name…"
-                  aria-label="Custom data service"
-                  className="mt-3 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                />
+              {Boolean(customDataService) && !answerValidation.ok && (
+                <p className="text-[10px] font-medium text-red-600" role="alert">
+                  {answerValidation.error}
+                </p>
               )}
-            </>
+            </div>
           )}
 
           {!isCloudChange &&
@@ -560,8 +581,24 @@ export function ClarifyingInterview({
                 }}
                 placeholder="Or type a different answer…"
                 aria-label={`Custom answer for question ${currentIndex + 1}`}
+                aria-invalid={
+                  Boolean(currentAnswer.trim()) &&
+                  !selectedOption &&
+                  !answerValidation.ok
+                }
                 className="mt-3 w-full min-w-0 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
+            )}
+          {!isCloudChange &&
+            !isHostingChange &&
+            !isCiChange &&
+            !isDataOther &&
+            Boolean(currentAnswer.trim()) &&
+            !selectedOption &&
+            !answerValidation.ok && (
+              <p className="mt-2 text-[10px] font-medium text-red-600" role="alert">
+                {answerValidation.error}
+              </p>
             )}
         </div>
       )}

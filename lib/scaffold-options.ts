@@ -121,7 +121,10 @@ export function parseScaffoldOptions(
   // Access
   if (/\bprivate and internal only\b|\bprivate\/internal\b|\binternal only\b/.test(t)) {
     out.access = 'private';
-  } else if (/\bpublic without a custom domain\b/.test(t)) {
+  } else if (
+    /\bpublic without a custom domain\b/.test(t) ||
+    /\bhttps on (the )?default (load[- ]?balancer|alb|lb) hostname\b/.test(t)
+  ) {
     out.access = 'public_basic';
   } else if (/\bpublic with secure https\b|\bpublic with https\b/.test(t)) {
     out.access = 'public_https';

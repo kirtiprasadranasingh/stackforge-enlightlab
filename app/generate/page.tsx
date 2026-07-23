@@ -30,10 +30,13 @@ import {
 import {
   interviewAlreadyChoseCi,
   isCiSystemQuestion,
+  parseClarifyingQuestion,
 } from '@/lib/clarifying-questions';
+import { validateInterviewAnswer } from '@/lib/interview-answer-validation';
 import { ConfirmedChoicesCard } from '@/components/ConfirmedChoicesCard';
 import { WorkflowPanel } from '@/components/WorkflowPanel';
 import { inferPresetsFromPrompt } from '@/lib/infer-presets';
+import { sanitizePlanAgainstInterview } from '@/lib/sanitize-plan';
 import {
   isFullStackPrompt,
   isIterativeEditPrompt,
@@ -707,8 +710,16 @@ export default function GeneratePage() {
                 break;
               case 'plan':
                 if (event.plan) {
-                  receivedPlan = event.plan;
-                  setPendingPlan(event.plan);
+                  const interviewCtx = [
+                    lastInterviewAnswersRef.current || lastInterviewAnswers || '',
+                    lastStackPrompt || text || '',
+                  ].join('\n');
+                  const cleaned = sanitizePlanAgainstInterview(
+                    event.plan,
+                    interviewCtx
+                  );
+                  receivedPlan = cleaned;
+                  setPendingPlan(cleaned);
                   setPendingQuestions([]);
                   setQuestionAnswers({});
                   setAwaitingApproval(true);
@@ -917,7 +928,9 @@ export default function GeneratePage() {
       ) {
         return true;
       }
-      return false;
+      const { options } = parseClarifyingQuestion(question);
+      const validation = validateInterviewAnswer(question, answer, options);
+      return !validation.ok;
     });
     if (incomplete) return;
 

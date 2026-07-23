@@ -698,13 +698,39 @@ CMD ["node", "server.js"]
   }
   if (options.runtime === 'java' || options.runtime === 'dotnet') {
     notes.push(
-      `${options.runtime} was selected — the scaffold keeps a minimal health stub in a supported runtime (Node/Python/Go) so image build and /health checks pass. Replace the stub with your ${options.runtime} service before production.`
+      `${options.runtime === 'java' ? 'Java' : '.NET'} was selected as the **language** only — Spring Boot / ASP.NET were not confirmed. This scaffold keeps a minimal \`/health\` stub in a supported runtime (Node/Python/Go) so image build and probes pass. Replace the stub with your real ${options.runtime} service before production.`
     );
   }
   if (options.database === 'mongodb') {
     notes.push(
-      'MongoDB was selected — this scaffold provisions a managed relational DB (or disables DB when cache-only) as a validate-safe starting point. Swap to DocumentDB / Atlas before production.'
+      'MongoDB was selected — StackForge does **not** scaffold full MongoDB/DocumentDB/Atlas infrastructure. This scaffold uses a **PostgreSQL** managed database as a validate-safe relational stand-in. Replace with DocumentDB, Atlas, or your own MongoDB after review; do not treat terraform as production MongoDB.'
     );
+  }
+  // Strip any model-invented MongoDB / DocumentDB / Atlas Terraform files
+  for (const p of [...byPath.keys()]) {
+    if (
+      /mongodb|documentdb|mongodbatlas|mongo[_-]?db/i.test(p) &&
+      (p.endsWith('.tf') || p.endsWith('.tfvars') || p.includes('/mongo'))
+    ) {
+      byPath.delete(p);
+    }
+  }
+  for (const [p, f] of [...byPath.entries()]) {
+    if (!p.endsWith('.tf')) continue;
+    if (
+      !/aws_docdb_|mongodbatlas_|azurerm_cosmosdb_mongo|google_firestore|resource\s+"[^"]*mongo/i.test(
+        f.content
+      )
+    ) {
+      continue;
+    }
+    // Drop DocumentDB / Atlas resource blocks from shared files (keep postgres RDS)
+    let c = f.content;
+    c = c.replace(
+      /resource\s+"(aws_docdb_[^"]+|mongodbatlas_[^"]+|azurerm_cosmosdb_mongo[^"]*)"\s+"[^"]+"\s*\{[\s\S]*?\n\}\n*/g,
+      ''
+    );
+    if (c !== f.content) byPath.set(p, { ...f, content: c });
   }
   if (notes.length) {
     const readme = byPath.get('README.md');

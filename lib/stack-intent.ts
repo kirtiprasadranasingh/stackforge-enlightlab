@@ -96,6 +96,59 @@ export function isOutOfScopeOpsPrompt(prompt: string): boolean {
   return false;
 }
 
+/**
+ * Vague deploy/scaffold asks with no cloud/CI named — e.g. "Deploy my app".
+ * These MUST enter the clarifying interview; never invent AWS/EKS defaults.
+ */
+export function isVagueStackPrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase().trim().replace(/[.!?]+$/g, '');
+  if (!lower) return false;
+  // Named cloud/orchestrator/CI → not vague (interview still runs via other gates)
+  if (hasCloudOrOrchestratorSignal(lower)) return false;
+  if (
+    /\b(github\s*actions|gitlab|jenkins|azure\s*devops|codepipeline|cloud\s*build|oci\s*devops|terraform|helm|dockerfile)\b/.test(
+      lower
+    )
+  ) {
+    return false;
+  }
+
+  // "Deploy my app/backend", "create an application", "build my api"
+  if (
+    /^(deploy|create|generate|build|scaffold|design|set\s+up|setup|provision|host)\b/.test(
+      lower
+    ) &&
+    /\b(app|application|service|api|project|stack|backend|frontend|website|site|devops|infra(?:structure)?|startup)\b/.test(
+      lower
+    )
+  ) {
+    return true;
+  }
+  // Ultra-short: "deploy app", "host application", "create service"
+  if (
+    /^(deploy|scaffold|set\s+up|setup|provision|host)\s+(an?\s+|my\s+|our\s+|the\s+)?(app|application|service|api|stack|backend)\b/.test(
+      lower
+    )
+  ) {
+    return true;
+  }
+  // "I need scalable infrastructure" / "I want infrastructure" with no cloud named
+  if (
+    /^(i\s+need|i\s+want|we\s+need|need|want)\b/.test(lower) &&
+    /\b(infra(?:structure)?|scalable|scale|hosting|platform|deploy)\b/.test(lower)
+  ) {
+    return true;
+  }
+  // "Create DevOps for my startup" / "build devops platform" with no cloud named
+  if (
+    /\bdevops\b/.test(lower) &&
+    /^(create|generate|build|scaffold|design|set\s+up|setup|provision)\b/.test(lower)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function isFullStackPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase().trim();
   if (isOutOfScopeOpsPrompt(lower)) return false;
@@ -109,6 +162,9 @@ export function isFullStackPrompt(prompt: string): boolean {
     return false;
   }
 
+  // "Deploy my app" and similar — interview first, never silent AWS/EKS generation
+  if (isVagueStackPrompt(prompt)) return true;
+
   // Short but explicit cloud/orchestrator prompts are still full-stack requests
   // e.g. "An Oracle OKE service", "A Node.js API on AWS EKS"
   if (hasCloudOrOrchestratorSignal(lower) && lower.length >= 12) {
@@ -117,10 +173,9 @@ export function isFullStackPrompt(prompt: string): boolean {
 
   if (lower.length < 20) return false;
 
-  // Explicit full-stack verbs
+  // Explicit full-stack verbs (enough detail to treat as a new stack request)
   if (
-    /^(deploy|create|generate|build|scaffold|design|set\s+up|provision)\b/.test(lower) &&
-    lower.length > 30
+    /^(deploy|create|generate|build|scaffold|design|set\s+up|provision)\b/.test(lower)
   ) {
     return true;
   }
@@ -238,11 +293,21 @@ export function requiresPlanApproval(
 ): boolean {
   if (hasExistingFiles && isIterativeEditPrompt(prompt)) return false;
   if (isOutOfScopeOpsPrompt(prompt)) return false; // handled as a scoped reply, not generate
+  // Vague "Deploy my app" etc. — always interview on a new project
+  if (isVagueStackPrompt(prompt)) return true;
   if (isFullStackPrompt(prompt)) return true;
   // First generation: any infra signal, or enough free text to interview on
   if (!hasExistingFiles) {
     if (hasInfraSignal(prompt)) return true;
     if (prompt.trim().length >= 20) return true;
+    // Short deploy/create verbs without cloud still need an interview
+    if (
+      /^(deploy|create|generate|build|scaffold|design|set\s+up|setup|provision)\b/i.test(
+        prompt.trim()
+      )
+    ) {
+      return true;
+    }
   }
   return false;
 }
@@ -284,6 +349,7 @@ export function isConversationalPrompt(prompt: string): boolean {
   if (isJailbreakPrompt(prompt)) return false;
 
   if (hasInfraSignal(prompt) || hasCloudOrOrchestratorSignal(prompt)) return false;
+  if (isVagueStackPrompt(prompt)) return false;
 
   const commandVerb =
     /^(add|update|fix|change|remove|delete|rename|move|create|generate|build|make|set\s*up|setup|deploy|scaffold|provision|harden|secure|wire|include|configure|refactor|optimize|design)\b/;

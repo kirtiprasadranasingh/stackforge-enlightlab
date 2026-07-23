@@ -1719,6 +1719,7 @@ export function normalizeScaffoldFiles(
   ensureRequiredProviders(byPath);
   ensureMissingTerraformVariables(byPath);
   ensureEcsScaffoldCompleteness(byPath);
+  stripUnsupportedMongoScaffold(byPath);
   stripEksWorkflowEcsBleed(byPath);
   stripAlbAnnotationsWithoutController(byPath);
   stripCrossCloudBleed(byPath);
@@ -2204,6 +2205,60 @@ function patchEcsServiceIgnoreChanges(content: string): string {
 }`;
     }
   );
+}
+
+/**
+ * StackForge does not scaffold MongoDB/DocumentDB/Atlas.
+ * Drop invented mongo files/resources; PostgreSQL stand-in + README note is the supported path.
+ */
+function stripUnsupportedMongoScaffold(
+  byPath: Map<string, GeneratedFile>
+): void {
+  for (const p of [...byPath.keys()]) {
+    if (
+      /(^|\/)(mongodb|documentdb|mongodbatlas)(\.tf|_|\.tfvars)/i.test(p) ||
+      /terraform\/[^/]*mongo[^/]*\.tf$/i.test(p)
+    ) {
+      byPath.delete(p);
+    }
+  }
+
+  for (const [p, f] of [...byPath.entries()]) {
+    if (!p.endsWith('.tf')) continue;
+    if (
+      !/aws_docdb_|mongodbatlas_|azurerm_cosmosdb_mongo|resource\s+"[^"]*mongo/i.test(
+        f.content
+      )
+    ) {
+      continue;
+    }
+    let c = f.content;
+    c = c.replace(
+      /resource\s+"(aws_docdb_[^"]+|mongodbatlas_[^"]+|azurerm_cosmosdb_mongo[^"]*)"\s+"[^"]+"\s*\{[\s\S]*?\n\}\n*/g,
+      ''
+    );
+    if (c !== f.content) byPath.set(p, { ...f, content: c });
+  }
+
+  const mentionsMongoIntent = [...byPath.values()].some((f) =>
+    /\bmongodb\b|\bmongo\b|\banother service:\s*mongodb/i.test(f.content)
+  );
+  if (!mentionsMongoIntent && ![...byPath.keys()].some((p) => /mongo/i.test(p))) {
+    // Still add note if interview options already stamped postgres for mongo — handled in applyScaffoldOptions
+  }
+
+  const readme = byPath.get('README.md');
+  if (readme && /\bmongodb\b/i.test(readme.content) && !/postgresql.*stand-in|stand-in.*postgresql/i.test(readme.content)) {
+    // If README claims full Mongo provisioning, soften it
+    let c = readme.content.replace(
+      /##?\s*[^\n]*mongodb[^\n]*\n[\s\S]*?(?=\n## |\n# |$)/gi,
+      ''
+    );
+    if (!/PostgreSQL.*stand-in|stand-in.*PostgreSQL/i.test(c)) {
+      c += `\n\n## MongoDB note\n\nMongoDB was requested, but StackForge does **not** generate full MongoDB/DocumentDB/Atlas infrastructure. This scaffold uses **PostgreSQL** as a validate-safe relational stand-in. Configure DocumentDB, Atlas, or self-managed MongoDB manually after review.\n`;
+    }
+    byPath.set('README.md', { ...readme, content: c });
+  }
 }
 
 /** ECS Fargate: Dockerfile present + curl/healthCheck aligned; accept app/Dockerfile layout. */
