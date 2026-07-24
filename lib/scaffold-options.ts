@@ -148,8 +148,9 @@ export function parseScaffoldOptions(
   // Environments — prefer explicit interview phrases; avoid matching
   // "production-grade" / accidental "prod" substrings.
   // "One environment" must win over plan prose that lists all three names.
+  // Use development (not staging) so Confirmed/"dev" and tfvars stay aligned (QA #23).
   if (/\bone environment\b/.test(t)) {
-    out.environments = ['staging'];
+    out.environments = ['development'];
   } else if (/\bdevelopment,\s*staging,\s*and\s*production\b/.test(t)) {
     out.environments = ['development', 'staging', 'production'];
   } else if (/\bdevelopment and staging\b/.test(t)) {

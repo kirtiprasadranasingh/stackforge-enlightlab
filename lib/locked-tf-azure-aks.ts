@@ -38,6 +38,14 @@ variable "enable_database" {
   type    = bool
   default = true
 }
+variable "enable_redis" {
+  type    = bool
+  default = false
+}
+variable "redis_ha" {
+  type    = bool
+  default = false
+}
 variable "availability_zones" {
   type    = list(string)
   default = ["1", "2"]
@@ -112,6 +120,19 @@ export const TF_AKS_DATABASE = `resource "azurerm_postgresql_flexible_server" "m
 }
 `;
 
+export const TF_AKS_REDIS = `resource "azurerm_redis_cache" "main" {
+  count                = var.enable_redis ? 1 : 0
+  name                 = "\${var.project_name}\${var.environment}redis"
+  location             = azurerm_resource_group.main.location
+  resource_group_name  = azurerm_resource_group.main.name
+  capacity             = var.redis_ha ? 1 : 0
+  family               = var.redis_ha ? "P" : "C"
+  sku_name             = var.redis_ha ? "Premium" : "Basic"
+  non_ssl_port_enabled = false
+  minimum_tls_version  = "1.2"
+}
+`;
+
 export const TF_AKS_OUTPUTS = `output "aks_name" {
   value = azurerm_kubernetes_cluster.main.name
 }
@@ -120,5 +141,8 @@ output "aks_fqdn" {
 }
 output "postgres_fqdn" {
   value = try(azurerm_postgresql_flexible_server.main[0].fqdn, null)
+}
+output "redis_hostname" {
+  value = try(azurerm_redis_cache.main[0].hostname, null)
 }
 `;

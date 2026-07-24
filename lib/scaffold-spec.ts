@@ -186,6 +186,7 @@ export const AZURE_AKS_HELM_FILES = [
   'terraform/network.tf',
   'terraform/aks.tf',
   'terraform/database.tf',
+  'terraform/redis.tf',
   'terraform/outputs.tf',
   '.github/workflows/deploy.yml',
   'app/Dockerfile',
@@ -234,7 +235,30 @@ export function detectScaffoldProfile(
   prompt: string,
   presets: Presets
 ): ScaffoldProfile | null {
-  const t = prompt.toLowerCase();
+  const t = prompt
+    .toLowerCase()
+    // CI product names are not cloud/hosting signals (QA #24 Azure DevOps).
+    .replace(/azure\s*devops(?:\s*pipelines)?/gi, ' ')
+    .replace(/azure\s*pipelines/gi, ' ');
+
+  // Explicit AWS ECS/Fargate in the prompt beats leftover Azure UI defaults
+  // and Azure DevOps CI (which must not flip the locked profile to ACA).
+  if (
+    (/\baws\b/.test(t) || /amazon\s+ecs/.test(t)) &&
+    (/\becs\b/.test(t) || /\bfargate\b/.test(t)) &&
+    !/container\s*apps?/.test(t) &&
+    !/\baks\b/.test(t)
+  ) {
+    return AWS_ECS_EXPRESS_PROFILE;
+  }
+  if (
+    (/\baws\b/.test(t) || /\beks\b/.test(t)) &&
+    /\beks\b/.test(t) &&
+    !/container\s*apps?/.test(t) &&
+    !/\baks\b/.test(t)
+  ) {
+    return AWS_EKS_HELM_PROFILE;
+  }
 
   // Client overrides always win over the original prompt keywords
   // (e.g. "OKE prompt" + Azure AKS override must not stay on Oracle).
@@ -395,6 +419,25 @@ export function detectProfileFromGeneratedFiles(
     return ORACLE_OKE_HELM_PROFILE;
   }
 
+  // AWS compute named in Terraform must win before Azure DevOps CI heuristics.
+  // azure-pipelines.yml is cross-cloud (QA #24 / ZIP 37: AWS ECS + Azure DevOps
+  // was re-locked to Azure Container Apps solely because the pipeline file existed).
+  if (
+    /hashicorp\/aws|provider\s+"aws"|resource\s+"aws_/.test(tfBlob)
+  ) {
+    if (
+      hasCharts ||
+      /aws_eks_cluster|aws_eks_node_group|aws_eks_fargate/.test(tfBlob)
+    ) {
+      return AWS_EKS_HELM_PROFILE;
+    }
+    if (/aws_ecs_service|aws_ecs_cluster|ecs\.tf/.test(tfBlob + pathBlob)) {
+      return AWS_ECS_EXPRESS_PROFILE;
+    }
+    if (!hasCharts) return AWS_ECS_EXPRESS_PROFILE;
+    return AWS_EKS_HELM_PROFILE;
+  }
+
   if (
     /hashicorp\/azurerm|provider\s+"azurerm"|azurerm_/.test(tfBlob) &&
     (hasCharts || /azurerm_kubernetes_cluster/.test(tfBlob))
@@ -403,8 +446,8 @@ export function detectProfileFromGeneratedFiles(
   }
 
   if (
-    /azurerm_container_app|container_apps\.tf/.test(tfBlob) ||
-    pathBlob.includes('azure-pipelines.yml')
+    /azurerm_container_app/.test(tfBlob) ||
+    (pathBlob.includes('container_apps.tf') && /azurerm_/.test(tfBlob))
   ) {
     return AZURE_GO_CONTAINER_APPS_PROFILE;
   }
@@ -420,21 +463,11 @@ export function detectProfileFromGeneratedFiles(
     return GCP_FASTAPI_CLOUDRUN_PROFILE;
   }
 
-  if (
-    /hashicorp\/aws|provider\s+"aws"|resource\s+"aws_/.test(tfBlob) ||
-    pathBlob.includes('terraform/')
-  ) {
-    if (
-      hasCharts ||
-      /aws_eks_cluster|aws_eks_node_group|aws_eks_fargate/.test(tfBlob)
-    ) {
-      return AWS_EKS_HELM_PROFILE;
-    }
-    if (/aws_ecs_service|aws_ecs_cluster|ecs\.tf/.test(tfBlob + pathBlob)) {
-      return AWS_ECS_EXPRESS_PROFILE;
-    }
-    // Default AWS + charts already handled; bare AWS → ECS profile (common QA)
-    if (!hasCharts) return AWS_ECS_EXPRESS_PROFILE;
+  // Bare terraform/ without a recognizable provider — default AWS ECS (common QA)
+  if (pathBlob.includes('terraform/') && !hasCharts) {
+    return AWS_ECS_EXPRESS_PROFILE;
+  }
+  if (pathBlob.includes('terraform/') && hasCharts) {
     return AWS_EKS_HELM_PROFILE;
   }
 

@@ -33,6 +33,7 @@ import {
   isOffTopicPrompt,
   isGreetingOnlyPrompt,
   isVagueStackPrompt,
+  resolveStackPromptFromAffirmation,
 } from '@/lib/stack-intent';
 import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import {
@@ -325,7 +326,13 @@ export async function POST(request: NextRequest) {
       priorPlan,
       interviewAnswers,
     } = validation.data;
-    const prompt = sanitizeInput(rawPrompt);
+    // Affirmative follow-ups ("yes please") after a .NET/runtime offer → continue
+    // into clarify with the prior stack prompt (not a welcome reset).
+    const affirmedStack = resolveStackPromptFromAffirmation(
+      sanitizeInput(rawPrompt),
+      history as { role: string; content: string }[]
+    );
+    let prompt = sanitizeInput(affirmedStack || rawPrompt);
     // interviewAnswers is critical: generate clears history for payload size,
     // so region/DB/scale/access live here — not only in the approved plan prose.
     const optionsText = [

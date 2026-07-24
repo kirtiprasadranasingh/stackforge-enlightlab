@@ -265,6 +265,141 @@ deploy:
 `,
       };
     case 'azure-devops':
+      if (presets.cloud === 'aws' && presets.orchestrator === 'ecs') {
+        return {
+          path: 'azure-pipelines.yml',
+          content: `trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  AWS_REGION: '${region}'
+  ECS_CLUSTER: stackforge
+  ECS_SERVICE: app
+  ECR_REPOSITORY: stackforge
+
+stages:
+  - stage: Build
+    displayName: Build and push
+    jobs:
+      - job: build_push
+        steps:
+          - script: |
+              set -euo pipefail
+              if [ -f app/package.json ]; then (cd app && npm ci --omit=dev) || (cd app && npm install --omit=dev); fi
+            displayName: Quality gate (install/build)
+          - script: |
+              set -euo pipefail
+              # Wire Azure DevOps OIDC → AWS IAM (service connection) before production.
+              aws ecr get-login-password --region "$(AWS_REGION)" | docker login --username AWS --password-stdin "$(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com"
+              IMAGE="$(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com/$(ECR_REPOSITORY):$(Build.BuildId)"
+              docker build -t "$IMAGE" -f app/Dockerfile app
+              docker push "$IMAGE"
+              echo "##vso[task.setvariable variable=IMAGE_URI]$IMAGE"
+            displayName: Build and push to Amazon ECR
+
+  - stage: Deploy
+    displayName: Deploy ECS
+    dependsOn: Build
+    jobs:
+      - job: deploy_ecs
+        steps:
+          - script: |
+              set -euo pipefail
+              PRIOR=$(aws ecs describe-services --cluster "$(ECS_CLUSTER)" --services "$(ECS_SERVICE)" --region "$(AWS_REGION)" --query 'services[0].taskDefinition' --output text)
+              echo "##vso[task.setvariable variable=PRIOR_TD]$PRIOR"
+              aws ecs update-service --cluster "$(ECS_CLUSTER)" --service "$(ECS_SERVICE)" --force-new-deployment --region "$(AWS_REGION)"
+              aws ecs wait services-stable --cluster "$(ECS_CLUSTER)" --services "$(ECS_SERVICE)" --region "$(AWS_REGION)"
+            displayName: Deploy and wait for stability
+          - script: |
+              set -euo pipefail
+              if [ -n "$(PRIOR_TD)" ] && [ "$(PRIOR_TD)" != "None" ]; then
+                aws ecs update-service --cluster "$(ECS_CLUSTER)" --service "$(ECS_SERVICE)" --task-definition "$(PRIOR_TD)" --force-new-deployment --region "$(AWS_REGION)"
+                aws ecs wait services-stable --cluster "$(ECS_CLUSTER)" --services "$(ECS_SERVICE)" --region "$(AWS_REGION)"
+              fi
+            displayName: Rollback to prior task definition
+            condition: failed()
+`,
+        };
+      }
+      if (presets.cloud === 'azure' && presets.orchestrator === 'aks') {
+        return {
+          path: 'azure-pipelines.yml',
+          content: `trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  AZURE_RESOURCE_GROUP: stackforge-development-rg
+  AKS_CLUSTER: stackforge-development-aks
+  ACR_NAME: stackforgeacr
+  IMAGE_NAME: app
+  HELM_RELEASE: app
+  HELM_NAMESPACE: development
+
+stages:
+  - stage: Build
+    displayName: Build and push ACR
+    jobs:
+      - job: build_push
+        steps:
+          - script: |
+              set -euo pipefail
+              if [ -f app/go.mod ]; then (cd app && go test ./...) || true; fi
+            displayName: Quality gate (Go test)
+          - task: Docker@2
+            displayName: Build and push to ACR
+            inputs:
+              command: buildAndPush
+              repository: $(IMAGE_NAME)
+              dockerfile: app/Dockerfile
+              buildContext: app
+              containerRegistry: $(ACR_NAME)
+              tags: |
+                $(Build.BuildId)
+                latest
+
+  - stage: Deploy
+    displayName: Helm deploy AKS
+    dependsOn: Build
+    jobs:
+      - job: helm_deploy
+        steps:
+          - task: AzureCLI@2
+            displayName: Deploy with Helm + wait
+            inputs:
+              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az aks get-credentials --resource-group "$(AZURE_RESOURCE_GROUP)" --name "$(AKS_CLUSTER)" --overwrite-existing
+                PRIOR=$(helm list -n "$(HELM_NAMESPACE)" -q | grep -x "$(HELM_RELEASE)" >/dev/null && helm history "$(HELM_RELEASE)" -n "$(HELM_NAMESPACE)" -o json | python -c "import sys,json; h=json.load(sys.stdin); print(h[-1]['revision'] if h else '')" || true)
+                echo "##vso[task.setvariable variable=PRIOR_REV]$PRIOR"
+                helm upgrade --install "$(HELM_RELEASE)" ./charts/app \\
+                  --namespace "$(HELM_NAMESPACE)" --create-namespace \\
+                  --set image.repository="$(ACR_NAME).azurecr.io/$(IMAGE_NAME)" \\
+                  --set image.tag="$(Build.BuildId)" \\
+                  --wait --timeout 10m
+          - task: AzureCLI@2
+            displayName: Rollback Helm release
+            condition: failed()
+            inputs:
+              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                if [ -n "\${PRIOR_REV:-}" ]; then
+                  helm rollback "$(HELM_RELEASE)" "$(PRIOR_REV)" -n "$(HELM_NAMESPACE)" --wait
+                fi
+`,
+        };
+      }
       return {
         path: 'azure-pipelines.yml',
         content: `trigger:
@@ -565,6 +700,8 @@ export function applyScaffoldOptions(
 
     if (presets.cloud === 'azure') {
       lines.push(`enable_database = ${enableDb}`);
+      lines.push(`enable_redis = ${enableRedis}`);
+      if (enableRedis) lines.push(`redis_ha = ${multiAz}`);
       if (presets.orchestrator === 'container-apps') {
         lines.push(`ingress_external = ${publicAccess}`);
         lines.push(`min_replicas = ${replicas.minReplicas}`);
@@ -978,8 +1115,14 @@ CMD ["node", "server.js"]
     `Applied from interview: region=${options.region}; envs=${options.environments.join(', ')}; access=${options.access}; database=${options.database}; scale=${options.scale}; runtime=${options.runtime}; ci=${presets.ci}.`
   );
   if (options.access === 'public_https' || options.access === 'public_basic') {
+    const tlsFollowUp =
+      presets.cloud === 'azure'
+        ? 'For production HTTPS, attach an Application Gateway / ingress TLS certificate (Key Vault or custom) and an HTTPS listener — do not treat HTTP-only as the final product choice.'
+        : presets.cloud === 'gcp'
+          ? 'For production HTTPS, attach a Google-managed or custom certificate and HTTPS — do not treat HTTP-only as the final product choice.'
+          : 'For production HTTPS, attach an ACM (or cloud-equivalent) certificate and an HTTPS:443 listener — do not treat HTTP:80 as the final product choice.';
     notes.push(
-      `Access is **public** (internet-facing load balancer / ingress). This locked template uses an **HTTP:80** listener by default so \`terraform validate\` stays certificate-free. For production HTTPS, attach an ACM (or cloud-equivalent) certificate and an HTTPS:443 listener — do not treat HTTP:80 as the final product choice.`
+      `Access is **public** (internet-facing load balancer / ingress). This locked template uses an **HTTP:80** listener by default so \`terraform validate\` stays certificate-free. ${tlsFollowUp}`
     );
   }
   if (options.access === 'private') {
@@ -998,10 +1141,18 @@ CMD ["node", "server.js"]
   }
   const redisSupported =
     (presets.cloud === 'aws' && presets.orchestrator === 'ecs') ||
-    (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run');
+    (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run') ||
+    (presets.cloud === 'azure' && presets.orchestrator === 'aks');
   if (options.database === 'redis' && !redisSupported) {
     notes.push(
       `Redis/Valkey was selected, but this locked ${presets.cloud}/${presets.orchestrator} template does not yet provision a managed cache. Relational DB is disabled (\`enable_database = false\`). Add Memorystore / ElastiCache / Azure Cache before production.`
+    );
+  }
+  if (options.database === 'redis' && presets.cloud === 'azure' && presets.orchestrator === 'aks') {
+    notes.push(
+      options.databaseMode === 'ha' || options.databaseMode === 'ha_backup'
+        ? 'Redis HA was selected — this Azure AKS locked template provisions **Azure Cache for Redis (Premium)** via `terraform/redis.tf` (`enable_redis = true`, `redis_ha = true`). Wire Private Endpoint / Key Vault before production.'
+        : 'Redis was selected — this Azure AKS locked template provisions **Azure Cache for Redis** via `terraform/redis.tf` (`enable_redis = true`). Upgrade SKU / Private Endpoint before production if required.'
     );
   }
   if (options.database === 'mysql' && presets.cloud === 'azure') {

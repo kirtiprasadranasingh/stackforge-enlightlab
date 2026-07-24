@@ -101,7 +101,11 @@ export function parseClarifyingQuestion(raw: string): {
 }
 
 function detectCloudLabel(text: string): Presets['cloud'] | null {
-  const value = text.toLowerCase();
+  // Strip CI product names so "Azure DevOps" is not read as Microsoft Azure.
+  const value = text
+    .toLowerCase()
+    .replace(/azure\s*devops(?:\s*pipelines)?/gi, ' ')
+    .replace(/azure\s*pipelines/gi, ' ');
   if (value.includes('oracle')) return 'oracle';
   if (value.includes('google cloud') || value.includes('gcp')) return 'gcp';
   if (value.includes('microsoft azure') || /\bazure\b/.test(value)) return 'azure';
@@ -138,7 +142,7 @@ export function cloudFromInterviewAnswer(
     if (/oci\s*devops|oracle/i.test(ci)) return 'oracle';
     if (/cloud\s*build|google/i.test(ci)) return 'gcp';
     if (/code\s*pipeline|codepipeline/i.test(ci)) return 'aws';
-    if (/azure\s*devops/i.test(ci)) return 'azure';
+    // Azure DevOps is cross-cloud — do not flip cloud to Azure (QA #24).
   }
 
   if (text.startsWith('Change the hosting platform:')) {
@@ -164,10 +168,11 @@ export function cloudFromInterviewAnswer(
   }
 
   // Bare CI pick on "Which CI/CD system should we use?"
+  // Native-cloud CI tools imply a cloud; Azure DevOps does not (works with AWS too).
   if (/^OCI DevOps$/i.test(text)) return 'oracle';
   if (/^Google Cloud Build$/i.test(text)) return 'gcp';
   if (/^AWS CodePipeline$/i.test(text)) return 'aws';
-  if (/^Azure DevOps Pipelines$/i.test(text)) return 'azure';
+  if (/^Azure DevOps Pipelines$/i.test(text)) return null;
 
   // Direct pick from "Which cloud should we use?" (no Change the cloud: prefix)
   return detectCloudLabel(text);
@@ -193,7 +198,9 @@ export function baseCloudFromSetupQuestion(
   if (target.includes('oracle cloud infrastructure') || target.includes('oracle')) {
     return 'oracle';
   }
-  if (target.includes('microsoft azure') || target.includes('azure')) return 'azure';
+  if (target.includes('microsoft azure') || (target.includes('azure') && !target.includes('devops'))) {
+    return 'azure';
+  }
   if (target.includes('google cloud') || target.includes('gcp')) return 'gcp';
   if (/\baws\b/.test(target) || target.includes('amazon')) return 'aws';
   return null;

@@ -1,0 +1,49 @@
+version: 0.1
+component: application
+timeoutInSeconds: 600
+phases:
+  deploy:
+    steps:
+      - type: "APPLY_MANIFEST"
+        name: "Deploy to OKE"
+        timeoutInSeconds: 300
+        configuration:
+          clusterId: "${OKE_CLUSTER_OCID}" # OKE cluster OCID
+          namespace: "${K8S_NAMESPACE}" # Target Kubernetes namespace (e.g., dev, staging, prod)
+          manifests:
+            - # This is a placeholder. OCI DevOps' Kubernetes Manifest Deployment stage
+              # needs to point to the actual Helm chart or Kubernetes manifests.
+              # For Helm, you would typically run `helm upgrade --install` commands.
+              # OCI DevOps can execute arbitrary scripts within stages, so you can do:
+              # - type: "COMMAND"
+              #   name: "Helm Upgrade"
+              #   command: |
+              #     helm upgrade --install app ./charts/app \
+              #       --namespace ${K8S_NAMESPACE} \
+              #       --set image.repository="${OCI_DEVOPS_IMAGE_NAME}" \
+              #       --set image.tag="${BUILD_RUN_ID}" \
+              #       --set mysql.host="${MYSQL_DB_ENDPOINT}" \
+              #       --set mysql.username="${MYSQL_ADMIN_USERNAME}" \
+              #       --set mysql.password="${MYSQL_ADMIN_PASSWORD_SECRET}" # Use OCI Vault for secrets
+              #       --create-namespace
+              # Replace the above with appropriate commands, ensuring OCI DevOps has `helm` and `kubectl` installed
+              # and configured (e.g., in a base command or build stage).
+
+    # Example of a rollback step (modify as needed)
+    rollback:
+      - type: "COMMAND"
+        name: "Rollback Helm Release"
+        command: |
+          echo "Deployment failed. Attempting Helm rollback..."
+          # Assuming 'app' is the release name
+          helm rollback app -n ${K8S_NAMESPACE} || true
+          echo "Helm rollback attempted."
+
+# Parameters for deployment (these would be configured in the OCI DevOps deployment pipeline)
+# OKE_CLUSTER_OCID: The OCID of your OKE cluster (from Terraform outputs)
+# K8S_NAMESPACE: The Kubernetes namespace to deploy to (e.g., dev, staging, prod)
+# OCI_DEVOPS_IMAGE_NAME: The full image name from the build stage (e.g., ap-mumbai-1.ocir.io/tenancy_namespace/repo_name:build_id)
+# BUILD_RUN_ID: The build ID from the build stage (for tagging)
+# MYSQL_DB_ENDPOINT: MySQL endpoint (from Terraform outputs)
+# MYSQL_ADMIN_USERNAME: MySQL admin username
+# MYSQL_ADMIN_PASSWORD_SECRET: Reference to OCI Vault secret for MySQL password

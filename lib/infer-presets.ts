@@ -118,25 +118,32 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
   let orchestrator = overrides.orchestrator ?? current.orchestrator;
   let ci = overrides.ci ?? current.ci;
 
+  // Strip CI product names so "Azure DevOps" does not count as Azure cloud (QA #24).
+  const tCloud = t
+    .replace(/azure\s*devops(?:\s*pipelines)?/gi, ' ')
+    .replace(/azure\s*pipelines/gi, ' ')
+    .replace(/google\s*cloud\s*build/gi, ' ')
+    .replace(/oci\s*devops/gi, ' ');
   const mentionsAzure =
-    /\bazure\b/.test(t) ||
-    /\baks\b/.test(t) ||
-    /container\s*apps?/.test(t) ||
-    /\bazurerm\b/.test(t);
+    /\bazure\b/.test(tCloud) ||
+    /\baks\b/.test(tCloud) ||
+    /container\s*apps?/.test(tCloud) ||
+    /\bazurerm\b/.test(tCloud) ||
+    /microsoft\s+azure/.test(tCloud);
   const mentionsAws =
     /\baws\b/.test(t) ||
     /\beks\b/.test(t) ||
     /\becs\b/.test(t) ||
     /\bfargate\b/.test(t);
   const mentionsGcp =
-    /\bgcp\b/.test(t) ||
-    /\bgke\b/.test(t) ||
-    /google\s*cloud/.test(t) ||
-    /cloud\s*run/.test(t);
+    /\bgcp\b/.test(tCloud) ||
+    /\bgke\b/.test(tCloud) ||
+    /google\s*cloud/.test(tCloud) ||
+    /cloud\s*run/.test(tCloud);
   const mentionsOracle =
-    /\boracle\b/.test(t) ||
-    /\boci\b/.test(t) ||
-    /\boke\b/.test(t);
+    /\boracle\b/.test(tCloud) ||
+    /\boci\b/.test(tCloud) ||
+    /\boke\b/.test(tCloud);
 
   /** True when the user named a cloud/orchestrator — not silent UI defaults. */
   const namedCloud =
@@ -212,6 +219,14 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
     cloud = 'gcp';
   }
 
+  // Explicit AWS/ECS (or EKS) hosting always beats CI-native cloud pairing.
+  // Fixes: AWS + Azure DevOps wrongly becoming Azure Container Apps (ZIP 37 / QA #24).
+  if (mentionsAws && (/\becs\b/.test(t) || /\bfargate\b/.test(t) || /\beks\b/.test(t))) {
+    cloud = 'aws';
+    if (/\becs\b/.test(t) || /\bfargate\b/.test(t)) orchestrator = 'ecs';
+    else if (/\beks\b/.test(t)) orchestrator = 'eks';
+  }
+
   // Native cloud CI must not stay paired with silent AWS/EKS UI defaults.
   // e.g. "Change CI/CD: OCI DevOps" alone → Oracle + OKE + OCIR (never AWS ECR/EKS).
   if (ci === 'oci-devops' && !mentionsAws && !mentionsAzure && !mentionsGcp) {
@@ -241,7 +256,10 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
 
 /** True when the prompt itself names a cloud/orchestrator (not UI defaults alone). */
 export function promptNamesCloud(prompt: string): boolean {
-  const t = prompt.toLowerCase();
+  const t = prompt
+    .toLowerCase()
+    .replace(/azure\s*devops(?:\s*pipelines)?/gi, ' ')
+    .replace(/azure\s*pipelines/gi, ' ');
   return (
     /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|google\s*cloud)\b/.test(
       t

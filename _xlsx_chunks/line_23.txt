@@ -1,0 +1,1 @@
+R18:  | Hosting Switch prompt | Build an Express.js API on AWS ECS Fargate with an Application Load Balancer, GitHub Actions, Redis cache, autoscaling, and three environments. |  |  | Pass |  |  | 

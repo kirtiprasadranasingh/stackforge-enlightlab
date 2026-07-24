@@ -461,7 +461,7 @@ cloud/platform when the client overrode it.
   CodeBuild-style deploy paths unless the client *explicitly* asked for a multi-cloud bridge.
 - **Google Cloud Build** → GCP + GKE/Cloud Run + Artifact Registry (not ECR/EKS).
 - **AWS CodePipeline** → AWS + EKS/ECS + ECR.
-- **Azure DevOps** → Azure + AKS/Container Apps + ACR when cloud was not otherwise named.
+- **Azure DevOps** → use with the confirmed cloud (AWS/Azure/GCP/Oracle). Do **not** treat Azure DevOps alone as Microsoft Azure cloud — only switch to Azure + AKS/Container Apps + ACR when Azure was named as the cloud (or no other cloud was named).
 - If only CI was chosen and cloud/compute were never confirmed, either follow the pairing above
   (preferred) or emit <<<QUESTIONS>>> — do **not** present cross-cloud deploy details as confirmed.
 

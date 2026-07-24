@@ -55,6 +55,16 @@ function interviewNamedDotNetOnly(context: string): boolean {
 function interviewConfirmedLanguage(context: string): boolean {
   if (/Language(?:\/framework)?\s*\(client override\)/i.test(context)) return true;
   if (
+    /Health-check service language:\s*(Node\.js|Go|Python|Java|\.NET)\b/i.test(
+      context
+    )
+  ) {
+    return true;
+  }
+  if (/Language(?: for health-check[^:\n]*)?:\s*(Node\.js|Go|Python|Java|\.NET)\b/i.test(context)) {
+    return true;
+  }
+  if (
     /→\s*(Node\.js|Go|Python|Java|\.NET|Spring(?:\s*Boot)?)\b/i.test(context)
   ) {
     return true;
@@ -74,6 +84,12 @@ function interviewConfirmedLanguage(context: string): boolean {
 /** True when the client answered a data/cache question or named a DB in the prompt. */
 function interviewConfirmedDatabase(context: string): boolean {
   if (/Data service\s*\(client override\)/i.test(context)) return true;
+  if (/Data service:\s*(No data service|PostgreSQL|MySQL|Redis|MongoDB)/i.test(context)) {
+    return true;
+  }
+  if (/Database:\s*(PostgreSQL|MySQL|Redis|MongoDB)/i.test(context)) {
+    return true;
+  }
   if (
     /→\s*(No data service|PostgreSQL|MySQL|Redis(?:\s*cache)?|MongoDB|Another service:)/i.test(
       context
@@ -83,7 +99,7 @@ function interviewConfirmedDatabase(context: string): boolean {
   }
   if (
     /\b(postgres(?:ql)?|mysql|mongodb|redis|cloud sql)\b/i.test(context) &&
-    /deploy|with|database|rds|sql/i.test(context)
+    /deploy|with|database|rds|sql|data service/i.test(context)
   ) {
     return true;
   }
@@ -299,6 +315,13 @@ function demoteUnconfirmedDatabase(plan: string, context: string): string {
 function interviewConfirmedCi(context: string): boolean {
   if (/CI\/CD system\s*\(client override\)/i.test(context)) return true;
   if (
+    /CI\/CD system:\s*(GitHub Actions|GitLab CI|Jenkins|Azure DevOps|AWS CodePipeline|Google Cloud Build|OCI DevOps)\b/i.test(
+      context
+    )
+  ) {
+    return true;
+  }
+  if (
     /→\s*(GitHub Actions|GitLab CI|Jenkins|Azure DevOps|AWS CodePipeline|Google Cloud Build|OCI DevOps)\b/i.test(
       context
     )
@@ -340,72 +363,304 @@ function demoteUnconfirmedCi(plan: string, context: string): string {
   return out;
 }
 
+/** True when plan/context is AWS (not Azure/GCP/Oracle). */
+function planOrContextIsAws(plan: string, context: string): boolean {
+  const blob = `${context}\n${plan}`;
+  // Confirmed non-AWS cloud always wins — leaked "AWS ECS" / "RDS" / "ALB"
+  // assumption bullets must not flip this (QA #25 Azure AKS + Redis).
+  if (
+    /Cloud(?:\s+Provider)?:\s*(Microsoft\s+)?Azure\b/i.test(blob) ||
+    /Cloud:\s*(Microsoft\s+)?Azure\b/i.test(blob) ||
+    /Cloud(?:\s+Provider)?:\s*(GCP|Google Cloud)\b/i.test(blob) ||
+    /Cloud:\s*(GCP|Google Cloud)\b/i.test(blob) ||
+    /Cloud(?:\s+Provider)?:\s*(Oracle|OCI)\b/i.test(blob) ||
+    /Cloud:\s*(Oracle|OCI)\b/i.test(blob) ||
+    /Hosting platform:\s*Azure Kubernetes/i.test(blob) ||
+    /Hosting platform:\s*Azure Container Apps/i.test(blob) ||
+    /Compute:\s*Azure Kubernetes/i.test(blob) ||
+    /\bAzure Kubernetes Service\b/i.test(blob)
+  ) {
+    return false;
+  }
+  if (
+    /\b(Azure Container Apps|Cloud Run|GKE|OKE)\b/i.test(blob) &&
+    !/Cloud(?:\s+Provider)?:\s*AWS\b/i.test(blob) &&
+    !/\bAmazon ECS\b|\bAmazon EKS\b/i.test(blob)
+  ) {
+    return false;
+  }
+  return /\bAWS\b|\bAmazon ECS\b|\bAmazon EKS\b|\bFargate\b/i.test(blob);
+}
+
+function planOrContextIsAzure(plan: string, context: string): boolean {
+  const blob = `${context}\n${plan}`;
+  return (
+    /Cloud(?:\s+Provider)?:\s*(Microsoft\s+)?Azure\b/i.test(blob) ||
+    /Cloud:\s*(Microsoft\s+)?Azure\b/i.test(blob) ||
+    /Hosting platform:\s*Azure /i.test(blob) ||
+    /\bAzure Kubernetes Service\b|\bAzure Container Apps\b|\bAKS\b/i.test(blob)
+  );
+}
+
+/** Drop AWS ECS/ALB/ACM/SSM/Secrets Manager assumption bullets from non-AWS plans. */
+function stripAwsAssumptionLeakage(plan: string): string {
+  let out = plan
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim();
+      // Match with or without markdown bullets (UI sometimes drops leading "- ")
+      if (
+        /locked AWS ECS template|AWS Secrets Manager|Secrets Manager \(or SSM\)|HTTP:80 ALB|Attach ACM \+ HTTPS|ALB listener so `?terraform validate|not three RDS instances|Wire Secrets Manager/i.test(
+          t
+        )
+      ) {
+        return false;
+      }
+      if (
+        /Scaffold delivery vs access intent/i.test(t) &&
+        /HTTP:80|ALB|ACM|Public without a custom domain/i.test(t)
+      ) {
+        return false;
+      }
+      if (
+        /Per-environment databases/i.test(t) &&
+        /RDS instances/i.test(t)
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .join('\n');
+  // Model sometimes copies the old sanitizer wording into Implement stage
+  out = out.replace(
+    /Apply client overrides\s*\([^)]*\);\s*treat runtime\/DB\/CI\/region defaults as Assumptions[^\n]*/gi,
+    'Apply confirmed interview choices (cloud, compute, CI, region, environments, access, data service, language) into Terraform variables and Helm/CI config'
+  );
+  out = out.replace(
+    /treat runtime\/DB\/CI\/region defaults as Assumptions[^\n]*/gi,
+    'use confirmed interview answers for runtime, database, CI, and region'
+  );
+  return out;
+}
+
 /**
  * QA #7 — Align plan prose with what Approve & Generate actually emits.
- * Client access intent (public / HTTPS goal) can stay Confirmed; delivery claims
- * that over-promise ACM TLS, Secrets Manager, or src/ layout must be demoted.
+ * AWS-specific honesty (HTTP:80 ALB, Secrets Manager) only when the stack is AWS.
  */
-function honestScaffoldDelivery(plan: string): string {
+function honestScaffoldDelivery(plan: string, context: string): string {
   let out = plan;
+  const isAws = planOrContextIsAws(plan, context);
+  const oneEnv =
+    /→\s*One environment\b/i.test(context) ||
+    /Which environments do you need\s*\n\s*→\s*One environment\b/i.test(context) ||
+    /Environments:\s*One environment\b/i.test(context);
 
-  // Architecture / Tools / Networking: do not promise ACM HTTPS as shipped.
-  out = out.replace(
-    /fronted by an Application Load Balancer \(ALB\) in public subnets for public access via HTTPS\.?/gi,
-    'fronted by an Application Load Balancer (ALB) in public subnets for public access (scaffold ships **HTTP:80** for validate-safe TLS-free Terraform; attach ACM + HTTPS:443 before production)'
-  );
-  out = out.replace(
-    /Handling public ingress, load balancing, and HTTPS termination\.?/gi,
-    'Handling public ingress and load balancing (HTTP:80 in the locked scaffold; HTTPS termination is a follow-up with ACM)'
-  );
-  out = out.replace(
-    /Set up ALB listener for HTTPS traffic and target groups for ECS services\.?/gi,
-    'Set up ALB listener (**HTTP:80** in locked scaffold) and target groups for ECS services; document ACM + HTTPS:443 as a production follow-up'
-  );
-  out = out.replace(
-    /AWS Application Load Balancer \(ALB\):\s*Internet-facing load balancer with a listener for HTTPS\.?/gi,
-    'AWS Application Load Balancer (ALB): Internet-facing load balancer with an **HTTP:80** listener in the locked scaffold (HTTPS/ACM follow-up)'
-  );
+  if (isAws) {
+    // Architecture / Tools / Networking: do not promise ACM HTTPS as shipped.
+    out = out.replace(
+      /fronted by an Application Load Balancer \(ALB\) in public subnets for public access via HTTPS\.?/gi,
+      'fronted by an Application Load Balancer (ALB) in public subnets for public access (scaffold ships **HTTP:80** for validate-safe TLS-free Terraform; attach ACM + HTTPS:443 before production)'
+    );
+    out = out.replace(
+      /Handling public ingress, load balancing, and HTTPS termination\.?/gi,
+      'Handling public ingress and load balancing (HTTP:80 in the locked scaffold; HTTPS termination is a follow-up with ACM)'
+    );
+    out = out.replace(
+      /Set up ALB listener for HTTPS traffic and target groups for ECS services\.?/gi,
+      'Set up ALB listener (**HTTP:80** in locked scaffold) and target groups for ECS services; document ACM + HTTPS:443 as a production follow-up'
+    );
+    out = out.replace(
+      /AWS Application Load Balancer \(ALB\):\s*Internet-facing load balancer with a listener for HTTPS\.?/gi,
+      'AWS Application Load Balancer (ALB): Internet-facing load balancer with an **HTTP:80** listener in the locked scaffold (HTTPS/ACM follow-up)'
+    );
 
-  // TLS assumption bullets that claim managed cert is already wired
-  out = out.replace(
-    /^([-*]\s*)?TLS:\s*HTTPS will be terminated at the ALB using an AWS-managed certificate[^\n]*/gim,
-    '$1TLS: Client asked for public access on the default LB hostname. **Approve & Generate emits HTTP:80** so `terraform validate` stays certificate-free. Attach ACM (or equivalent) + HTTPS:443 before production — do not treat HTTP:80 as the product choice.'
-  );
-  out = out.replace(
-    /^([-*]\s*)?HTTPS will be (?:enabled|terminated)[^\n]*ACM[^\n]*/gim,
-    '$1HTTPS/ACM is a **production follow-up**. The locked scaffold uses an HTTP:80 listener so validate stays certificate-free.'
-  );
+    out = out.replace(
+      /^([-*]\s*)?TLS:\s*HTTPS will be terminated at the ALB using an AWS-managed certificate[^\n]*/gim,
+      '$1TLS: Client asked for public access on the default LB hostname. **Approve & Generate emits HTTP:80** so `terraform validate` stays certificate-free. Attach ACM (or equivalent) + HTTPS:443 before production — do not treat HTTP:80 as the product choice.'
+    );
+    out = out.replace(
+      /^([-*]\s*)?HTTPS will be (?:enabled|terminated)[^\n]*ACM[^\n]*/gim,
+      '$1HTTPS/ACM is a **production follow-up**. The locked scaffold uses an HTTP:80 listener so validate stays certificate-free.'
+    );
 
-  // Secrets Manager — locked ECS template uses random_password, not SM resources
-  out = out.replace(
-    /^([-*]\s*)?Secrets Management:\s*AWS Secrets Manager will be used[^\n]*/gim,
-    '$1Secrets: Locked scaffold uses Terraform `random_password` for the DB (state-backed). **AWS Secrets Manager wiring is a follow-up** — placeholders / SM resources are not required for the starting scaffold.'
-  );
-  out = out.replace(
-    /AWS Secrets Manager will be used for database credentials[^\n]*/gi,
-    'Database password is generated in Terraform (`random_password`) for the starting scaffold; wire AWS Secrets Manager before production'
-  );
-  out = out.replace(
-    /^([-*]\s*)?Secrets:\s*Database credentials will be managed in AWS Secrets Manager[^\n]*/gim,
-    '$1Secrets: Starting scaffold uses Terraform-managed DB password (`random_password`). Move credentials to AWS Secrets Manager before production.'
-  );
-  out = out.replace(
-    /^([-*]\s*)?[^\n]*placeholder secret resources[^\n]*Secrets Manager[^\n]*/gim,
-    '- Secrets: Terraform `random_password` for DB in the locked template; Secrets Manager integration is out of scope for the starting scaffold'
-  );
-  out = out.replace(
-    /^([-*]\s*)?AWS Secrets Manager placeholders[^\n]*/gim,
-    '$1DB password via Terraform `random_password` (Secrets Manager is a follow-up)'
-  );
-  out = out.replace(
-    /Terraform will create placeholder secret resources[^\n]*/gi,
-    'Terraform generates a DB password with `random_password` in the locked scaffold; Secrets Manager is a follow-up'
-  );
+    out = out.replace(
+      /^([-*]\s*)?Secrets Management:\s*AWS Secrets Manager will be used[^\n]*/gim,
+      '$1Secrets: Locked scaffold uses Terraform `random_password` for the DB (state-backed). **AWS Secrets Manager wiring is a follow-up** — placeholders / SM resources are not required for the starting scaffold.'
+    );
+    out = out.replace(
+      /AWS Secrets Manager will be used for database credentials[^\n]*/gi,
+      'Database password is generated in Terraform (`random_password`) for the starting scaffold; wire AWS Secrets Manager before production'
+    );
+    out = out.replace(
+      /^([-*]\s*)?Secrets:\s*Database credentials will be managed in AWS Secrets Manager[^\n]*/gim,
+      '$1Secrets: Starting scaffold uses Terraform-managed DB password (`random_password`). Move credentials to AWS Secrets Manager before production.'
+    );
+    out = out.replace(
+      /^([-*]\s*)?[^\n]*placeholder secret resources[^\n]*Secrets Manager[^\n]*/gim,
+      '- Secrets: Terraform `random_password` for DB in the locked template; Secrets Manager integration is out of scope for the starting scaffold'
+    );
+    out = out.replace(
+      /^([-*]\s*)?AWS Secrets Manager placeholders[^\n]*/gim,
+      '$1DB password via Terraform `random_password` (Secrets Manager is a follow-up)'
+    );
+    out = out.replace(
+      /Terraform will create placeholder secret resources[^\n]*/gi,
+      'Terraform generates a DB password with `random_password` in the locked scaffold; Secrets Manager is a follow-up'
+    );
 
-  // Per-env dedicated RDS — keep as assumption, force honest wording
+    out = out.replace(
+      /^([-*]\s*)?Database Environments:\s*Each environment[^\n]*dedicated RDS[^\n]*/gim,
+      '$1Database environments: Separate **RDS per environment** is achieved by applying Terraform once per env with `environments/*.tfvars` (distinct `environment` name) — not a single apply that creates three databases, and not automatic Terraform workspaces unless you add a backend.'
+    );
+
+    // HA Postgres → Multi-AZ RDS instance ONLY (never Aurora / rds_cluster) — QA #23 100%
+    const haPostgres =
+      /PostgreSQL|postgres|High availability|Multi-AZ|aws_rds_cluster|Aurora|aws_db_instance/i.test(
+        `${context}\n${out}`
+      );
+    if (haPostgres || /Database:\s*PostgreSQL/i.test(out)) {
+      // Drop cluster resource lines entirely (do not leave duplicate db_instance lines)
+      out = out.replace(
+        /^[-*]\s*aws_rds_cluster[^\n]*\n?/gim,
+        ''
+      );
+      out = out.replace(
+        /^[-*]\s*aws_rds_cluster_instance[^\n]*\n?/gim,
+        ''
+      );
+      out = out.replace(
+        /^[-*]?\s*aws_rds_cluster\s*\([^\n]*\n?/gim,
+        ''
+      );
+      out = out.replace(
+        /^[-*]?\s*aws_rds_cluster_instance\s*\n?/gim,
+        ''
+      );
+      out = out.replace(
+        /^[-*]?\s*aws_db_instance[^\n]*if not using cluster[^\n]*\n?/gim,
+        '- aws_db_instance (Amazon RDS PostgreSQL, Multi-AZ)\n'
+      );
+      out = out.replace(
+        /aws_rds_cluster\s*&\s*aws_rds_cluster_instance/gi,
+        'aws_db_instance (Multi-AZ Amazon RDS PostgreSQL)'
+      );
+      out = out.replace(/\baws_rds_cluster_instance\b/gi, 'aws_db_instance');
+      out = out.replace(/\baws_rds_cluster\b/gi, 'aws_db_instance');
+      out = out.replace(
+        /\b(?:Amazon\s+)?Aurora PostgreSQL(?:\s+cluster)?\b/gi,
+        'Amazon RDS PostgreSQL (Multi-AZ)'
+      );
+      out = out.replace(
+        /\bRDS Aurora PostgreSQL(?:\s*\(Multi-AZ\))?/gi,
+        'Amazon RDS PostgreSQL (Multi-AZ)'
+      );
+      out = out.replace(
+        /Aurora PostgreSQL cluster for high availability/gi,
+        'Multi-AZ Amazon RDS PostgreSQL instance (`aws_db_instance`) for high availability'
+      );
+      // Deduplicate consecutive identical aws_db_instance bullets
+      out = out.replace(
+        /((?:^|\n)[-*]?\s*aws_db_instance[^\n]*)(\n[-*]?\s*aws_db_instance[^\n]*)+/gi,
+        '$1'
+      );
+      if (
+        /Database:\s*PostgreSQL|PostgreSQL \(high availability\)|High availability/i.test(
+          `${context}\n${out}`
+        ) &&
+        !/aws_db_instance/i.test(out)
+      ) {
+        out = out.replace(
+          /(##\s*Resources to create[\s\S]*?Database:\s*\n)/i,
+          '$1- aws_db_instance (Amazon RDS PostgreSQL, Multi-AZ)\n- aws_db_subnet_group\n'
+        );
+      }
+    }
+
+    const accessSecureHttps =
+      /Public with secure HTTPS/i.test(context) ||
+      /API Access:\s*Public with secure HTTPS/i.test(out);
+    const accessPublicBasic =
+      /Public without a custom domain/i.test(context) ||
+      /API Access:\s*Public without a custom domain/i.test(out);
+
+    // Never stamp wrong access goal (QA #23/#25)
+    if (accessSecureHttps) {
+      out = out.replace(
+        /^[-*]?\s*[^\n]*Scaffold delivery vs access intent:[^\n]*Public without a custom domain[^\n]*\n?/gim,
+        ''
+      );
+      out = out.replace(
+        /^[-*]?\s*[^\n]*"Public without a custom domain"[^\n]*confirmed access[^\n]*\n?/gim,
+        ''
+      );
+      out = prependAssumption(
+        out,
+        '**HTTPS intent:** Client confirmed **Public with secure HTTPS**. Locked scaffold may still emit an **HTTP:80** ALB listener so `terraform validate` stays certificate-free. Attach ACM + HTTPS:443 before production — do not treat HTTP:80 as the final product choice.'
+      );
+    } else if (accessPublicBasic) {
+      out = prependAssumption(
+        out,
+        '**Scaffold delivery vs access intent:** "Public without a custom domain" is the confirmed access *goal*. Approve & Generate still emits an **HTTP:80** ALB listener so `terraform validate` stays certificate-free. Attach ACM + HTTPS:443 before production — do not treat HTTP:80 as the final product choice.'
+      );
+    } else {
+      out = prependAssumption(
+        out,
+        '**Scaffold delivery vs access intent:** Public HTTPS access is the confirmed *goal* when selected. Approve & Generate still emits an **HTTP:80** ALB listener so `terraform validate` stays certificate-free. Attach ACM + HTTPS:443 before production — do not treat HTTP:80 as the final product choice.'
+      );
+    }
+
+    out = prependAssumption(
+      out,
+      '**Secrets:** The locked AWS ECS template uses Terraform `random_password` for RDS — not AWS Secrets Manager resources. Wire Secrets Manager (or SSM) before production.'
+    );
+    out = prependAssumption(
+      out,
+      '**Per-environment databases:** Multi-env (dev/staging/prod) means separate `environments/*.tfvars` applies (or workspaces you add) — not three RDS instances from one apply unless you explicitly extend the module. **One environment** → a single `environments/development.tfvars` apply.'
+    );
+  } else {
+    out = stripAwsAssumptionLeakage(out);
+    const isAzure = planOrContextIsAzure(out, context);
+    const accessSecureHttps =
+      /Public with secure HTTPS/i.test(context) ||
+      /API [Aa]ccess:\s*Public with secure HTTPS/i.test(out);
+    const accessPublicBasic =
+      /Public without a custom domain/i.test(context) ||
+      /API [Aa]ccess:\s*Public without a custom domain/i.test(out);
+
+    if (isAzure) {
+      if (accessSecureHttps) {
+        out = prependAssumption(
+          out,
+          '**HTTPS intent:** Client confirmed **Public with secure HTTPS**. Locked AKS/ACA scaffold still uses validate-safe **HTTP** ingress/listeners so `terraform validate` stays certificate-free. Attach Application Gateway / ingress TLS + custom domain before production — do not treat HTTP-only as the final product choice.'
+        );
+      } else if (accessPublicBasic) {
+        out = prependAssumption(
+          out,
+          '**Scaffold delivery vs access intent:** "Public without a custom domain" is the confirmed access *goal*. Locked scaffold may emit HTTP-only ingress so `terraform validate` stays certificate-free; add TLS before production.'
+        );
+      }
+      out = prependAssumption(
+        out,
+        '**Secrets:** Prefer **Azure Key Vault** references for Redis/DB connection strings before production — the locked template may use Terraform placeholders / `random_password` only (not AWS Secrets Manager).'
+      );
+      out = prependAssumption(
+        out,
+        '**Per-environment data:** Multi-env (dev/staging) means separate `environments/*.tfvars` applies (or workspaces you add) — not multiple Redis/DB instances from one apply unless you extend the module.'
+      );
+    } else if (accessSecureHttps || accessPublicBasic) {
+      out = prependAssumption(
+        out,
+        accessSecureHttps
+          ? '**HTTPS intent:** Client confirmed **Public with secure HTTPS**. Locked scaffold may still use HTTP-only listeners/ingress so `terraform validate` stays certificate-free. Attach managed TLS + custom domain before production.'
+          : '**Scaffold delivery vs access intent:** Public access without a custom domain is the confirmed *goal*; add managed TLS before production if required.'
+      );
+    }
+  }
+
+  // Always: never demote confirmed interview picks in Implement stage wording
   out = out.replace(
-    /^([-*]\s*)?Database Environments:\s*Each environment[^\n]*dedicated RDS[^\n]*/gim,
-    '$1Database environments: Separate **RDS per environment** is achieved by applying Terraform once per env with `environments/*.tfvars` (distinct `environment` name) — not a single apply that creates three databases, and not automatic Terraform workspaces unless you add a backend.'
+    /Apply client overrides\s*\([^)]*\);\s*treat runtime\/DB\/CI\/region defaults as Assumptions[^\n]*/gi,
+    'Apply confirmed interview choices (cloud, compute, CI, region, environments, access, data service, language) into Terraform variables and Helm/CI config'
   );
 
   // File manifest: locked Node stub is app/server.js, not src/app.js
@@ -421,46 +676,107 @@ function honestScaffoldDelivery(plan: string): string {
   out = out.replace(/\bsrc\/package\.json\b/g, 'app/package.json');
   out = out.replace(/\bsrc\/package-lock\.json\b/g, 'app/package-lock.json');
 
-  // Rollback — locked GHA captures prior ARN and runs update-service on failure
+  if (isAws) {
+    out = out.replace(
+      /Implement a rollback mechanism to revert to the previous stable task definition in case of deployment failure\. This will involve capturing the prior task definition ARN and updating the service to it upon job failure\.?/gi,
+      'On deploy failure, the GitHub Actions workflow captures the prior ECS task definition ARN and runs `aws ecs update-service` to roll back, then waits for service stability.'
+    );
+  }
+
+  // One environment selected — do not invent staging / production-like / multi-env var wording
+  if (oneEnv) {
+    out = out.replace(
+      /\bOne\s*\(\s*development\s*\/\s*staging\s*\)/gi,
+      'One environment (development)'
+    );
+    out = out.replace(
+      /\bOne environment\s*\(\s*production-like\s*\)/gi,
+      'One environment (development)'
+    );
+    out = out.replace(
+      /Environments:\s*One\s*\(\s*development\s*\/\s*staging\s*\)/gi,
+      'Environments: One environment (development)'
+    );
+    out = out.replace(
+      /Environments:\s*One environment\s*\(defaulting to ['"]?dev['"]?\)/gi,
+      'Environments: One environment (development)'
+    );
+    out = out.replace(
+      /One environment\s*\(defaulting to ['"]?dev['"]?\)/gi,
+      'One environment (development)'
+    );
+    out = out.replace(
+      /One environment\s*\(development\s*\/\s*staging\s*\/\s*production[^)]*\)/gi,
+      'One environment (development)'
+    );
+    out = out.replace(
+      /Environments:\s*One environment\s*\(development\s*\/\s*staging\s*\/\s*production[^)]*\)/gi,
+      'Environments: One environment (development)'
+    );
+    out = out.replace(
+      /via\s+var\.environment/gi,
+      'via environments/development.tfvars'
+    );
+    out = out.replace(
+      /The single environment will be named\s+dev\b/gi,
+      'The single environment uses `environments/development.tfvars` (environment = "development")'
+    );
+    out = out.replace(
+      /single ['"]dev['"] environment/gi,
+      'single development environment'
+    );
+  }
+
+  // Azure DevOps CI — never leave GitHub Actions AWS Auth template lines
+  if (
+    /Azure DevOps/i.test(context) ||
+    /CI\/CD System:\s*Azure DevOps/i.test(out) ||
+    /CI:\s*Azure DevOps/i.test(out)
+  ) {
+    out = out.replace(
+      /^[-*]\s*[^\n]*GitHub Actions for AWS Auth[^\n]*\n?/gim,
+      ''
+    );
+    out = out.replace(
+      /^[-*]\s*[^\n]*GitHub Actions[^\n]*OIDC[^\n]*AWS[^\n]*\n?/gim,
+      ''
+    );
+  }
+
+  return out;
+}
+
+/**
+ * When OCI DevOps appears with AWS ECR/EKS, rewrite OCIR → ECR and note consistency.
+ */
+function stripCrossCloudCiRegistryConflicts(
+  plan: string,
+  context: string
+): string {
+  const blob = `${context}\n${plan}`;
+  const hasOciDevops = /\bOCI DevOps\b/i.test(blob);
+  const hasAwsRegistryOrCompute =
+    /\b(ECR|Amazon ECR|EKS|Amazon EKS|aws_ecr)\b/i.test(blob);
+  if (!hasOciDevops || !hasAwsRegistryOrCompute) return plan;
+
+  let out = plan;
+  out = out.replace(/\bOCIR\b/g, 'ECR');
   out = out.replace(
-    /Implement a rollback mechanism to revert to the previous stable task definition in case of deployment failure\. This will involve capturing the prior task definition ARN and updating the service to it upon job failure\.?/gi,
-    'On deploy failure, the GitHub Actions workflow captures the prior ECS task definition ARN and runs `aws ecs update-service` to roll back, then waits for service stability.'
+    /Oracle Cloud Infrastructure Registry\s*\(OCIR\)/gi,
+    'Amazon Elastic Container Registry (ECR)'
   );
-
-  // Always stamp scaffold-delivery honesty under Assumptions
-  out = prependAssumption(
-    out,
-    '**Scaffold delivery vs access intent:** "Public without a custom domain" is the confirmed access *goal*. Approve & Generate still emits an **HTTP:80** ALB listener so `terraform validate` stays certificate-free. Attach ACM + HTTPS:443 (or cloud equivalent) before production — do not treat HTTP:80 as the final product choice.'
-  );
-  out = prependAssumption(
-    out,
-    '**Secrets:** The locked AWS ECS template uses Terraform `random_password` for RDS — not AWS Secrets Manager resources. Wire Secrets Manager (or SSM) before production.'
-  );
-  out = prependAssumption(
-    out,
-    '**Per-environment databases:** Multi-env (dev/staging/prod) means separate `environments/*.tfvars` applies (or workspaces you add) — not three RDS instances from one apply unless you explicitly extend the module.'
-  );
-
-  // Implement stage must not re-label scaffold defaults as "confirmed choices"
   out = out.replace(
-    /Apply confirmed choices\s*\(([^)]*)\)/gi,
-    (_m, inner: string) => {
-      const parts = String(inner)
-        .split(',')
-        .map((p) => p.trim())
-        .filter(Boolean);
-      const kept = parts.filter(
-        (p) =>
-          !/postgres|mysql|mongodb|redis|cloud sql|node\.?js|python|golang|\.net|java|gitlab|github actions|jenkins|us-central|us-east|us-west|region/i.test(
-            p
-          )
-      );
-      const label =
-        kept.length > 0 ? kept.join(', ') : 'client cloud/compute overrides only';
-      return `Apply client overrides (${label}); treat runtime/DB/CI/region defaults as Assumptions — not confirmed interview answers`;
-    }
+    /Oracle Cloud Infrastructure Registry/gi,
+    'Amazon Elastic Container Registry (ECR)'
   );
-
+  out = out.replace(
+    /push(?:es|ing)?(?:\s+Docker)?\s+images?\s+to\s+OCIR/gi,
+    'push images to ECR'
+  );
+  out = prependAssumption(
+    out,
+    '**CI/registry consistency:** OCI DevOps was selected with an AWS compute/registry stack (ECR/EKS). Image push targets **Amazon ECR** (not OCIR) so the pipeline matches Terraform. Confirm OCI→AWS credentials / OIDC before production.'
+  );
   return out;
 }
 
@@ -520,7 +836,8 @@ export function sanitizePlanAgainstInterview(
   out = demoteUnconfirmedRuntime(out, ctx);
   out = demoteUnconfirmedDatabase(out, ctx);
   out = demoteUnconfirmedCi(out, ctx);
-  out = honestScaffoldDelivery(out);
+  out = honestScaffoldDelivery(out, ctx);
+  out = stripCrossCloudCiRegistryConflicts(out, ctx);
 
   return out;
 }

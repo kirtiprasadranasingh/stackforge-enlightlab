@@ -66,6 +66,7 @@ import {
   TF_AKS_NETWORK,
   TF_AKS_CLUSTER,
   TF_AKS_DATABASE,
+  TF_AKS_REDIS,
   TF_AKS_OUTPUTS,
 } from '@/lib/locked-tf-azure-aks';
 import {
@@ -1009,6 +1010,7 @@ function azureAksBase(): BaseFileMap {
     'terraform/network.tf': TF_AKS_NETWORK,
     'terraform/aks.tf': TF_AKS_CLUSTER,
     'terraform/database.tf': TF_AKS_DATABASE,
+    'terraform/redis.tf': TF_AKS_REDIS,
     'terraform/outputs.tf': TF_AKS_OUTPUTS,
     'environments/staging.tfvars': `location = "eastus"\nenvironment = "staging"\n`,
     '.github/workflows/deploy.yml': GHA_EKS_DEPLOY.replace(/EKS_/g, 'AKS_').replace(
@@ -1135,17 +1137,29 @@ export function mergeLockedBaseFiles(
       path === '.github/workflows/deploy.yml' &&
       Boolean(options.presets?.ci) &&
       options.presets!.ci !== 'github-actions';
+    // Do not force-lock Node stubs when interview chose Go/Python (ZIP 38 dual tree).
+    const runtime = options.scaffoldOptions?.runtime;
+    const skipWrongRuntimeStub =
+      (runtime === 'go' || runtime === 'python') &&
+      (path === 'app/server.js' ||
+        path === 'app/package.json' ||
+        path === 'app/package-lock.json' ||
+        path === 'server.js' ||
+        path === 'package.json' ||
+        path === 'package-lock.json');
     const shouldForce =
       forceStubs &&
       shouldForceLockPath(path) &&
       (!terraformOnly || isTf) &&
-      !skipGhaForce;
+      !skipGhaForce &&
+      !skipWrongRuntimeStub;
     const shouldFill = missing.includes(path) || (!exists && fillMissing);
     const existing = byPath.get(path);
     const emptyExisting = exists && !(existing?.content || '').trim();
 
-    if (skipGhaForce) {
+    if (skipGhaForce || skipWrongRuntimeStub) {
       // Actively drop profile/model GHA when interview chose another CI
+      // or drop Node stubs when runtime is Go/Python.
       byPath.delete(path);
       seeded.push(`removed:${path}`);
       continue;

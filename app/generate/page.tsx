@@ -43,6 +43,7 @@ import {
   isIterativeEditPrompt,
   requiresPlanApproval,
   buildValidationFixPrompt,
+  resolveStackPromptFromAffirmation,
 } from '@/lib/stack-intent';
 import { getLanguageFromPath } from '@/lib/utils';
 
@@ -414,8 +415,8 @@ export default function GeneratePage() {
 
   const sendMessage = useCallback(
     async (rawText: string, options?: SendOptions) => {
-      const text = rawText.trim();
-      if (!text || isGenerating) return;
+      const typed = rawText.trim();
+      if (!typed || isGenerating) return;
 
       const priorHistory = messagesRef.current
         .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -423,6 +424,10 @@ export default function GeneratePage() {
           role: m.role as 'user' | 'assistant',
           content: m.content,
         }));
+
+      // "yes please" after a .NET/runtime offer → continue with the prior stack ask
+      const text =
+        resolveStackPromptFromAffirmation(typed, priorHistory)?.trim() || typed;
 
       const startFresh =
         isFullStackPrompt(text) && !isIterativeEditPrompt(text);
@@ -476,7 +481,7 @@ export default function GeneratePage() {
             role: 'user',
             content: options?.interviewChoices?.length
               ? ''
-              : options?.displayContent?.trim() || text,
+              : options?.displayContent?.trim() || typed,
             kind: options?.interviewChoices?.length ? 'confirmed-choices' : 'text',
             choices: options?.interviewChoices,
           },

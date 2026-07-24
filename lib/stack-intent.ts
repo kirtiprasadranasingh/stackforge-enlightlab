@@ -12,6 +12,71 @@ export function hasInfraSignal(prompt: string): boolean {
   );
 }
 
+/** ".NET API", "Java service", etc. — enough to start clarify even without a cloud name. */
+export function hasRuntimeAppSignal(prompt: string): boolean {
+  const t = prompt.trim();
+  // ".NET" begins with a non-word char — do not require a leading \b before \.net
+  if (
+    /(?:^|[^a-z0-9_])(?:\.net|dotnet|asp\.?net)\b.{0,40}\b(api|service|app|application|backend|microservice)\b/i.test(
+      t
+    )
+  ) {
+    return true;
+  }
+  return (
+    /\b(node\.?js|python|java|golang|go|fastapi|spring|express|next\.?js)\b.{0,40}\b(api|service|app|application|backend|microservice)\b/i.test(
+      t
+    ) ||
+    /\b(api|service|app|application|backend)\b.{0,40}(?:\.net|dotnet|asp\.?net|node\.?js|python|java|golang|go)\b/i.test(
+      t
+    )
+  );
+}
+
+/** Short affirmations after the bot offered to scaffold a runtime/API. */
+export function isAffirmativeContinuePrompt(prompt: string): boolean {
+  const lower = prompt
+    .toLowerCase()
+    .trim()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, '');
+  return /^(yes|yeah|yep|yup|sure|ok|okay|please|continue|proceed|go ahead|lets go|let's go|do it|sounds good)(\s+(please|continue|go ahead))?$/.test(
+    lower
+  ) || /^(yes|yeah|sure|ok|okay|please)\s+(please|continue)$/.test(lower);
+}
+
+/**
+ * If the user says "yes please" after a .NET/runtime offer, return the prior
+ * stack prompt so clarify can start instead of a welcome reset.
+ */
+export function resolveStackPromptFromAffirmation(
+  prompt: string,
+  history: { role: string; content: string }[]
+): string | null {
+  if (!isAffirmativeContinuePrompt(prompt) || !history?.length) return null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role !== 'user') continue;
+    const c = (m.content || '').trim();
+    if (!c || isAffirmativeContinuePrompt(c)) continue;
+    if (hasRuntimeAppSignal(c) || hasInfraSignal(c) || isVagueStackPrompt(c)) {
+      return c;
+    }
+  }
+  const asst = history
+    .filter((h) => h.role === 'assistant')
+    .map((h) => h.content || '')
+    .join('\n');
+  if (
+    /help you set up (the )?infrastructure|set up the infrastructure for your|great project/i.test(
+      asst
+    )
+  ) {
+    const user = history.find((h) => h.role === 'user' && (h.content || '').trim());
+    if (user?.content?.trim()) return user.content.trim();
+  }
+  return null;
+}
+
 /** Named cloud / orchestrator — enough to start an interview even on short prompts. */
 export function hasCloudOrOrchestratorSignal(prompt: string): boolean {
   return /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s)\b/i.test(
@@ -164,6 +229,9 @@ export function isFullStackPrompt(prompt: string): boolean {
 
   // "Deploy my app" and similar — interview first, never silent AWS/EKS generation
   if (isVagueStackPrompt(prompt)) return true;
+
+  // ".NET API" / "Java service" without a cloud still starts the interview
+  if (hasRuntimeAppSignal(prompt)) return true;
 
   // Short but explicit cloud/orchestrator prompts are still full-stack requests
   // e.g. "An Oracle OKE service", "A Node.js API on AWS EKS"
@@ -348,7 +416,13 @@ export function isConversationalPrompt(prompt: string): boolean {
   if (isOutOfScopeOpsPrompt(prompt)) return false;
   if (isJailbreakPrompt(prompt)) return false;
 
-  if (hasInfraSignal(prompt) || hasCloudOrOrchestratorSignal(prompt)) return false;
+  if (
+    hasInfraSignal(prompt) ||
+    hasCloudOrOrchestratorSignal(prompt) ||
+    hasRuntimeAppSignal(prompt)
+  ) {
+    return false;
+  }
   if (isVagueStackPrompt(prompt)) return false;
 
   const commandVerb =
