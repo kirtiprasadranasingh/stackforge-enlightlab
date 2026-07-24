@@ -1,0 +1,16 @@
+trigger:
+  - main
+pool:
+  vmImage: ubuntu-latest
+stages:
+  - stage: Build
+    jobs:
+      - job: build
+        steps:
+          - script: echo "Build image for azure"
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - job: deploy
+        steps:
+          - script: echo "Deploy to container-apps"

@@ -481,10 +481,28 @@ jobs:
     if: failure() && needs.deploy.outputs.prior_task_def_arn != ''
     needs: deploy
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - name: Rollback note
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: \${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: \${{ env.AWS_REGION }}
+      - name: Rollback ECS service to prior task definition
         run: |
-          echo "Rollback to prior task definition if deploy failed."
+          set -euo pipefail
+          PRIOR="\${{ needs.deploy.outputs.prior_task_def_arn }}"
+          echo "Rolling back to \$PRIOR"
+          aws ecs update-service \\
+            --cluster "\$ECS_CLUSTER_NAME" \\
+            --service "\$ECS_SERVICE_NAME" \\
+            --task-definition "\$PRIOR" \\
+            --force-new-deployment
+          aws ecs wait services-stable \\
+            --cluster "\$ECS_CLUSTER_NAME" \\
+            --services "\$ECS_SERVICE_NAME"
 `;
 
 const GHA_EKS_DEPLOY = `name: Deploy

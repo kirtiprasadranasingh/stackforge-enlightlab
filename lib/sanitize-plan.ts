@@ -243,6 +243,10 @@ function demoteUnconfirmedRuntime(plan: string, context: string): string {
     /^([-*]\s*)?Runtime Stub:\s*(Python|Go|Java|\.NET)[^\n]*/gim,
     '$1Runtime Stub: $2 (**scaffold default** — language was not confirmed in the interview)'
   );
+  out = out.replace(
+    /^([-*]\s*)?Language\/runtime stub:\s*Node\.js[^\n]*/gim,
+    '$1Language/runtime stub: Node.js (**scaffold default** — language was not confirmed in the interview)'
+  );
   out = prependAssumption(
     out,
     'Health-check **runtime was not confirmed** in the interview. Node.js (or the stub named in Stack summary) is a **default scaffold placeholder** — not a client-chosen language. Replace before production.'
@@ -337,6 +341,130 @@ function demoteUnconfirmedCi(plan: string, context: string): string {
 }
 
 /**
+ * QA #7 — Align plan prose with what Approve & Generate actually emits.
+ * Client access intent (public / HTTPS goal) can stay Confirmed; delivery claims
+ * that over-promise ACM TLS, Secrets Manager, or src/ layout must be demoted.
+ */
+function honestScaffoldDelivery(plan: string): string {
+  let out = plan;
+
+  // Architecture / Tools / Networking: do not promise ACM HTTPS as shipped.
+  out = out.replace(
+    /fronted by an Application Load Balancer \(ALB\) in public subnets for public access via HTTPS\.?/gi,
+    'fronted by an Application Load Balancer (ALB) in public subnets for public access (scaffold ships **HTTP:80** for validate-safe TLS-free Terraform; attach ACM + HTTPS:443 before production)'
+  );
+  out = out.replace(
+    /Handling public ingress, load balancing, and HTTPS termination\.?/gi,
+    'Handling public ingress and load balancing (HTTP:80 in the locked scaffold; HTTPS termination is a follow-up with ACM)'
+  );
+  out = out.replace(
+    /Set up ALB listener for HTTPS traffic and target groups for ECS services\.?/gi,
+    'Set up ALB listener (**HTTP:80** in locked scaffold) and target groups for ECS services; document ACM + HTTPS:443 as a production follow-up'
+  );
+  out = out.replace(
+    /AWS Application Load Balancer \(ALB\):\s*Internet-facing load balancer with a listener for HTTPS\.?/gi,
+    'AWS Application Load Balancer (ALB): Internet-facing load balancer with an **HTTP:80** listener in the locked scaffold (HTTPS/ACM follow-up)'
+  );
+
+  // TLS assumption bullets that claim managed cert is already wired
+  out = out.replace(
+    /^([-*]\s*)?TLS:\s*HTTPS will be terminated at the ALB using an AWS-managed certificate[^\n]*/gim,
+    '$1TLS: Client asked for public access on the default LB hostname. **Approve & Generate emits HTTP:80** so `terraform validate` stays certificate-free. Attach ACM (or equivalent) + HTTPS:443 before production — do not treat HTTP:80 as the product choice.'
+  );
+  out = out.replace(
+    /^([-*]\s*)?HTTPS will be (?:enabled|terminated)[^\n]*ACM[^\n]*/gim,
+    '$1HTTPS/ACM is a **production follow-up**. The locked scaffold uses an HTTP:80 listener so validate stays certificate-free.'
+  );
+
+  // Secrets Manager — locked ECS template uses random_password, not SM resources
+  out = out.replace(
+    /^([-*]\s*)?Secrets Management:\s*AWS Secrets Manager will be used[^\n]*/gim,
+    '$1Secrets: Locked scaffold uses Terraform `random_password` for the DB (state-backed). **AWS Secrets Manager wiring is a follow-up** — placeholders / SM resources are not required for the starting scaffold.'
+  );
+  out = out.replace(
+    /AWS Secrets Manager will be used for database credentials[^\n]*/gi,
+    'Database password is generated in Terraform (`random_password`) for the starting scaffold; wire AWS Secrets Manager before production'
+  );
+  out = out.replace(
+    /^([-*]\s*)?Secrets:\s*Database credentials will be managed in AWS Secrets Manager[^\n]*/gim,
+    '$1Secrets: Starting scaffold uses Terraform-managed DB password (`random_password`). Move credentials to AWS Secrets Manager before production.'
+  );
+  out = out.replace(
+    /^([-*]\s*)?[^\n]*placeholder secret resources[^\n]*Secrets Manager[^\n]*/gim,
+    '- Secrets: Terraform `random_password` for DB in the locked template; Secrets Manager integration is out of scope for the starting scaffold'
+  );
+  out = out.replace(
+    /^([-*]\s*)?AWS Secrets Manager placeholders[^\n]*/gim,
+    '$1DB password via Terraform `random_password` (Secrets Manager is a follow-up)'
+  );
+  out = out.replace(
+    /Terraform will create placeholder secret resources[^\n]*/gi,
+    'Terraform generates a DB password with `random_password` in the locked scaffold; Secrets Manager is a follow-up'
+  );
+
+  // Per-env dedicated RDS — keep as assumption, force honest wording
+  out = out.replace(
+    /^([-*]\s*)?Database Environments:\s*Each environment[^\n]*dedicated RDS[^\n]*/gim,
+    '$1Database environments: Separate **RDS per environment** is achieved by applying Terraform once per env with `environments/*.tfvars` (distinct `environment` name) — not a single apply that creates three databases, and not automatic Terraform workspaces unless you add a backend.'
+  );
+
+  // File manifest: locked Node stub is app/server.js, not src/app.js
+  out = out.replace(/^[-*]\s*src\/app\.js[^\n]*\n?/gim, '- app/server.js (minimal Node `/health` stub)\n');
+  out = out.replace(/^[-*]\s*src\/package\.json[^\n]*\n?/gim, '- app/package.json\n');
+  out = out.replace(/^[-*]\s*src\/package-lock\.json[^\n]*\n?/gim, '- app/package-lock.json\n');
+  out = out.replace(/^src\/(package(?:-lock)?\.json)\s*$/gim, 'app/$1');
+  out = out.replace(
+    /Emit Dockerfile and a minimal src\/app\.js[^\n]*/gi,
+    'Emit Dockerfile and a minimal `app/server.js` Node.js `/health` stub with package.json/package-lock.json'
+  );
+  out = out.replace(/\bsrc\/app\.js\b/g, 'app/server.js');
+  out = out.replace(/\bsrc\/package\.json\b/g, 'app/package.json');
+  out = out.replace(/\bsrc\/package-lock\.json\b/g, 'app/package-lock.json');
+
+  // Rollback — locked GHA captures prior ARN and runs update-service on failure
+  out = out.replace(
+    /Implement a rollback mechanism to revert to the previous stable task definition in case of deployment failure\. This will involve capturing the prior task definition ARN and updating the service to it upon job failure\.?/gi,
+    'On deploy failure, the GitHub Actions workflow captures the prior ECS task definition ARN and runs `aws ecs update-service` to roll back, then waits for service stability.'
+  );
+
+  // Always stamp scaffold-delivery honesty under Assumptions
+  out = prependAssumption(
+    out,
+    '**Scaffold delivery vs access intent:** "Public without a custom domain" is the confirmed access *goal*. Approve & Generate still emits an **HTTP:80** ALB listener so `terraform validate` stays certificate-free. Attach ACM + HTTPS:443 (or cloud equivalent) before production — do not treat HTTP:80 as the final product choice.'
+  );
+  out = prependAssumption(
+    out,
+    '**Secrets:** The locked AWS ECS template uses Terraform `random_password` for RDS — not AWS Secrets Manager resources. Wire Secrets Manager (or SSM) before production.'
+  );
+  out = prependAssumption(
+    out,
+    '**Per-environment databases:** Multi-env (dev/staging/prod) means separate `environments/*.tfvars` applies (or workspaces you add) — not three RDS instances from one apply unless you explicitly extend the module.'
+  );
+
+  // Implement stage must not re-label scaffold defaults as "confirmed choices"
+  out = out.replace(
+    /Apply confirmed choices\s*\(([^)]*)\)/gi,
+    (_m, inner: string) => {
+      const parts = String(inner)
+        .split(',')
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const kept = parts.filter(
+        (p) =>
+          !/postgres|mysql|mongodb|redis|cloud sql|node\.?js|python|golang|\.net|java|gitlab|github actions|jenkins|us-central|us-east|us-west|region/i.test(
+            p
+          )
+      );
+      const label =
+        kept.length > 0 ? kept.join(', ') : 'client cloud/compute overrides only';
+      return `Apply client overrides (${label}); treat runtime/DB/CI/region defaults as Assumptions — not confirmed interview answers`;
+    }
+  );
+
+  return out;
+}
+
+/**
  * Demote Spring Boot / ASP.NET from Confirmed when the client only chose Java / .NET,
  * and mark unasked runtime/DB as scaffold defaults (not Confirmed).
  */
@@ -353,17 +481,35 @@ export function sanitizePlanAgainstInterview(
   }
 
   if (interviewNamedDotNetOnly(ctx)) {
+    // Avoid nesting: replacing ASP.NET → ".NET (ASP.NET not confirmed)" re-matches
+    // the inner ASP.NET and becomes ".NET (.NET (ASP.NET not confirmed) not confirmed)".
     out = out.replace(
-      /\bASP\.NET(?:\s+Core)?\b(?!\s*\(not confirmed)/gi,
-      '.NET (ASP.NET not confirmed)'
+      /\.NET\s*\(\s*\.NET\s*\(\s*ASP\.NET[^)]*\)\s*not confirmed\s*\)/gi,
+      '.NET (ASP.NET **not** confirmed)'
+    );
+    out = out.replace(
+      /\bASP\.NET(?:\s+Core)?\b(?!\s*\([^)]*not\s+confirmed)/gi,
+      'ASP.NET (**not** confirmed)'
     );
     out = out.replace(
       /^([-*]\s*)?Runtime Stub:\s*Node\.js[^\n]*/gim,
-      '$1Runtime Stub: **.NET** (language only — ASP.NET not confirmed; Node `/health` stub is a build placeholder)'
+      '$1Runtime Stub: **.NET** (language only — ASP.NET **not** confirmed; Node `/health` stub is a build placeholder)'
     );
     out = out.replace(
       /^([-*]\s*)?Health-check service language:\s*\.NET[^\n]*/gim,
       '$1Health-check service language: **.NET** (framework not confirmed)'
+    );
+    // File manifesto must not invent a real .NET project when language-only
+    out = out.replace(/^[-*]\s*app\/Program\.cs[^\n]*\n?/gim, '');
+    out = out.replace(/^[-*]\s*app\/app\.csproj[^\n]*\n?/gim, '');
+    out = out.replace(/^[-*]\s*Program\.cs[^\n]*\n?/gim, '');
+    out = out.replace(
+      /Emit Dockerfile and a minimal \.NET health-check application stub[^\n]*/gi,
+      'Emit Dockerfile + minimal `/health` stub for the .NET **language** choice (ASP.NET not confirmed; Node/Python/Go stand-in with README honesty)'
+    );
+    out = out.replace(
+      /A minimal \.NET Kestrel HTTP server will be provided[^\n]*/gi,
+      'A minimal `/health` placeholder stub (Node/Python/Go) is emitted so image build passes — not a confirmed ASP.NET/Kestrel app'
     );
     out = prependAssumption(
       out,
@@ -374,6 +520,7 @@ export function sanitizePlanAgainstInterview(
   out = demoteUnconfirmedRuntime(out, ctx);
   out = demoteUnconfirmedDatabase(out, ctx);
   out = demoteUnconfirmedCi(out, ctx);
+  out = honestScaffoldDelivery(out);
 
   return out;
 }

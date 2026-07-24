@@ -147,6 +147,10 @@ function stripCompetingAppTrees(
       'main.py',
       'requirements.txt',
     ]);
+    // If root Go stub exists (Container Apps / Cloud Run), drop competing app/ Go tree
+    if (byPath.has('main.go') || byPath.has('go.mod')) {
+      drop(['app/main.go', 'app/go.mod', 'app/go.sum', 'app/Dockerfile']);
+    }
   } else if (runtime === 'node' || runtime === 'java' || runtime === 'dotnet') {
     drop([
       'app/main.py',
@@ -716,11 +720,15 @@ steps:
   }
 
   // Runtime stubs — swap when interview picks a language
+  // Cloud Run / Container Apps locked profiles require root main.go|main.py|Dockerfile.
+  // Do not put stubs under app/ for those (ZIP 34 dual-tree + false "missing main.go").
   const useAppLayout =
-    [...byPath.keys()].some(
+    presets.orchestrator !== 'container-apps' &&
+    presets.orchestrator !== 'cloud-run' &&
+    ([...byPath.keys()].some(
       (p) => p.startsWith('charts/') || p.startsWith('app/')
     ) ||
-    ['ecs', 'eks', 'gke', 'aks', 'oke'].includes(presets.orchestrator);
+      ['ecs', 'eks', 'gke', 'aks', 'oke'].includes(presets.orchestrator));
 
   if (options.runtime === 'python') {
     const pyMain = `from fastapi import FastAPI

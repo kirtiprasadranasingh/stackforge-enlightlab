@@ -1,0 +1,16 @@
+stages: [test, build, deploy]
+variables:
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+test:
+  stage: test
+  script: ["echo health-stub-ok"]
+build:
+  stage: build
+  script:
+    - echo "Build and push image for aws/ecs"
+deploy:
+  stage: deploy
+  script:
+    - echo "Deploy using AWS_REGION credentials"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

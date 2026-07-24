@@ -1,0 +1,70 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-west-2' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'stackforge' }}
+  ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME || 'stackforge' }}
+  ECS_SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME || 'stackforge' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      image_uri: ${{ steps.set-image-uri.outputs.image_uri }}
+      prior_task_def_arn: ${{ steps.get-current-service.outputs.current_task_definition_arn }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image URI output
+        id: set-image-uri
+        run: |
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        run: |
+          docker build -t "${{ steps.set-image-uri.outputs.image_uri }}" -f app/Dockerfile app
+          docker push "${{ steps.set-image-uri.outputs.image_uri }}"
+
+      - name: Capture prior task definition
+        id: get-current-service
+        run: |
+          CURRENT=$(aws ecs describe-services --cluster "$ECS_CLUSTER_NAME" --services "$ECS_SERVICE_NAME" --query 'services[0].taskDefinition' --output text)
+          echo "current_task_definition_arn=$CURRENT" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_SERVICE_NAME" \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_SERVICE_NAME"
+
+  scaffold_rollback:
+    if: failure() && needs.deploy.outputs.prior_task_def_arn != ''
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rollback note
+        run: |
+          echo "Rollback to prior task definition if deploy failed."

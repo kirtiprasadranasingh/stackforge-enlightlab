@@ -471,10 +471,17 @@ cloud/platform when the client overrode it.
   tfvars" under **Assumptions** (or say it is configurable / shared DB is an alternative) —
   never under Confirmed requirements unless they explicitly asked for separate DBs.
 - **"Public without a custom domain"** means internet-facing on the **default load-balancer
-  hostname**. Prefer **HTTPS on the ALB/LB default DNS** (ACM/managed cert when practical) or
-  state clearly in Assumptions whether TLS is on the default endpoint vs temporary plain HTTP —
-  never write "HTTP is assumed public" as if plain HTTP were a confirmed choice.
-- **"Public with secure HTTPS"** → custom domain + TLS is the confirmed path.
+  hostname**. Confirmed requirements may keep that access *intent*. Under Architecture /
+  Assumptions / Implement you **must** state that Approve & Generate emits an **HTTP:80**
+  listener so \`terraform validate\` stays certificate-free, and that ACM/HTTPS:443 is a
+  production follow-up — never claim the scaffold already wires managed TLS on the default DNS.
+- **"Public with secure HTTPS"** → custom domain + TLS is the confirmed path (still document
+  any validate-safe HTTP interim in Assumptions if the locked template cannot yet attach ACM).
+- Do **not** claim AWS Secrets Manager (or cloud vault) resources are created unless the locked
+  template actually includes them. Prefer: Terraform \`random_password\` / placeholders now;
+  Secrets Manager wiring is a follow-up.
+- File manifest for Node health stubs must use \`app/server.js\` (or root \`server.js\`) — not
+  invent \`src/app.js\` unless that path is truly emitted.
 - Always include **autoscaling** in Architecture / Resources / Implement stage: ECS →
   \`aws_appautoscaling_target\` + CPU (and optionally memory) target-tracking policies; EKS/GKE/AKS/OKE →
   HPA enabled by default. A DevOps/startup scaffold without scale-out is incomplete.
