@@ -61,6 +61,10 @@ variable "enable_database" {
   type    = bool
   default = false
 }
+variable "enable_redis" {
+  type    = bool
+  default = false
+}
 variable "db_engine" {
   type    = string
   default = "mysql"
