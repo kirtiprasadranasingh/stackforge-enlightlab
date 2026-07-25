@@ -1,0 +1,38 @@
+# OCI DevOps Build Specification
+# This defines the steps for building the Docker image and pushing it to OCIR.
+
+version: 1.0
+timeoutInSeconds: 600
+inputArtifacts:
+  - name: source_code
+    type: GIT
+    path: .
+outputArtifacts:
+  - name: docker_image_artifact
+    type: DOCKER_IMAGE
+    # Name should match the artifact definition in OCI DevOps project
+    # e.g., "node-app-image" (this is just a logical name, not the full OCIR path)
+    location: "${OCIR_REPOSITORY_URL}:${COMMIT_HASH}" # Placeholder, OCI DevOps will resolve
+steps:
+  - type: Command
+    name: "Login to OCIR"
+    command: |
+      docker login --username='${OCI_TENANCY_NAMESPACE}/${OCI_DEVOPS_USER}' --password='${OCI_DEVOPS_AUTH_TOKEN}' ${OCIR_REGION}.ocir.io
+      # For instance principal authentication:
+      # docker login -u 'ocid1.instance.oc1..aaaaaa...<instance_ocid>' --password 'auth_token' ${OCIR_REGION}.ocir.io
+      # Replace placeholders with actual OCI DevOps service principal or user credentials.
+      # Best practice is to use OCI Instance Principals or Resource Principals with Dynamic Groups.
+      # For OCI DevOps build runners, instance principal often auto-configures `docker login`.
+      # If using dynamic groups, policies must grant `manage repos` on the compartment.
+
+  - type: Build
+    name: "Build Docker Image"
+    command: |
+      docker build -t ${OCIR_REPOSITORY_URL}:${COMMIT_HASH} -f app/Dockerfile app/
+      # OCIR_REPOSITORY_URL will be an environment variable set by OCI DevOps based on an artifact definition.
+      # COMMIT_HASH can be derived from OCI DevOps build context variables.
+
+  - type: Command
+    name: "Push Docker Image to OCIR"
+    command: |
+      docker push ${OCIR_REPOSITORY_URL}:${COMMIT_HASH}

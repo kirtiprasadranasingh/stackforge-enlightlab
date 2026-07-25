@@ -322,6 +322,22 @@ export function ClarifyingInterview({
     return count + 1;
   }, 0);
 
+function mapRegionToNewCloud(currentRegion: string, allowed: string[]): string {
+  if (!allowed.length) return '';
+  if (allowed.includes(currentRegion)) return currentRegion;
+
+  const lower = currentRegion.toLowerCase();
+  if (/eu|europe|frankfurt|ireland|london/.test(lower)) {
+    const euro = allowed.find((r) => /eu|europe|frankfurt|west1/.test(r.toLowerCase()));
+    if (euro) return euro;
+  }
+  if (/ap|asia|mumbai|india|south1/.test(lower)) {
+    const asia = allowed.find((r) => /ap|asia|mumbai|india|south1/.test(r.toLowerCase()));
+    if (asia) return asia;
+  }
+  return allowed[0];
+}
+
   const clearStaleRegionIfNeeded = (nextCloudAnswer: string) => {
     const regionIndex = adaptedQuestions.findIndex((question) =>
       /^Where should we host it\?/i.test(question)
@@ -337,7 +353,8 @@ export function ClarifyingInterview({
     const allowed = parseClarifyingQuestion(regionQuestion).options;
     const currentRegion = answers[regionIndex];
     if (currentRegion && !allowed.includes(currentRegion)) {
-      onAnswer(regionIndex, '');
+      const fallback = mapRegionToNewCloud(currentRegion, allowed);
+      onAnswer(regionIndex, fallback);
     }
   };
 
