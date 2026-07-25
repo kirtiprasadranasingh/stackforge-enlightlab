@@ -254,6 +254,32 @@ function slimHistory(
     }));
 }
 
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = 2,
+  delayMs = 1000
+): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status >= 500 && attempt < retries) {
+        await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Network request failed');
+}
+
 export default function GeneratePage() {
   const [setupDone, setSetupDone] = useState(true);
   const [step, setStep] = useState<SetupStep>(1);
@@ -505,6 +531,9 @@ export default function GeneratePage() {
       );
       setError(null);
       setWarnings([]);
+      if (abortController.current) {
+        abortController.current.abort();
+      }
       abortController.current = new AbortController();
 
       if (phase === 'plan' || phase === 'clarify') {
@@ -607,32 +636,6 @@ export default function GeneratePage() {
             );
 
       try {
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  retries = 2,
-  delayMs = 1000
-): Promise<Response> {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, options);
-      if (res.status >= 500 && attempt < retries) {
-        await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
-        continue;
-      }
-      return res;
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') throw err;
-      if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error('Network request failed');
-}
-
         const response = await fetchWithRetry('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -677,7 +680,11 @@ async function fetchWithRetry(
         let buffer = '';
 
         while (true) {
-          const { done, value } = await reader.read();
+          const readPromise = reader.read();
+          const timeoutPromise = new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) =>
+            setTimeout(() => reject(new Error('Stream read timed out — connection lost')), 35000)
+          );
+          const { done, value } = await Promise.race([readPromise, timeoutPromise]);
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
