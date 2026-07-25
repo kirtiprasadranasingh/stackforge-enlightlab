@@ -607,7 +607,33 @@ export default function GeneratePage() {
             );
 
       try {
-        const response = await fetch('/api/generate', {
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = 2,
+  delayMs = 1000
+): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status >= 500 && attempt < retries) {
+        await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Network request failed');
+}
+
+        const response = await fetchWithRetry('/api/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
