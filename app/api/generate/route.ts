@@ -1178,6 +1178,11 @@ Always format your response by wrapping the chat reply in the following markers:
                   );
                   let code = 0;
                   let output = "";
+                  const pingTimer = setInterval(() => {
+                    try {
+                      controller.enqueue(sse({ type: 'ping' }));
+                    } catch {}
+                  }, 3000);
                   try {
                     const tfCache =
                       process.env.STACKFORGE_TF_PLUGIN_CACHE?.trim() ||
@@ -1202,6 +1207,7 @@ Always format your response by wrapping the chat reply in the following markers:
                     code = execError.code || 1;
                     output = (execError.stdout || '') + (execError.stderr || '');
                   } finally {
+                    clearInterval(pingTimer);
                     // Drop provider binaries under the scaffold temp after each attempt.
                     await fs
                       .rm(path.join(tempDir, 'terraform', '.terraform'), {

@@ -682,7 +682,7 @@ export default function GeneratePage() {
         while (true) {
           const readPromise = reader.read();
           const timeoutPromise = new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) =>
-            setTimeout(() => reject(new Error('Stream read timed out — connection lost')), 35000)
+            setTimeout(() => reject(new Error('Stream read timed out — connection lost')), 120000)
           );
           const { done, value } = await Promise.race([readPromise, timeoutPromise]);
           if (done) break;
@@ -714,6 +714,8 @@ export default function GeneratePage() {
             } catch {
               continue;
             }
+
+            if (event.type === 'ping') continue;
 
             if (event.type === 'error') {
               throw new Error(event.error || 'Generation failed');
