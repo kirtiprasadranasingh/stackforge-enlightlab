@@ -400,7 +400,32 @@ export function ClarifyingInterview({
     onAnswer(currentIndex, `${selectedOption}: ${option}`);
   };
 
+  const firstIncompleteStepIndex = steps.findIndex(({ question, sourceIndex }) => {
+    const answer = answers[sourceIndex]?.trim() || '';
+    if (!answer) return true;
+    const { options: qOptions } = parseClarifyingQuestion(question);
+    const parsed = parseStructuredAnswer(answer, qOptions);
+    if (parsed.selectedOption === 'Change the cloud') {
+      const compound = parseCompoundDetail(parsed.detail);
+      return !(compound.primary && compound.hosting);
+    }
+    if (
+      parsed.selectedOption === 'Change the hosting platform' ||
+      parsed.selectedOption === 'Change CI/CD' ||
+      parsed.selectedOption === 'Another service'
+    ) {
+      return !(parsed.detail && parsed.detail !== 'Other');
+    }
+    const val = validateInterviewAnswer(question, answer, qOptions);
+    return !val.ok;
+  });
+
   const goNext = () => {
+    if (firstIncompleteStepIndex !== -1 && firstIncompleteStepIndex !== stepIndex && isLast) {
+      setStep(firstIncompleteStepIndex);
+      return;
+    }
+
     if (!canContinue) return;
 
     if (isLast) {

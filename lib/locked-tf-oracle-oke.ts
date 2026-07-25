@@ -217,8 +217,18 @@ resource "oci_mysql_mysql_db_system" "main" {
 }
 `;
 
-export const TF_OKE_OUTPUTS = `output "oke_cluster_id" {
+export const TF_OKE_REDIS = `resource "oci_redis_redis_cluster" "main" {
+  count                  = var.enable_redis ? 1 : 0
+  compartment_id         = var.compartment_ocid
+  display_name           = "\${var.project_name}-\${var.environment}-redis"
+  node_count             = 2
+  node_memory_in_gbs     = 2
+  subnet_id              = oci_core_subnet.private.id
+  software_version       = "V7_0"
+}
+`;
 
+export const TF_OKE_OUTPUTS = `output "oke_cluster_id" {
   value = oci_containerengine_cluster.oke.id
 }
 output "oke_cluster_name" {

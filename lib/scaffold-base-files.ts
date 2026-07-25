@@ -85,6 +85,7 @@ import {
   TF_OKE_NETWORK,
   TF_OKE_CLUSTER,
   TF_OKE_DATABASE,
+  TF_OKE_REDIS,
   TF_OKE_IAM,
   TF_OKE_OUTPUTS,
 } from '@/lib/locked-tf-oracle-oke';
@@ -980,6 +981,7 @@ function oracleOkeBase(): BaseFileMap {
     'terraform/network.tf': TF_OKE_NETWORK,
     'terraform/oke.tf': TF_OKE_CLUSTER,
     'terraform/database.tf': TF_OKE_DATABASE,
+    'terraform/redis.tf': TF_OKE_REDIS,
     'terraform/iam.tf': TF_OKE_IAM,
     'terraform/outputs.tf': TF_OKE_OUTPUTS,
     'environments/staging.tfvars': `region = "ap-mumbai-1"\nenvironment = "staging"\n# compartment_ocid = "ocid1.compartment..."\n# tenancy_ocid = "ocid1.tenancy..."\n`,
@@ -1137,10 +1139,10 @@ export function mergeLockedBaseFiles(
       path === '.github/workflows/deploy.yml' &&
       Boolean(options.presets?.ci) &&
       options.presets!.ci !== 'github-actions';
-    // Do not force-lock Node stubs when interview chose Go/Python (ZIP 38 dual tree).
+    // Do not force-lock Node stubs when interview chose Go/Python/Dotnet/Java.
     const runtime = options.scaffoldOptions?.runtime;
     const skipWrongRuntimeStub =
-      (runtime === 'go' || runtime === 'python') &&
+      (runtime === 'go' || runtime === 'python' || runtime === 'dotnet' || runtime === 'java') &&
       (path === 'app/server.js' ||
         path === 'app/package.json' ||
         path === 'app/package-lock.json' ||
@@ -1153,7 +1155,7 @@ export function mergeLockedBaseFiles(
       (!terraformOnly || isTf) &&
       !skipGhaForce &&
       !skipWrongRuntimeStub;
-    const shouldFill = missing.includes(path) || (!exists && fillMissing);
+    const shouldFill = (missing.includes(path) || (!exists && fillMissing)) && !skipWrongRuntimeStub;
     const existing = byPath.get(path);
     const emptyExisting = exists && !(existing?.content || '').trim();
 
