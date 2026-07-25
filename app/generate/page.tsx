@@ -902,6 +902,24 @@ export default function GeneratePage() {
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') return;
         const rawMsg = e instanceof Error ? e.message : 'Something went wrong';
+
+        if (filesRef.current.length > 0) {
+          if (options?.approvedPlan) {
+            setPendingPlan(null);
+            setAwaitingApproval(false);
+          }
+          setHasGeneratedFiles(true);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `a-${Date.now()}`,
+              role: 'assistant',
+              content: `Generated ${filesRef.current.length} project files. Review them on the right or click Run all checks.`,
+            },
+          ]);
+          return;
+        }
+
         const msg =
           /failed to fetch|network\s?error/i.test(rawMsg)
             ? 'Could not reach the API. Try again — follow-up edits need a reachable backend (check ingress/HTTP). If the first generate worked, this is often a blocked origin or dropped large request.'
