@@ -747,26 +747,49 @@ function honestScaffoldDelivery(plan: string, context: string): string {
 }
 
 /**
- * When OCI DevOps appears with AWS ECR/EKS, rewrite OCIR → ECR and note consistency.
+ * When OCI DevOps appears with AWS ECR/EKS (specifically on AWS cloud), rewrite OCIR → ECR.
+ * BUT if the target cloud is Oracle, purge any accidental AWS ECR/EKS mentions and keep OCIR clean.
  */
 function stripCrossCloudCiRegistryConflicts(
   plan: string,
   context: string
 ): string {
   const blob = `${context}\n${plan}`;
+  const isOracleCloud =
+    /Cloud provider(?:\s*\(client override\))?:\s*Oracle/i.test(context) ||
+    /Cloud provider:\s*Oracle/i.test(blob) ||
+    /\boracle cloud infrastructure\b/i.test(context);
+  const isAwsCloud =
+    /Cloud provider(?:\s*\(client override\))?:\s*AWS/i.test(context) ||
+    /Cloud provider:\s*AWS/i.test(context);
+
+  let out = plan;
+
+  if (isOracleCloud && !isAwsCloud) {
+    // Purge AWS / Azure leakage from Oracle OCI plans
+    out = out.replace(/Oracle Container Registry\s*\(ECR\)/gi, 'Oracle Container Registry (OCIR)');
+    out = out.replace(/Oracle Container Registry\s*\(AWS ECR\)/gi, 'Oracle Container Registry (OCIR)');
+    out = out.replace(/Amazon Elastic Container Registry\s*\(ECR\)/gi, 'Oracle Container Registry (OCIR)');
+    out = out.replace(/Amazon ECR/gi, 'Oracle Container Registry (OCIR)');
+    out = out.replace(/Azure Key Vault/gi, 'OCI Vault');
+    out = out.replace(/AWS Secrets Manager/gi, 'OCI Vault');
+    out = out.replace(/Locked AKS\/ACA scaffold/gi, 'Locked OKE scaffold');
+    out = out.replace(/CI\/registry consistency:\s*OCI DevOps was selected with an AWS compute\/registry stack[^\n]*/gi, '');
+    return out;
+  }
+
   const hasOciDevops = /\bOCI DevOps\b/i.test(blob);
   const hasAwsRegistryOrCompute =
     /\b(ECR|Amazon ECR|EKS|Amazon EKS|aws_ecr)\b/i.test(blob);
-  if (!hasOciDevops || !hasAwsRegistryOrCompute) return plan;
+  if (!hasOciDevops || !hasAwsRegistryOrCompute || !isAwsCloud) return out;
 
-  let out = plan;
   out = out.replace(/\bOCIR\b/g, 'ECR');
   out = out.replace(
-    /Oracle Cloud Infrastructure Registry\s*\(OCIR\)/gi,
+    /Oracle Container Registry\s*\(OCIR\)/gi,
     'Amazon Elastic Container Registry (ECR)'
   );
   out = out.replace(
-    /Oracle Cloud Infrastructure Registry/gi,
+    /Oracle Container Registry/gi,
     'Amazon Elastic Container Registry (ECR)'
   );
   out = out.replace(
@@ -777,6 +800,7 @@ function stripCrossCloudCiRegistryConflicts(
     out,
     '**CI/registry consistency:** OCI DevOps was selected with an AWS compute/registry stack (ECR/EKS). Image push targets **Amazon ECR** (not OCIR) so the pipeline matches Terraform. Confirm OCI→AWS credentials / OIDC before production.'
   );
+
   return out;
 }
 
@@ -812,9 +836,20 @@ export function sanitizePlanAgainstInterview(
       '$1Runtime Stub: **.NET** (language only — ASP.NET **not** confirmed; Node `/health` stub is a build placeholder)'
     );
     out = out.replace(
-      /^([-*]\s*)?Health-check service language:\s*\.NET[^\n]*/gim,
+      /^([-*]\s*)?Health-check service language:\s*\.NET(?!\s*\([^)]*not\s+confirmed\))[^\n]*/gim,
       '$1Health-check service language: **.NET** (framework not confirmed)'
     );
+
+    // Clean up duplicate consecutive (not confirmed) or (framework not confirmed) strings
+    out = out.replace(
+      /\((?:framework|ASP\.NET)\s+not\s+confirmed\)\s*\((?:framework|ASP\.NET)\s+not\s+confirmed\)/gi,
+      '(framework not confirmed)'
+    );
+    out = out.replace(
+      /\(not confirmed\)\s*\(not confirmed\)/gi,
+      '(not confirmed)'
+    );
+
     // File manifesto must not invent a real .NET project when language-only
     out = out.replace(/^[-*]\s*app\/Program\.cs[^\n]*\n?/gim, '');
     out = out.replace(/^[-*]\s*app\/app\.csproj[^\n]*\n?/gim, '');
@@ -827,10 +862,12 @@ export function sanitizePlanAgainstInterview(
       /A minimal \.NET Kestrel HTTP server will be provided[^\n]*/gi,
       'A minimal `/health` placeholder stub (Node/Python/Go) is emitted so image build passes — not a confirmed ASP.NET/Kestrel app'
     );
-    out = prependAssumption(
-      out,
-      '.NET was selected as the **language** only — ASP.NET was not chosen; any stub is a Node/Python/Go `/health` placeholder, not a confirmed framework.'
-    );
+    if (!out.includes('.NET was selected as the **language** only')) {
+      out = prependAssumption(
+        out,
+        '.NET was selected as the **language** only — ASP.NET was not chosen; any stub is a Node/Python/Go `/health` placeholder, not a confirmed framework.'
+      );
+    }
   }
 
   out = demoteUnconfirmedRuntime(out, ctx);

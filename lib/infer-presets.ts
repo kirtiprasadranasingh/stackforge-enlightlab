@@ -4,7 +4,7 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
   const out: Partial<Presets> = {};
 
   const cloudMatch = prompt.match(
-    /cloud provider\s*\(client override\)\s*:\s*([^.\n]+)/i
+    /cloud provider(?:\s*\(client override\))?\s*:\s*([^.\n]+)/i
   );
   if (cloudMatch) {
     const c = cloudMatch[1].toLowerCase();
@@ -18,25 +18,25 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
   // or "Oracle Cloud Infrastructure. Hosting platform (client override): OKE..."
   if (!out.cloud) {
     if (
-      /microsoft\s+azure[\s\S]{0,120}hosting platform\s*\(client override\)/i.test(
+      /microsoft\s+azure[\s\S]{0,120}hosting platform(?:\s*\(client override\))?/i.test(
         prompt
       ) ||
       /\bmicrosoft\s+azure\b[\s\S]{0,80}\baks\b/i.test(prompt)
     ) {
       out.cloud = 'azure';
     } else if (
-      /oracle cloud infrastructure[\s\S]{0,200}hosting platform\s*\(client override\)/i.test(
+      /oracle cloud infrastructure[\s\S]{0,200}hosting platform(?:\s*\(client override\))?/i.test(
         prompt
       )
     ) {
       out.cloud = 'oracle';
     } else if (
-      /google cloud[\s\S]{0,120}hosting platform\s*\(client override\)/i.test(prompt)
+      /google cloud[\s\S]{0,120}hosting platform(?:\s*\(client override\))?/i.test(prompt)
     ) {
       out.cloud = 'gcp';
     } else if (
-      /\baws\b[\s\S]{0,120}hosting platform\s*\(client override\)/i.test(prompt) ||
-      /amazon web services[\s\S]{0,120}hosting platform\s*\(client override\)/i.test(
+      /\baws\b[\s\S]{0,120}hosting platform(?:\s*\(client override\))?/i.test(prompt) ||
+      /amazon web services[\s\S]{0,120}hosting platform(?:\s*\(client override\))?/i.test(
         prompt
       )
     ) {
@@ -45,7 +45,7 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
   }
 
   const hostingMatch = prompt.match(
-    /hosting platform\s*\(client override\)\s*:\s*([^.\n]+)/i
+    /hosting platform(?:\s*\(client override\))?\s*:\s*([^.\n]+)/i
   );
   if (hostingMatch) {
     const h = hostingMatch[1].toLowerCase();
@@ -73,7 +73,7 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
     }
   }
 
-  const ciMatch = prompt.match(/ci\/cd system\s*\(client override\)\s*:\s*([^.\n]+)/i);
+  const ciMatch = prompt.match(/ci\/cd system(?:\s*\(client override\))?\s*:\s*([^.\n]+)/i);
   if (ciMatch) {
     const ci = ciMatch[1].toLowerCase();
     if (/azure devops|azure pipelines/.test(ci)) out.ci = 'azure-devops';
@@ -87,7 +87,7 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
   }
 
   if (
-    /oracle cloud infrastructure[\s\S]{0,200}hosting platform\s*\(client override\)\s*:[^.\n]*(oke|oracle kubernetes)/i.test(
+    /oracle cloud infrastructure[\s\S]{0,200}hosting platform(?:\s*\(client override\))?\s*:[^.\n]*(oke|oracle kubernetes)/i.test(
       prompt
     )
   ) {
@@ -96,7 +96,7 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
   }
 
   if (
-    /microsoft\s+azure[\s\S]{0,200}hosting platform\s*\(client override\)\s*:[^.\n]*(aks|azure kubernetes)/i.test(
+    /microsoft\s+azure[\s\S]{0,200}hosting platform(?:\s*\(client override\))?\s*:[^.\n]*(aks|azure kubernetes)/i.test(
       prompt
     )
   ) {
@@ -221,7 +221,7 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
 
   // Explicit AWS/ECS (or EKS) hosting always beats CI-native cloud pairing.
   // Fixes: AWS + Azure DevOps wrongly becoming Azure Container Apps (ZIP 37 / QA #24).
-  if (mentionsAws && (/\becs\b/.test(t) || /\bfargate\b/.test(t) || /\beks\b/.test(t))) {
+  if (!overrides.cloud && mentionsAws && (/\becs\b/.test(t) || /\bfargate\b/.test(t) || /\beks\b/.test(t))) {
     cloud = 'aws';
     if (/\becs\b/.test(t) || /\bfargate\b/.test(t)) orchestrator = 'ecs';
     else if (/\beks\b/.test(t)) orchestrator = 'eks';

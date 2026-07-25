@@ -1029,12 +1029,223 @@ CMD ["/app"]
     }
   }
 
-  // Node runtime — also used as validate-safe stand-in for Java / .NET (language only)
-  if (
-    options.runtime === 'node' ||
-    options.runtime === 'java' ||
-    options.runtime === 'dotnet'
-  ) {
+  if (options.runtime === 'dotnet') {
+    const netProgram = `var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+
+app.MapGet("/", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+app.Run();
+`;
+    const netCsproj = `<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
+`;
+    const netDocker = `# hadolint ignore=DL3008
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY app.csproj ./
+RUN dotnet restore
+COPY . .
+RUN dotnet publish -c Release -o /app/publish
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+WORKDIR /app
+COPY --from=build /app/publish .
+ENV PORT=8080
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+USER 1000
+ENTRYPOINT ["dotnet", "app.dll"]
+`;
+    if (useAppLayout) {
+      set(byPath, 'app/Program.cs', netProgram);
+      set(byPath, 'app/app.csproj', netCsproj);
+      set(byPath, 'app/Dockerfile', netDocker);
+      for (const p of [
+        'app/server.js',
+        'app/package.json',
+        'app/package-lock.json',
+        'app/main.py',
+        'app/requirements.txt',
+        'app/main.go',
+        'app/go.mod',
+        'app/go.sum',
+        'main.py',
+        'requirements.txt',
+        'main.go',
+        'go.mod',
+        'go.sum',
+        'server.js',
+        'package.json',
+        'package-lock.json',
+        'Dockerfile',
+      ]) {
+        byPath.delete(p);
+      }
+    } else {
+      set(byPath, 'Program.cs', netProgram);
+      set(byPath, 'app.csproj', netCsproj);
+      set(byPath, 'Dockerfile', netDocker);
+      for (const p of [
+        'main.py',
+        'requirements.txt',
+        'main.go',
+        'go.mod',
+        'go.sum',
+        'server.js',
+        'package.json',
+        'package-lock.json',
+        'app/server.js',
+        'app/package.json',
+        'app/package-lock.json',
+        'app/main.py',
+        'app/requirements.txt',
+        'app/main.go',
+        'app/go.mod',
+        'app/go.sum',
+        'app/Dockerfile',
+      ]) {
+        byPath.delete(p);
+      }
+    }
+  }
+
+  if (options.runtime === 'java') {
+    const javaApp = `package com.example.health;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@SpringBootApplication
+@RestController
+public class Application {
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+
+    @GetMapping("/")
+    public String root() {
+        return "{\\"status\\":\\"ok\\"}";
+    }
+
+    @GetMapping("/health")
+    public String health() {
+        return "{\\"status\\":\\"ok\\"}";
+    }
+}
+`;
+    const javaPom = `<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>health-stub</artifactId>
+    <version>1.0.0</version>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.4</version>
+        <relativePath/>
+    </parent>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+`;
+    const javaDocker = `# hadolint ignore=DL3008
+FROM maven:3.9-eclipse-temurin-17 AS build
+WORKDIR /src
+COPY pom.xml .
+RUN mvn dependency:go-offline
+COPY src ./src
+RUN mvn package -DskipTests
+
+FROM eclipse-temurin:17-jre
+WORKDIR /app
+COPY --from=build /src/target/*.jar app.jar
+ENV PORT=8080
+EXPOSE 8080
+USER 1000
+CMD ["java", "-jar", "app.jar"]
+`;
+    if (useAppLayout) {
+      set(byPath, 'app/src/main/java/com/example/health/Application.java', javaApp);
+      set(byPath, 'app/pom.xml', javaPom);
+      set(byPath, 'app/Dockerfile', javaDocker);
+      for (const p of [
+        'app/server.js',
+        'app/package.json',
+        'app/package-lock.json',
+        'app/main.py',
+        'app/requirements.txt',
+        'app/main.go',
+        'app/go.mod',
+        'app/go.sum',
+        'main.py',
+        'requirements.txt',
+        'main.go',
+        'go.mod',
+        'go.sum',
+        'server.js',
+        'package.json',
+        'package-lock.json',
+        'Dockerfile',
+      ]) {
+        byPath.delete(p);
+      }
+    } else {
+      set(byPath, 'src/main/java/com/example/health/Application.java', javaApp);
+      set(byPath, 'pom.xml', javaPom);
+      set(byPath, 'Dockerfile', javaDocker);
+      for (const p of [
+        'main.py',
+        'requirements.txt',
+        'main.go',
+        'go.mod',
+        'go.sum',
+        'server.js',
+        'package.json',
+        'package-lock.json',
+        'app/server.js',
+        'app/package.json',
+        'app/package-lock.json',
+        'app/main.py',
+        'app/requirements.txt',
+        'app/main.go',
+        'app/go.mod',
+        'app/go.sum',
+        'app/Dockerfile',
+      ]) {
+        byPath.delete(p);
+      }
+    }
+  }
+
+  // Node runtime
+  if (options.runtime === 'node') {
     const serverJs = `const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
