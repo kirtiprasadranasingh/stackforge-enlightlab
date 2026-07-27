@@ -402,8 +402,63 @@ function planOrContextIsAzure(plan: string, context: string): boolean {
   );
 }
 
-/** Drop AWS ECS/ALB/ACM/SSM/Secrets Manager assumption bullets from non-AWS plans. */
-function stripAwsAssumptionLeakage(plan: string): string {
+/** Normalize invalid AWS/Azure region strings into proper GCP regions when cloud is GCP. */
+function sanitizeGcpRegion(plan: string, context: string): string {
+  const blob = `${context}\n${plan}`;
+  const isGcp = /Cloud provider:\s*Google/i.test(blob) || /Google Cloud/i.test(blob) || /\bGCP\b/i.test(blob);
+  if (!isGcp) return plan;
+
+  let out = plan;
+  out = out.replace(/\beu-frankfurt-1\b/gi, 'europe-west3');
+  out = out.replace(/\beu-central-1\b/gi, 'europe-west3');
+  out = out.replace(/\beu-west-1\b/gi, 'europe-west1');
+  out = out.replace(/\bwesteurope\b/gi, 'europe-west1');
+  out = out.replace(/\bus-east-1\b/gi, 'us-central1');
+  out = out.replace(/\bus-west-2\b/gi, 'us-central1');
+  out = out.replace(/\beastus\b/gi, 'us-central1');
+  out = out.replace(/\bap-mumbai-1\b/gi, 'asia-south1');
+  out = out.replace(/\bap-south-1\b/gi, 'asia-south1');
+  out = out.replace(/\bcentralindia\b/gi, 'asia-south1');
+  out = out.replace(/\bus-ashburn-1\b/gi, 'us-east4');
+  return out;
+}
+
+/** Purge database references from assumptions and stack summary when No Database is selected. */
+function sanitizeNoDatabase(plan: string, context: string): string {
+  const blob = `${context}\n${plan}`;
+  const noDb = /No data service|No database|without a database|database:\s*none/i.test(blob);
+  if (!noDb) return plan;
+
+  let out = plan;
+  out = out.replace(/^[-*]?\s*Database:\s*(?:PostgreSQL|MySQL|Redis|MongoDB)[^\n]*/gim, '- Database: No database');
+  out = out.replace(/Data [Ss]ervice:\s*(?:PostgreSQL|MySQL|Redis|MongoDB)/gi, 'Data Service: No database');
+  out = out.replace(/^[-*]\s*[^\n]*Per-environment databases[^\n]*\n?/gim, '');
+  out = out.replace(/^[-*]\s*[^\n]*Secrets:[^\n]*DB connection strings[^\n]*\n?/gim, '');
+  out = out.replace(/^[-*]\s*[^\n]*database credentials[^\n]*\n?/gim, '');
+  out = out.replace(/^[-*]\s*[^\n]*PostgreSQL instance[^\n]*\n?/gim, '');
+  out = out.replace(/^[-*]\s*[^\n]*Redis cache instance[^\n]*\n?/gim, '');
+  return out;
+}
+
+/** Keep MongoDB as confirmed data service and avoid demoting to PostgreSQL. */
+function sanitizeMongoDB(plan: string, context: string): string {
+  const blob = `${context}\n${plan}`;
+  const isMongo = /\bMongoDB\b/i.test(blob);
+  if (!isMongo) return plan;
+
+  let out = plan;
+  out = out.replace(/MongoDB requested,\s*will scaffold a PostgreSQL stand-in[^\n]*/gi, 'MongoDB selected (Cosmos DB API / DocumentDB / MongoDB container)');
+  out = out.replace(/scaffold a PostgreSQL stand-in/gi, 'scaffold a MongoDB-compatible service');
+  return out;
+}
+
+/** Drop cross-cloud artifacts (AWS/Azure/GCP/OCI) from non-matching architectures. */
+function stripAwsAssumptionLeakage(plan: string, context: string): string {
+  const blob = `${context}\n${plan}`;
+  const isGcp = /Google Cloud|\bGCP\b/i.test(blob);
+  const isAzure = /Microsoft Azure|\bAzure\b/i.test(blob);
+  const isOracle = /Oracle Cloud|\bOCI\b/i.test(blob);
+
   let out = plan
     .split('\n')
     .filter((line) => {
@@ -414,23 +469,43 @@ function stripAwsAssumptionLeakage(plan: string): string {
           t
         )
       ) {
+        if (!/AWS|Amazon/i.test(blob) || isGcp || isAzure || isOracle) return false;
+      }
+      if (isGcp && /Azure Key Vault|AWS Secrets Manager|HTTP ingress for AKS|OCI Vault/i.test(t)) {
+        return false;
+      }
+      if (isAzure && /AWS Secrets Manager|OCI Vault|Amazon EKS|Amazon ECR/i.test(t)) {
+        return false;
+      }
+      if (isOracle && /AWS Secrets Manager|Azure Key Vault|Amazon EKS|Azure Container Apps/i.test(t)) {
         return false;
       }
       if (
         /Scaffold delivery vs access intent/i.test(t) &&
         /HTTP:80|ALB|ACM|Public without a custom domain/i.test(t)
       ) {
-        return false;
+        if (isGcp || isAzure || isOracle) return false;
       }
       if (
         /Per-environment databases/i.test(t) &&
         /RDS instances/i.test(t)
       ) {
-        return false;
+        if (isGcp || isAzure || isOracle) return false;
       }
       return true;
     })
     .join('\n');
+
+  // Fix CI assumptions leakage (e.g. Jenkins/GitLab CI marked as not confirmed or OCI DevOps selected)
+  if (/Jenkins/i.test(blob)) {
+    out = out.replace(/^[-*]?\s*[^\n]*OCI DevOps was selected[^\n]*\n?/gim, '');
+    out = out.replace(/^[-*]?\s*[^\n]*CI\/CD was not confirmed[^\n]*\n?/gim, '');
+  }
+  if (/GitLab CI/i.test(blob)) {
+    out = out.replace(/^[-*]?\s*[^\n]*OCI DevOps was selected[^\n]*\n?/gim, '');
+    out = out.replace(/^[-*]?\s*[^\n]*CI\/CD was not confirmed[^\n]*\n?/gim, '');
+  }
+
   // Model sometimes copies the old sanitizer wording into Implement stage
   out = out.replace(
     /Apply client overrides\s*\([^)]*\);\s*treat runtime\/DB\/CI\/region defaults as Assumptions[^\n]*/gi,
@@ -875,6 +950,9 @@ export function sanitizePlanAgainstInterview(
   out = demoteUnconfirmedCi(out, ctx);
   out = honestScaffoldDelivery(out, ctx);
   out = stripCrossCloudCiRegistryConflicts(out, ctx);
+  out = sanitizeGcpRegion(out, ctx);
+  out = sanitizeNoDatabase(out, ctx);
+  out = sanitizeMongoDB(out, ctx);
 
   return out;
 }
