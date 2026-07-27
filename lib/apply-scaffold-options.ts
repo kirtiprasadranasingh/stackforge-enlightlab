@@ -4,6 +4,7 @@
  */
 import type { GeneratedFile, Presets, CIProvider } from '@/types';
 import { getLanguageFromPath } from '@/lib/utils';
+import { validateRegionForCloud } from '@/lib/clarifying-questions';
 import {
   type ScaffoldOptions,
   scaleToReplicas,
@@ -586,15 +587,20 @@ export function applyScaffoldOptions(
   );
   const regionKey = regionVarName(presets.cloud);
   const replicas = scaleToReplicas(options.scale);
+  const regionCheck = validateRegionForCloud(options.region, presets.cloud);
+  const effectiveRegion = regionCheck.validatedRegion;
+  if (!regionCheck.isValid && regionCheck.feedback) {
+    notes.push(regionCheck.feedback);
+  }
 
   // Patch terraform variables defaults
   for (const [p, f] of [...byPath.entries()]) {
     if (!p.endsWith('variables.tf')) continue;
     let c = f.content;
-    c = patchDefault(c, regionKey, options.region);
-    c = patchDefault(c, 'aws_region', options.region);
-    c = patchDefault(c, 'region', options.region);
-    c = patchDefault(c, 'location', options.region);
+    c = patchDefault(c, regionKey, effectiveRegion);
+    c = patchDefault(c, 'aws_region', effectiveRegion);
+    c = patchDefault(c, 'region', effectiveRegion);
+    c = patchDefault(c, 'location', effectiveRegion);
     c = patchDefault(c, 'desired_count', replicas.desiredCount);
     c = patchDefault(c, 'node_desired_size', replicas.desiredCount);
     c = patchDefault(c, 'node_min_size', replicas.minReplicas);
@@ -642,7 +648,7 @@ export function applyScaffoldOptions(
   }
   for (const env of options.environments) {
     const lines = [
-      `${regionKey} = "${options.region}"`,
+      `${regionKey} = "${effectiveRegion}"`,
       `environment  = "${env}"`,
       `project_name = "stackforge"`,
     ];

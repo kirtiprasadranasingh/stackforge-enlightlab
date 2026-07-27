@@ -83,6 +83,88 @@ export const HOSTING_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
   oracle: ['Oracle Kubernetes Engine (OKE)'],
 };
 
+/** Validate whether a region string is valid for the selected cloud provider. */
+export function validateRegionForCloud(
+  region: string,
+  cloud: Presets['cloud']
+): {
+  isValid: boolean;
+  validatedRegion: string;
+  feedback?: string;
+} {
+  if (!region?.trim()) return { isValid: true, validatedRegion: REGION_OPTIONS_BY_CLOUD[cloud][0] };
+  const r = region.trim().toLowerCase();
+
+  if (cloud === 'gcp') {
+    const isGcpSyntax = /^(us|europe|asia|northamerica|southamerica|australia|me)-(central|east|west|south|northeast|southeast)\d+$/.test(r);
+    if (isGcpSyntax) {
+      return { isValid: true, validatedRegion: r };
+    }
+    let mapped = 'us-central1';
+    if (/frankfurt|eu-central|eu-frankfurt/.test(r)) mapped = 'europe-west3';
+    else if (/europe|eu-west|westeurope/.test(r)) mapped = 'europe-west1';
+    else if (/mumbai|india|ap-south|ap-mumbai|asia-south/.test(r)) mapped = 'asia-south1';
+    else if (/ashburn|us-east/.test(r)) mapped = 'us-east4';
+
+    return {
+      isValid: false,
+      validatedRegion: mapped,
+      feedback: `'${region}' is not a valid Google Cloud region (GCP regions use syntax like europe-west3, us-central1, asia-south1). Validated and mapped to '${mapped}' for Google Cloud.`,
+    };
+  }
+
+  if (cloud === 'azure') {
+    const isAzureSyntax = /^(eastus\d?|westus\d?|centralus|westeurope|northeurope|centralindia|southindia|southeastasia|japaneast|brazilsouth|[a-z]+)$/.test(r) && !/-/.test(r);
+    if (isAzureSyntax) {
+      return { isValid: true, validatedRegion: r };
+    }
+    let mapped = 'eastus';
+    if (/frankfurt|europe|west-1|westeurope/.test(r)) mapped = 'westeurope';
+    else if (/mumbai|india|ap-south|ap-mumbai|centralindia/.test(r)) mapped = 'centralindia';
+
+    return {
+      isValid: false,
+      validatedRegion: mapped,
+      feedback: `'${region}' is not a valid Azure region (Azure regions do not use hyphens, e.g. westeurope, eastus, centralindia). Validated and mapped to '${mapped}' for Azure.`,
+    };
+  }
+
+  if (cloud === 'aws') {
+    const isAwsSyntax = /^(us|eu|ap|sa|ca|me|af)-(east|west|south|north|central)-\d+$/.test(r);
+    if (isAwsSyntax) {
+      return { isValid: true, validatedRegion: r };
+    }
+    let mapped = 'us-east-1';
+    if (/frankfurt|eu-central|westeurope|europe/.test(r)) mapped = 'eu-central-1';
+    else if (/eu-west/.test(r)) mapped = 'eu-west-1';
+    else if (/mumbai|india|ap-mumbai|centralindia/.test(r)) mapped = 'ap-south-1';
+
+    return {
+      isValid: false,
+      validatedRegion: mapped,
+      feedback: `'${region}' is not a valid AWS region (AWS regions use syntax like us-east-1, eu-west-1, ap-south-1). Validated and mapped to '${mapped}' for AWS.`,
+    };
+  }
+
+  if (cloud === 'oracle') {
+    const isOracleSyntax = /^(ap|us|eu|uk|sa|me|af)-[a-z]+-\d+$/.test(r);
+    if (isOracleSyntax) {
+      return { isValid: true, validatedRegion: r };
+    }
+    let mapped = 'ap-mumbai-1';
+    if (/frankfurt|europe|westeurope/.test(r)) mapped = 'eu-frankfurt-1';
+    else if (/ashburn|us-east|eastus/.test(r)) mapped = 'us-ashburn-1';
+
+    return {
+      isValid: false,
+      validatedRegion: mapped,
+      feedback: `'${region}' is not a valid Oracle OCI region (Oracle OCI regions use syntax like ap-mumbai-1, us-ashburn-1, eu-frankfurt-1). Validated and mapped to '${mapped}' for Oracle Cloud.`,
+    };
+  }
+
+  return { isValid: true, validatedRegion: r };
+}
+
 /** Parse "Question text? (options: A / B / C)" into prompt + options. */
 export function parseClarifyingQuestion(raw: string): {
   prompt: string;
