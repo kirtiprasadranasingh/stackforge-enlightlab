@@ -452,45 +452,49 @@ function sanitizeMongoDB(plan: string, context: string): string {
   return out;
 }
 
-/** Drop cross-cloud artifacts (AWS/Azure/GCP/OCI) from non-matching architectures. */
+/** Drop cross-cloud artifacts (AWS/Azure/GCP/OCI) from non-matching architectures (Akruti Step 4 Rules). */
 function stripAwsAssumptionLeakage(plan: string, context: string): string {
   const blob = `${context}\n${plan}`;
-  const isGcp = /Google Cloud|\bGCP\b/i.test(blob);
-  const isAzure = /Microsoft Azure|\bAzure\b/i.test(blob);
-  const isOracle = /Oracle Cloud|\bOCI\b/i.test(blob);
+  const isGcp = /Google Cloud|\bGCP\b|google_compute_|google_container_/i.test(blob);
+  const isAzure = /Microsoft Azure|\bAzure\b|azurerm_/i.test(blob);
+  const isOracle = /Oracle Cloud|\bOCI\b|oci_core_|oci_identity_/i.test(blob);
+  const isAws = /AWS|Amazon|\baws_/i.test(blob) && !isGcp && !isAzure && !isOracle;
 
   let out = plan
     .split('\n')
     .filter((line) => {
       const t = line.trim();
-      // Match with or without markdown bullets (UI sometimes drops leading "- ")
+      // Match with or without markdown bullets
       if (
         /locked AWS ECS template|AWS Secrets Manager|Secrets Manager \(or SSM\)|HTTP:80 ALB|Attach ACM \+ HTTPS|ALB listener so `?terraform validate|not three RDS instances|Wire Secrets Manager/i.test(
           t
         )
       ) {
-        if (!/AWS|Amazon/i.test(blob) || isGcp || isAzure || isOracle) return false;
+        if (!isAws) return false;
       }
-      if (isGcp && /Azure Key Vault|AWS Secrets Manager|HTTP ingress for AKS|OCI Vault/i.test(t)) {
+      if (isGcp && /Azure Key Vault|AWS Secrets Manager|HTTP ingress for AKS|OCI Vault|Application Gateway|Amazon EKS|Amazon ECR|Azure Container Registry|azurerm_/i.test(t)) {
         return false;
       }
-      if (isAzure && /AWS Secrets Manager|OCI Vault|Amazon EKS|Amazon ECR/i.test(t)) {
+      if (isAzure && /AWS Secrets Manager|OCI Vault|Amazon EKS|Amazon ECR|Oracle Container Registry|oci_core_|google_compute_/i.test(t)) {
         return false;
       }
-      if (isOracle && /AWS Secrets Manager|Azure Key Vault|Amazon EKS|Azure Container Apps/i.test(t)) {
+      if (isOracle && /AWS Secrets Manager|Azure Key Vault|Amazon EKS|Azure Container Apps|Application Gateway|azurerm_|google_compute_/i.test(t)) {
+        return false;
+      }
+      if (isAws && /Azure Key Vault|OCI Vault|GKE|AKS|Azure Container Apps|azurerm_|oci_core_|google_compute_/i.test(t)) {
         return false;
       }
       if (
         /Scaffold delivery vs access intent/i.test(t) &&
         /HTTP:80|ALB|ACM|Public without a custom domain/i.test(t)
       ) {
-        if (isGcp || isAzure || isOracle) return false;
+        if (!isAws) return false;
       }
       if (
         /Per-environment databases/i.test(t) &&
         /RDS instances/i.test(t)
       ) {
-        if (isGcp || isAzure || isOracle) return false;
+        if (!isAws) return false;
       }
       return true;
     })
