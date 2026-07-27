@@ -1460,7 +1460,11 @@ CMD ["node", "server.js"]
   }
 
   if (options.database === 'none') {
-    // Ensure enable flags are false even if variable block missing defaults patch
+    byPath.delete('terraform/database.tf');
+    byPath.delete('terraform/mysql.tf');
+    byPath.delete('terraform/postgres.tf');
+    byPath.delete('terraform/redis.tf');
+    byPath.delete('terraform/mongodb.tf');
     for (const [p, f] of [...byPath.entries()]) {
       if (!p.endsWith('.tf')) continue;
       let c = f.content;
@@ -1470,6 +1474,19 @@ CMD ["node", "server.js"]
       );
       byPath.set(p, { ...f, content: c });
     }
+  } else if (options.database === 'redis') {
+    byPath.delete('terraform/database.tf');
+    byPath.delete('terraform/mysql.tf');
+    byPath.delete('terraform/postgres.tf');
+    byPath.delete('terraform/mongodb.tf');
+  } else if (options.database === 'mysql' || options.database === 'postgres') {
+    byPath.delete('terraform/redis.tf');
+    byPath.delete('terraform/mongodb.tf');
+  } else if (options.database === 'mongodb') {
+    byPath.delete('terraform/database.tf');
+    byPath.delete('terraform/mysql.tf');
+    byPath.delete('terraform/postgres.tf');
+    byPath.delete('terraform/redis.tf');
   }
 
   return Array.from(byPath.values());
