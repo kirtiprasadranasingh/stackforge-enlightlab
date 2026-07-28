@@ -311,11 +311,12 @@ function demoteUnconfirmedDatabase(plan: string, context: string): string {
   return out;
 }
 
-/** True when the client named a CI system. */
+/** True when the client named or confirmed a CI system. */
 function interviewConfirmedCi(context: string): boolean {
+  if (!context) return false;
   if (/CI\/CD system\s*\(client override\)/i.test(context)) return true;
   if (
-    /CI\/CD system:\s*(GitHub Actions|GitLab CI|Jenkins|Azure DevOps|AWS CodePipeline|Google Cloud Build|OCI DevOps)\b/i.test(
+    /CI\/CD (?:system|provider):\s*(GitHub Actions|GitLab CI|Jenkins|Azure DevOps|AWS CodePipeline|Google Cloud Build|OCI DevOps)\b/i.test(
       context
     )
   ) {
@@ -328,15 +329,27 @@ function interviewConfirmedCi(context: string): boolean {
   ) {
     return true;
   }
-  const firstLines = context.split('\n').slice(0, 4).join(' ');
+  if (
+    /Does this setup match what you need:.*?(GitHub Actions|GitLab CI|Jenkins|Azure DevOps|AWS CodePipeline|Google Cloud Build|OCI DevOps)/i.test(
+      context
+    )
+  ) {
+    return true;
+  }
+  const firstLines = context.split('\n').slice(0, 15).join(' ');
   return /\b(github actions|gitlab ci|jenkins|azure devops|codepipeline|cloud build|oci devops)\b/i.test(
     firstLines
   );
 }
 
 function demoteUnconfirmedCi(plan: string, context: string): string {
-  if (interviewConfirmedCi(context)) return plan;
   let out = plan;
+  if (interviewConfirmedCi(context)) {
+    // Purge any false unconfirmed CI bullets or scaffold default annotations
+    out = out.replace(/\s*\(\s*scaffold default\s*—?\s*CI system was not confirmed[^\)]*\)/gi, '');
+    out = out.replace(/^[-*]?\s*[^\n]*CI\/CD was not confirmed[^\n]*\n?/gim, '');
+    return out;
+  }
   out = mapSectionLines(
     out,
     /##\s*Confirmed requirements\b/i,
@@ -977,6 +990,22 @@ export function sanitizePlanAgainstInterview(
     }
   }
 
+/** Ensure the confirmed region from interview choices replaces any placeholder region (e.g. us-east-1) in text. */
+function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
+  const match = context.match(/(?:Region|host it|Where should we host it)(?:\s*\([^\)]*\))?:\s*([a-z0-9-]+)/i);
+  if (!match) return plan;
+  const confirmedRegion = match[1].trim();
+  if (!confirmedRegion) return plan;
+
+  let out = plan;
+  out = out.replace(/^(AWS Region|Region|Cloud Region):\s*[a-z0-9-]+/gim, `$1: ${confirmedRegion}`);
+  out = out.replace(/^([-*]\s*)?Region:\s*[a-z0-9-]+/gim, `$1Region: ${confirmedRegion}`);
+  out = out.replace(/Apply confirmed choices:\s*[a-z0-9-]+\s*region/gi, `Apply confirmed choices: ${confirmedRegion} region`);
+  out = out.replace(/Lock Terraform for AWS EKS for\s+[a-z0-9-]+/gi, `Lock Terraform for AWS EKS for ${confirmedRegion}`);
+  out = out.replace(/in the\s+[a-z0-9-]+\s+region/gi, `in the ${confirmedRegion} region`);
+  return out;
+}
+
   out = demoteUnconfirmedRuntime(out, ctx);
   out = demoteUnconfirmedDatabase(out, ctx);
   out = demoteUnconfirmedCi(out, ctx);
@@ -984,6 +1013,7 @@ export function sanitizePlanAgainstInterview(
   out = stripCrossCloudCiRegistryConflicts(out, ctx);
   out = sanitizeGcpRegion(out, ctx);
   out = sanitizeAwsRegion(out, ctx);
+  out = syncConfirmedRegionIntoPlan(out, ctx);
 
   // When Redis/Valkey was selected, ensure top-line Database in Confirmed requirements says Redis (not No database)
   const isRedisSelected = /Redis|Valkey/i.test(ctx) || /Redis|Valkey/i.test(plan);
