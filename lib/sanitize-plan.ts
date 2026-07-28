@@ -984,6 +984,20 @@ export function sanitizePlanAgainstInterview(
   out = stripCrossCloudCiRegistryConflicts(out, ctx);
   out = sanitizeGcpRegion(out, ctx);
   out = sanitizeAwsRegion(out, ctx);
+
+  // When Redis/Valkey was selected, ensure top-line Database in Confirmed requirements says Redis (not No database)
+  const isRedisSelected = /Redis|Valkey/i.test(ctx) || /Redis|Valkey/i.test(plan);
+  if (isRedisSelected) {
+    out = out.replace(
+      /^([-*]\s*)?Database:\s*No database[^\n]*/gim,
+      '$1Database: Redis cache (private)'
+    );
+    out = out.replace(
+      /^([-*]\s*)?Data Service:\s*No database[^\n]*/gim,
+      '$1Data Service: Redis cache (private)'
+    );
+  }
+
   out = sanitizeNoDatabase(out, ctx);
   out = sanitizeMongoDB(out, ctx);
 
