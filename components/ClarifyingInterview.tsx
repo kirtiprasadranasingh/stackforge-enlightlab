@@ -96,17 +96,20 @@ function parseCompoundDetail(detail: string): {
   primary: string;
   hosting: string;
   cloud: string;
+  ci: string;
 } {
   const parts = detail.split(/\s*\|\s*/).map((part) => part.trim());
   const hostingPart = parts.find((part) => /^Hosting:\s*/i.test(part));
   const cloudPart = parts.find((part) => /^Cloud:\s*/i.test(part));
+  const ciPart = parts.find((part) => /^CI:\s*/i.test(part));
   const primaryParts = parts.filter(
-    (part) => !/^Hosting:\s*/i.test(part) && !/^Cloud:\s*/i.test(part)
+    (part) => !/^Hosting:\s*/i.test(part) && !/^Cloud:\s*/i.test(part) && !/^CI:\s*/i.test(part)
   );
   return {
     primary: primaryParts.join(' | ').trim(),
     hosting: hostingPart ? hostingPart.replace(/^Hosting:\s*/i, '').trim() : '',
     cloud: cloudPart ? cloudPart.replace(/^Cloud:\s*/i, '').trim() : '',
+    ci: ciPart ? ciPart.replace(/^CI:\s*/i, '').trim() : '',
   };
 }
 
@@ -385,6 +388,13 @@ function mapRegionToNewCloud(currentRegion: string, allowed: string[]): string {
     clearStaleRegionIfNeeded(next);
   };
 
+  const selectCiAfterCloud = (option: string) => {
+    if (!selectedOption || !cloudChoice || !hostingChoice) return;
+    const next = `${selectedOption}: ${cloudChoice} | Hosting: ${hostingChoice} | CI: ${option}`;
+    onAnswer(currentIndex, next);
+    clearStaleRegionIfNeeded(next);
+  };
+
   const selectHostingFollowUp = (option: string) => {
     if (!selectedOption) return;
     onAnswer(currentIndex, `${selectedOption}: ${option}`);
@@ -548,6 +558,16 @@ function mapRegionToNewCloud(currentRegion: string, allowed: string[]): string {
                   selected={hostingChoice}
                   disabled={disabled}
                   onSelect={selectHostingAfterCloud}
+                />
+              )}
+              {cloudChoice && hostingChoice && (
+                <FollowUpPanel
+                  prompt={`Which CI/CD system should we use for ${cloudChoice}?`}
+                  hint="Select a CI pipeline or keep the default."
+                  options={CI_OPTION_LABELS_BY_CLOUD[detectCloudLabel(cloudChoice) || 'aws']}
+                  selected={followUpCompound.ci || null}
+                  disabled={disabled}
+                  onSelect={selectCiAfterCloud}
                 />
               )}
             </>
