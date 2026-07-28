@@ -629,10 +629,10 @@ export function buildClarifyingQuestions(
         'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain (HTTPS on default load-balancer hostname) / Private and internal only)',
       ];
 
-  // If the prompt did not name a CI system, ask explicitly — include AWS / GCP / OCI native options.
-  if (!namedCI) {
+  // If neither a cloud nor a CI system was named in prompt, and setupQuestion is not used, ask CI explicitly.
+  if (!namedCloud && !namedCI) {
     questions.splice(
-      namedCloud ? 2 : 3,
+      3,
       0,
       `Which CI/CD system should we use? (options: ${ciOptions})`
     );
