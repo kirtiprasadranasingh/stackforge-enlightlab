@@ -402,24 +402,18 @@ function planOrContextIsAzure(plan: string, context: string): boolean {
   );
 }
 
-/** Normalize invalid AWS/Azure region strings into proper GCP regions when cloud is GCP. */
-function sanitizeGcpRegion(plan: string, context: string): string {
+/** Normalize GCP region strings into proper AWS regions when cloud is AWS. */
+function sanitizeAwsRegion(plan: string, context: string): string {
   const blob = `${context}\n${plan}`;
-  const isGcp = /Cloud provider:\s*Google/i.test(blob) || /Google Cloud/i.test(blob) || /\bGCP\b/i.test(blob);
-  if (!isGcp) return plan;
+  const isAws = /Cloud provider:\s*AWS/i.test(blob) || /\bAWS\b/i.test(blob) || /Amazon/i.test(blob);
+  const isGcp = /Cloud provider:\s*Google/i.test(blob) || /Google Cloud/i.test(blob);
+  if (!isAws || isGcp) return plan;
 
   let out = plan;
-  out = out.replace(/\beu-frankfurt-1\b/gi, 'europe-west3');
-  out = out.replace(/\beu-central-1\b/gi, 'europe-west3');
-  out = out.replace(/\beu-west-1\b/gi, 'europe-west1');
-  out = out.replace(/\bwesteurope\b/gi, 'europe-west1');
-  out = out.replace(/\bus-east-1\b/gi, 'us-central1');
-  out = out.replace(/\bus-west-2\b/gi, 'us-central1');
-  out = out.replace(/\beastus\b/gi, 'us-central1');
-  out = out.replace(/\bap-mumbai-1\b/gi, 'asia-south1');
-  out = out.replace(/\bap-south-1\b/gi, 'asia-south1');
-  out = out.replace(/\bcentralindia\b/gi, 'asia-south1');
-  out = out.replace(/\bus-ashburn-1\b/gi, 'us-east4');
+  out = out.replace(/\beurope-west1\b/gi, 'eu-west-1');
+  out = out.replace(/\beurope-west3\b/gi, 'eu-central-1');
+  out = out.replace(/\basia-south1\b/gi, 'ap-south-1');
+  out = out.replace(/\bus-central1\b/gi, 'us-east-1');
   return out;
 }
 
@@ -471,6 +465,19 @@ function stripAwsAssumptionLeakage(plan: string, context: string): string {
         )
       ) {
         if (!isAws) return false;
+        if (/EKS|Kubernetes/i.test(blob) && /locked AWS ECS template/i.test(t)) return false;
+      }
+      if (
+        /HTTPS intent:\s*Client confirmed Public with secure HTTPS/i.test(t) &&
+        /Public without a custom domain/i.test(blob)
+      ) {
+        return false;
+      }
+      if (
+        /Health-check runtime was not confirmed/i.test(t) &&
+        /Node\.js|Python|Go|Java|\.NET/i.test(context)
+      ) {
+        return false;
       }
       if (isGcp && /Azure Key Vault|AWS Secrets Manager|HTTP ingress for AKS|OCI Vault|Application Gateway|Amazon EKS|Amazon ECR|Azure Container Registry|azurerm_/i.test(t)) {
         return false;
@@ -955,6 +962,7 @@ export function sanitizePlanAgainstInterview(
   out = honestScaffoldDelivery(out, ctx);
   out = stripCrossCloudCiRegistryConflicts(out, ctx);
   out = sanitizeGcpRegion(out, ctx);
+  out = sanitizeAwsRegion(out, ctx);
   out = sanitizeNoDatabase(out, ctx);
   out = sanitizeMongoDB(out, ctx);
 
