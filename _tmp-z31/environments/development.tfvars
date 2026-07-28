@@ -1,9 +1,0 @@
-aws_region = "us-west-2"
-environment  = "development"
-project_name = "stackforge"
-desired_count = 3
-alb_internal = false
-enable_database = true
-db_engine = "postgres"
-enable_redis = false
-db_multi_az = false

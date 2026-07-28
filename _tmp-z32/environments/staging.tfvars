@@ -1,9 +1,0 @@
-aws_region = "us-east-1"
-environment  = "staging"
-project_name = "stackforge"
-desired_count = 3
-alb_internal = false
-enable_database = true
-db_engine = "mysql"
-enable_redis = false
-db_multi_az = false

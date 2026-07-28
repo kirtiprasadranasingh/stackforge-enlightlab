@@ -1,1 +1,0 @@
-R1: Task no | Task name | Prompt | Chat and architecture devloped this column is reference so u can see what is my issue related to | Issues | Status |  | Screenshot | General observation

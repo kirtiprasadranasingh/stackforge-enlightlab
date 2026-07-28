@@ -1,2 +1,0 @@
-location = "westeurope"
-environment = "development"

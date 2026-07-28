@@ -1,1 +1,0 @@
-R10:  | Cloud Switching | Start with Deploy on AWS ECS.  During interview say Actually use Google Cloud Run instead.  or Change to Azure AKS.  Expected: Final output should only contain selected cloud. |  |  | pass |  |  | 
