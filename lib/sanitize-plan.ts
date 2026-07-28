@@ -402,6 +402,27 @@ function planOrContextIsAzure(plan: string, context: string): boolean {
   );
 }
 
+/** Normalize invalid AWS/Azure region strings into proper GCP regions when cloud is GCP. */
+function sanitizeGcpRegion(plan: string, context: string): string {
+  const blob = `${context}\n${plan}`;
+  const isGcp = /Cloud provider:\s*Google/i.test(blob) || /Google Cloud/i.test(blob) || /\bGCP\b/i.test(blob);
+  if (!isGcp) return plan;
+
+  let out = plan;
+  out = out.replace(/\beu-frankfurt-1\b/gi, 'europe-west3');
+  out = out.replace(/\beu-central-1\b/gi, 'europe-west3');
+  out = out.replace(/\beu-west-1\b/gi, 'europe-west1');
+  out = out.replace(/\bwesteurope\b/gi, 'europe-west1');
+  out = out.replace(/\bus-east-1\b/gi, 'us-central1');
+  out = out.replace(/\bus-west-2\b/gi, 'us-central1');
+  out = out.replace(/\beastus\b/gi, 'us-central1');
+  out = out.replace(/\bap-mumbai-1\b/gi, 'asia-south1');
+  out = out.replace(/\bap-south-1\b/gi, 'asia-south1');
+  out = out.replace(/\bcentralindia\b/gi, 'asia-south1');
+  out = out.replace(/\bus-ashburn-1\b/gi, 'us-east4');
+  return out;
+}
+
 /** Normalize GCP region strings into proper AWS regions when cloud is AWS. */
 function sanitizeAwsRegion(plan: string, context: string): string {
   const blob = `${context}\n${plan}`;
