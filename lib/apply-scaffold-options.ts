@@ -1649,5 +1649,36 @@ CMD ["node", "server.js"]
     byPath.delete('terraform/redis.tf');
   }
 
+  // Azure AKS outputs must only reference resources that remain in the
+  // selected data-service scaffold. Terraform validates resource references
+  // statically, so try(...) cannot protect an output pointing at a removed
+  // PostgreSQL or Redis resource.
+  if (presets.cloud === 'azure' && presets.orchestrator === 'aks') {
+    const outputs = byPath.get('terraform/outputs.tf');
+    if (outputs) {
+      const removeOutput = (content: string, name: string) =>
+        content.replace(
+          new RegExp(`\\n?output\\s+"${name}"\\s*\\{[\\s\\S]*?\\n\\}\\n?`, 'g'),
+          '\n'
+        );
+      let content = outputs.content;
+      const hasRelationalDb = options.database === 'postgres' || options.database === 'mysql';
+      if (!hasRelationalDb) {
+        content = removeOutput(content, 'postgres_fqdn');
+      } else if (options.database === 'mysql') {
+        content = content.replace(
+          /output\s+"postgres_fqdn"\s*\{\s*value\s*=\s*try\(azurerm_postgresql_flexible_server\.main\[0\]\.fqdn, null\)\s*\}/g,
+          'output "mysql_fqdn" {\n  value = try(azurerm_mysql_flexible_server.main[0].fqdn, null)\n}'
+        );
+      }
+      if (options.database !== 'redis') {
+        content = removeOutput(content, 'redis_hostname');
+      }
+      if (content !== outputs.content) {
+        byPath.set('terraform/outputs.tf', { ...outputs, content });
+      }
+    }
+  }
+
   return Array.from(byPath.values());
 }

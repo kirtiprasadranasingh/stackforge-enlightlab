@@ -142,6 +142,27 @@ export function validateScaffoldContract(
     }
   }
 
+  if (presets.cloud === 'azure' && presets.orchestrator === 'aks') {
+    const outputs = content(files, 'terraform/outputs.tf');
+    const database = content(files, 'terraform/database.tf');
+    const redis = content(files, 'terraform/redis.tf');
+    if (options.database === 'redis' && /azurerm_postgresql_flexible_server|azurerm_mysql_flexible_server/.test(outputs)) {
+      issues.push('Azure AKS Redis scaffold has an output referencing an undeclared relational database.');
+    }
+    if (options.database === 'none' && /azurerm_(?:postgresql|mysql)_flexible_server|azurerm_redis_cache/.test(outputs)) {
+      issues.push('Azure AKS no-data scaffold has an output referencing a removed data resource.');
+    }
+    if (options.database === 'mysql' && (!/azurerm_mysql_flexible_server/.test(database) || !/azurerm_mysql_flexible_server/.test(outputs))) {
+      issues.push('Azure AKS MySQL scaffold does not align its database resource and output.');
+    }
+    if (options.database === 'postgres' && (!/azurerm_postgresql_flexible_server/.test(database) || !/azurerm_postgresql_flexible_server/.test(outputs))) {
+      issues.push('Azure AKS PostgreSQL scaffold does not align its database resource and output.');
+    }
+    if (options.database !== 'redis' && /azurerm_redis_cache/.test(outputs) && !redis) {
+      issues.push('Azure AKS scaffold has a Redis output without a Redis resource.');
+    }
+  }
+
   const redisIsProvisioned =
     (presets.cloud === 'aws' && presets.orchestrator === 'ecs') ||
     (presets.cloud === 'aws' && presets.orchestrator === 'eks') ||
