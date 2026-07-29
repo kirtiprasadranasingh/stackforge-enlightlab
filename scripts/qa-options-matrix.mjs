@@ -484,6 +484,29 @@ if (/AWS ECS template|Node\.js is a default scaffold placeholder/i.test(cleanedE
   console.log('PASS  EKS plan cleanup removes ECS/Node leakage');
 }
 
+const azureOverride = buildArchitectureSpec({
+  prompt: 'Generate AWS EKS stack with Python',
+  interviewAnswers: 'Microsoft Azure. Hosting platform (client override): Azure Container Apps. westeurope. Development and staging. Public HTTP on the default load-balancer hostname. MySQL. Medium — 3 to 5 app copies.',
+  presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+});
+const azurePlan = sanitizePlanAgainstInterview(
+  '## Confirmed requirements\\n- Azure Container Apps in westeurope with GitHub Actions, Python, MySQL, development and staging.\\n## Assumptions\\n- AWS Secrets Manager will store credentials.',
+  azureOverride.source,
+  azureOverride.presets
+);
+const azurePlanIssues = validatePlanAgainstSpec(azurePlan, azureOverride);
+if (
+  azureOverride.presets.cloud !== 'azure' ||
+  azureOverride.presets.orchestrator !== 'container-apps' ||
+  /AWS Secrets Manager/i.test(azurePlan) ||
+  azurePlanIssues.length
+) {
+  fail++;
+  console.error(\`FAIL  Azure override plan cleanup: \${azurePlanIssues.join('; ') || azurePlan}\`);
+} else {
+  console.log('PASS  Azure override strips AWS secret leakage');
+}
+
 if (fail) {
   console.error(\`\\nOptions matrix FAILED (\${fail})\`);
   process.exit(1);

@@ -777,7 +777,7 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
       }
       out = prependAssumption(
         out,
-        '**Secrets:** Prefer **Azure Key Vault** references for Redis/DB connection strings before production — the locked template may use Terraform placeholders / `random_password` only (not AWS Secrets Manager).'
+        '**Secrets:** Prefer **Azure Key Vault** references for Redis/DB connection strings before production — the locked template may use Terraform placeholders / `random_password` only, not a cloud-specific secrets integration.'
       );
       out = prependAssumption(
         out,
