@@ -1015,16 +1015,27 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
   out = sanitizeAwsRegion(out, ctx);
   out = syncConfirmedRegionIntoPlan(out, ctx);
 
-  // When Redis/Valkey was selected, ensure top-line Database in Confirmed requirements says Redis (not No database)
-  const isRedisSelected = /Redis|Valkey/i.test(ctx) || /Redis|Valkey/i.test(plan);
-  if (isRedisSelected) {
+  // Ensure top-line Database / Data Service in Confirmed requirements matches parsed scaffoldOptions exactly
+  const opts = parseScaffoldOptions(ctx, presets);
+  if (opts.database === 'redis') {
     out = out.replace(
-      /^([-*]\s*)?Database:\s*No database[^\n]*/gim,
-      '$1Database: Redis cache (private)'
+      /^([-*]\s*)?(Database|Data Service):\s*[^\n]+/gim,
+      '$1$2: Redis cache (private)'
     );
+  } else if (opts.database === 'mysql') {
     out = out.replace(
-      /^([-*]\s*)?Data Service:\s*No database[^\n]*/gim,
-      '$1Data Service: Redis cache (private)'
+      /^([-*]\s*)?(Database|Data Service):\s*[^\n]+/gim,
+      '$1$2: MySQL database (managed)'
+    );
+  } else if (opts.database === 'postgres') {
+    out = out.replace(
+      /^([-*]\s*)?(Database|Data Service):\s*[^\n]+/gim,
+      '$1$2: PostgreSQL database (managed)'
+    );
+  } else if (opts.database === 'none') {
+    out = out.replace(
+      /^([-*]\s*)?(Database|Data Service):\s*[^\n]+/gim,
+      '$1$2: No database'
     );
   }
 
