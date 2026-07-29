@@ -1,8 +1,5 @@
-/**
- * Deterministic plan cleanup so inventable frameworks / scaffold defaults
- * never stay under Confirmed when the interview did not choose them.
- * (QA #8 Java→Spring Boot; QA #9 unasked Node/Postgres presented as final.)
- */
+import { parseScaffoldOptions } from '@/lib/scaffold-options';
+
 
 /** Affirmative Spring Boot selection — ignore "do NOT confirm Spring Boot" wording. */
 function interviewChoseSpringBoot(context: string): boolean {
