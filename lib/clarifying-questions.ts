@@ -183,7 +183,7 @@ export function parseClarifyingQuestion(raw?: string | null): {
   };
 }
 
-function detectCloudLabel(text: string): Presets['cloud'] | null {
+export function detectCloudLabel(text: string): Presets['cloud'] | null {
   // Strip CI product names so "Azure DevOps" is not read as Microsoft Azure.
   const value = text
     .toLowerCase()
