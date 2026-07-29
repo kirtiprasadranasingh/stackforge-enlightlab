@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Terraform (1.7.5 stable binary)
-RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip" \
+RUN curl --http1.1 -fsSL --retry 5 --retry-connrefused -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip" \
   && unzip /tmp/terraform.zip -d /usr/local/bin/ \
   && rm /tmp/terraform.zip
 
@@ -53,14 +53,14 @@ ENV TF_PLUGIN_CACHE_DIR=/tmp/stackforge-tf-plugin-cache
 ENV STACKFORGE_TF_PLUGIN_CACHE=/tmp/stackforge-tf-plugin-cache
 
 # Install Helm (official script)
-RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+RUN curl --http1.1 -fsSL --retry 5 --retry-connrefused https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Install Hadolint
-RUN curl -sSfL https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint \
+RUN curl --http1.1 -sSfL --retry 5 --retry-connrefused https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint \
   && chmod +x /usr/local/bin/hadolint
 
 # Install Actionlint
-RUN curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash \
+RUN curl --http1.1 -sSfL --retry 5 --retry-connrefused https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash \
   && mv actionlint /usr/local/bin/
 
 RUN addgroup --system --gid 1001 nodejs \
