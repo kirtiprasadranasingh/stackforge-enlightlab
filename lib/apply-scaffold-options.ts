@@ -800,9 +800,17 @@ export function applyScaffoldOptions(
   }
   if (presets.ci === 'github-actions' && existingGha) {
     let w = existingGha.content;
+    const regVar =
+      presets.cloud === 'gcp'
+        ? 'GCP_REGION'
+        : presets.cloud === 'azure'
+          ? 'AZURE_REGION'
+          : presets.cloud === 'oracle'
+            ? 'OCI_REGION'
+            : 'AWS_REGION';
     w = w.replace(
-      /AWS_REGION:\s*\$\{\{\s*vars\.AWS_REGION\s*\|\|\s*'[^']+'\s*\}\}/g,
-      `AWS_REGION: \${{ vars.AWS_REGION || '${options.region}' }}`
+      /(?:AWS_REGION|GCP_REGION|AZURE_REGION|OCI_REGION):\s*\$\{\{\s*vars\.(?:AWS_REGION|GCP_REGION|AZURE_REGION|OCI_REGION)\s*\|\|\s*'[^']+'\s*\}\}/g,
+      `${regVar}: \${{ vars.${regVar} || '${options.region}' }}`
     );
     w = w.replace(
       /aws-region:\s*\$\{\{\s*env\.AWS_REGION\s*\}\}/g,
