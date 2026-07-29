@@ -663,8 +663,10 @@ Always format your response by wrapping the chat reply in the following markers:
       !skipGateForRepair &&
       (gated || isVagueStackPrompt(prompt) || isFullStackPrompt(prompt))
     ) {
-      const hasPriorAssistant = history.some((m) => m.role === 'assistant');
-      phase = hasPriorAssistant ? 'plan' : 'clarify';
+      // If user has not completed interview answers or typed a new stack prompt,
+      // force clarify phase first (never jump straight to plan).
+      const hasCompletedInterview = Boolean(interviewAnswers?.trim());
+      phase = hasCompletedInterview ? 'plan' : 'clarify';
     }
 
     // Clarify / plan phases — never emit files
