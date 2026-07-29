@@ -114,19 +114,20 @@ function parseCompoundDetail(detail: string): {
 }
 
 function OptionCards({
-  options,
+  options = [],
   selected,
   disabled,
   onSelect,
 }: {
-  options: string[];
+  options?: string[];
   selected: string | null;
   disabled?: boolean;
   onSelect: (option: string) => void;
 }) {
+  const safeOptions = Array.isArray(options) ? options : [];
   return (
     <div className="mt-3 grid min-w-0 grid-cols-1 gap-2">
-      {options.map((option, optionIndex) => {
+      {safeOptions.map((option, optionIndex) => {
         const isSelected = selected === option;
         return (
           <button
@@ -566,8 +567,8 @@ function mapRegionToNewCloud(currentRegion: string, allowed: string[]): string {
                 <FollowUpPanel
                   prompt={`Which CI/CD system should we use for ${cloudChoice}?`}
                   hint="Select a CI pipeline or keep the default."
-                  options={CI_OPTION_LABELS_BY_CLOUD[detectCloudLabel(cloudChoice) || 'aws']}
-                  selected={followUpCompound.ci || null}
+                  options={(cloudChoice ? CI_OPTION_LABELS_BY_CLOUD[detectCloudLabel(cloudChoice) || 'aws'] : null) || CI_FOLLOW_UP_DEFAULT.options || []}
+                  selected={followUpCi || null}
                   disabled={disabled}
                   onSelect={selectCiAfterCloud}
                 />
