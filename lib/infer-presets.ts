@@ -107,6 +107,49 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
   return out;
 }
 
+function detectCloudFromText(rawText: string): Presets['cloud'] | null {
+  const t = rawText.toLowerCase();
+  const tCloud = t
+    .replace(/azure\s*devops(?:\s*pipelines)?/gi, ' ')
+    .replace(/azure\s*pipelines/gi, ' ')
+    .replace(/google\s*cloud\s*build/gi, ' ')
+    .replace(/oci\s*devops/gi, ' ');
+
+  const mentionsOracle =
+    /\boracle\b/.test(tCloud) ||
+    /\boci\b/.test(tCloud) ||
+    /\boke\b/.test(tCloud);
+  const mentionsAzure =
+    /\bazure\b/.test(tCloud) ||
+    /\baks\b/.test(tCloud) ||
+    /container\s*apps?/.test(tCloud) ||
+    /\bazurerm\b/.test(tCloud) ||
+    /microsoft\s*azure/.test(tCloud);
+  const mentionsGcp =
+    /\bgcp\b/.test(tCloud) ||
+    /\bgke\b/.test(tCloud) ||
+    /google\s*cloud|googlecloud/.test(tCloud) ||
+    /cloud\s*run/.test(tCloud);
+  const mentionsAws =
+    /\baws\b/.test(t) ||
+    /\beks\b/.test(t) ||
+    /\becs\b/.test(t) ||
+    /\bfargate\b/.test(t);
+
+  if (mentionsOracle && !mentionsAws && !mentionsAzure && !mentionsGcp) return 'oracle';
+  if (mentionsAzure && !mentionsAws && !mentionsGcp && !mentionsOracle) return 'azure';
+  if (mentionsGcp && !mentionsAws && !mentionsAzure && !mentionsOracle) return 'gcp';
+  if (mentionsAws && !mentionsAzure && !mentionsGcp && !mentionsOracle) return 'aws';
+
+  // Priority fallback when multiple mentions exist: single match check
+  if (mentionsOracle) return 'oracle';
+  if (mentionsAzure) return 'azure';
+  if (mentionsGcp) return 'gcp';
+  if (mentionsAws) return 'aws';
+
+  return null;
+}
+
 /**
  * Infer cloud / orchestrator / CI from free-text when the user names them explicitly.
  * Used so silent UI defaults (aws/eks/github-actions) do not override a clear prompt.
@@ -114,52 +157,27 @@ function parseClientOverrides(prompt: string): Partial<Presets> {
 export function inferPresetsFromPrompt(prompt: string, current: Presets): Presets {
   const t = prompt.toLowerCase();
   const overrides = parseClientOverrides(prompt);
-  let cloud = overrides.cloud ?? current.cloud;
+
+  // Check the latest prompt line first so history from previous turns does not override new requests
+  const promptLines = prompt.split('\n').map((l) => l.trim()).filter(Boolean);
+  const latestPrompt = promptLines[0] || prompt;
+  const latestCloud = detectCloudFromText(latestPrompt);
+
+  let cloud = overrides.cloud ?? latestCloud ?? detectCloudFromText(prompt) ?? current.cloud;
   let orchestrator = overrides.orchestrator ?? current.orchestrator;
   let ci = overrides.ci ?? current.ci;
 
-  // Strip CI product names so "Azure DevOps" does not count as Azure cloud (QA #24).
   const tCloud = t
     .replace(/azure\s*devops(?:\s*pipelines)?/gi, ' ')
     .replace(/azure\s*pipelines/gi, ' ')
     .replace(/google\s*cloud\s*build/gi, ' ')
     .replace(/oci\s*devops/gi, ' ');
-  const mentionsAzure =
-    /\bazure\b/.test(tCloud) ||
-    /\baks\b/.test(tCloud) ||
-    /container\s*apps?/.test(tCloud) ||
-    /\bazurerm\b/.test(tCloud) ||
-    /microsoft\s+azure/.test(tCloud);
-  const mentionsAws =
-    /\baws\b/.test(t) ||
-    /\beks\b/.test(t) ||
-    /\becs\b/.test(t) ||
-    /\bfargate\b/.test(t);
-  const mentionsGcp =
-    /\bgcp\b/.test(tCloud) ||
-    /\bgke\b/.test(tCloud) ||
-    /google\s*cloud/.test(tCloud) ||
-    /cloud\s*run/.test(tCloud);
-  const mentionsOracle =
-    /\boracle\b/.test(tCloud) ||
-    /\boci\b/.test(tCloud) ||
-    /\boke\b/.test(tCloud);
+  const mentionsAzure = cloud === 'azure';
+  const mentionsAws = cloud === 'aws';
+  const mentionsGcp = cloud === 'gcp';
+  const mentionsOracle = cloud === 'oracle';
 
-  /** True when the user named a cloud/orchestrator — not silent UI defaults. */
-  const namedCloud =
-    mentionsAzure || mentionsAws || mentionsGcp || mentionsOracle;
-
-  if (!overrides.cloud) {
-    if (mentionsAzure && !mentionsAws && !mentionsGcp && !mentionsOracle) {
-      cloud = 'azure';
-    } else if (mentionsAws && !mentionsAzure && !mentionsGcp && !mentionsOracle) {
-      cloud = 'aws';
-    } else if (mentionsGcp && !mentionsAzure && !mentionsAws && !mentionsOracle) {
-      cloud = 'gcp';
-    } else if (mentionsOracle && !mentionsAzure && !mentionsAws && !mentionsGcp) {
-      cloud = 'oracle';
-    }
-  }
+  const namedCloud = Boolean(cloud);
 
   if (!overrides.orchestrator) {
     if (namedCloud && cloud === 'azure') {
