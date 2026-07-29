@@ -22,6 +22,7 @@ import { parseScaffoldOptions } from '../lib/scaffold-options.ts';
 import { validateScaffoldContract } from '../lib/scaffold-contract.ts';
 import { buildArchitectureSpec, createRequirementsManifest, readRequirementsManifest, validatePlanAgainstSpec } from '../lib/architecture-spec.ts';
 import { sanitizePlanAgainstInterview } from '../lib/sanitize-plan.ts';
+import { normalizeScaffoldFiles } from '../lib/normalize-scaffold.ts';
 import type { Presets } from '../types/index.ts';
 
 type Expect = {
@@ -443,6 +444,27 @@ if (
   console.error(\`FAIL  EKS Java + Redis semantic contract: \${javaRedisIssues.join('; ') || JSON.stringify(javaRedisEks.options)}\`);
 } else {
   console.log('PASS  EKS Java + Redis semantic contract');
+}
+
+const validatedJavaRedisFiles = normalizeScaffoldFiles(
+  [...javaRedisFiles, createRequirementsManifest(javaRedisEks)],
+  {
+    applyLockedProfile: true,
+    terraformOnly: true,
+    presets: javaRedisEks.presets,
+    scaffoldOptions: javaRedisEks.options,
+  }
+);
+const validateRepairIssues = validateScaffoldContract(
+  validatedJavaRedisFiles,
+  javaRedisEks.presets,
+  javaRedisEks.options
+);
+if (validateRepairIssues.length) {
+  fail++;
+  console.error(\`FAIL  validation repair preserves Java runtime: \${validateRepairIssues.join('; ')}\`);
+} else {
+  console.log('PASS  validation repair preserves Java runtime');
 }
 
 const staleEksPlan = \`## Confirmed requirements

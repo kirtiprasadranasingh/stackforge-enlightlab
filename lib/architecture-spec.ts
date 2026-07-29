@@ -40,7 +40,9 @@ export function createRequirementsManifest(spec: ArchitectureSpec): GeneratedFil
   };
 }
 
-export function readRequirementsManifest(files: GeneratedFile[]): RequirementsManifest | null {
+export function readRequirementsManifest(
+  files: Array<Pick<GeneratedFile, 'path' | 'content'>>
+): RequirementsManifest | null {
   const raw = files.find((file) => file.path === REQUIREMENTS_MANIFEST_PATH)?.content;
   if (!raw) return null;
   try {

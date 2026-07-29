@@ -6,6 +6,14 @@ function content(files: GeneratedFile[], path: string): string {
   return files.find((file) => file.path === path)?.content || '';
 }
 
+function hasAnyPath(paths: Set<string>, candidates: string[]): boolean {
+  return candidates.some((path) => paths.has(path));
+}
+
+function contentAtAnyPath(files: GeneratedFile[], candidates: string[]): string {
+  return candidates.map((path) => content(files, path)).find(Boolean) || '';
+}
+
 export function validateScaffoldContract(
   files: GeneratedFile[],
   presets: Presets,
@@ -16,25 +24,50 @@ export function validateScaffoldContract(
   const runtime = options.runtime;
 
   if (runtime === 'python') {
-    if (!paths.has('app/main.py') || !paths.has('app/requirements.txt')) {
+    if (
+      !hasAnyPath(paths, ['app/main.py', 'main.py']) ||
+      !hasAnyPath(paths, ['app/requirements.txt', 'requirements.txt'])
+    ) {
       issues.push('Python runtime is missing its application files.');
     }
-    for (const path of ['app/server.js', 'app/package.json', 'app/package-lock.json']) {
+    for (const path of [
+      'app/server.js',
+      'app/package.json',
+      'app/package-lock.json',
+      'server.js',
+      'package.json',
+      'package-lock.json',
+    ]) {
       if (paths.has(path)) issues.push(`Python runtime contains conflicting Node file ${path}.`);
     }
   }
   if (runtime === 'node') {
-    if (!paths.has('app/server.js') || !paths.has('app/package.json')) {
+    if (
+      !hasAnyPath(paths, ['app/server.js', 'server.js']) ||
+      !hasAnyPath(paths, ['app/package.json', 'package.json'])
+    ) {
       issues.push('Node.js runtime is missing its application files.');
     }
-    for (const path of ['app/main.py', 'app/requirements.txt', 'app/main.go', 'app/go.mod']) {
+    for (const path of [
+      'app/main.py',
+      'app/requirements.txt',
+      'app/main.go',
+      'app/go.mod',
+      'main.py',
+      'requirements.txt',
+      'main.go',
+      'go.mod',
+    ]) {
       if (paths.has(path)) issues.push(`Node.js runtime contains conflicting file ${path}.`);
     }
   }
   if (runtime === 'java') {
-    const java = content(files, 'app/src/main/java/com/example/health/Application.java');
-    const pom = content(files, 'app/pom.xml');
-    const docker = content(files, 'app/Dockerfile');
+    const java = contentAtAnyPath(files, [
+      'app/src/main/java/com/example/health/Application.java',
+      'src/main/java/com/example/health/Application.java',
+    ]);
+    const pom = contentAtAnyPath(files, ['app/pom.xml', 'pom.xml']);
+    const docker = contentAtAnyPath(files, ['app/Dockerfile', 'Dockerfile']);
     if (!java || !pom) issues.push('Java runtime is missing its minimal health-service files.');
     if (/springframework|spring-boot/i.test(`${java}\n${pom}`)) {
       issues.push('Java-only selection introduced Spring Boot without a framework choice.');
@@ -45,7 +78,14 @@ export function validateScaffoldContract(
     if (!/FROM\s+maven:|FROM\s+eclipse-temurin:/i.test(docker) || !/EXPOSE\s+8080/.test(docker)) {
       issues.push('Java runtime Dockerfile must build Java and expose port 8080.');
     }
-    for (const path of ['app/server.js', 'app/package.json', 'app/package-lock.json']) {
+    for (const path of [
+      'app/server.js',
+      'app/package.json',
+      'app/package-lock.json',
+      'server.js',
+      'package.json',
+      'package-lock.json',
+    ]) {
       if (paths.has(path)) issues.push(`Java runtime contains conflicting Node file ${path}.`);
     }
   }

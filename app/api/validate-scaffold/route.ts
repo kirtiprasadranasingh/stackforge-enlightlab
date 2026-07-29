@@ -72,14 +72,20 @@ export async function POST(request: NextRequest) {
 
   const { check, files } = parsed.data;
   const checkId = check as ScaffoldCheckId;
+  // Load the approved contract before applying any base-template repairs.
+  // Without it, a generic EKS repair defaults to Node and can overwrite a
+  // valid Java workspace before the semantic checks run.
+  const submittedRequirements = readRequirementsManifest(files);
   // Re-lock Terraform templates for the detected profile so model/hybrid
   // refs cannot fail validate — but do NOT re-apply default interview options
   // (preserves Jenkins / Redis tfvars / runtime from generate).
   const normalizedFiles = normalizeScaffoldFiles(files, {
     applyLockedProfile: true,
     terraformOnly: true,
+    presets: submittedRequirements?.presets,
+    scaffoldOptions: submittedRequirements?.options,
   });
-  const requirements = readRequirementsManifest(normalizedFiles);
+  const requirements = readRequirementsManifest(normalizedFiles) || submittedRequirements;
 
   // Free disk from prior runs before terraform init downloads providers again.
   await sweepStaleScaffoldTemp(2 * 60 * 1000).catch(() => {});
