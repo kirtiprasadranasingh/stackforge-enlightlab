@@ -28,6 +28,7 @@ function interviewChoseAspNet(context: string): boolean {
 export function interviewNamedJavaOnly(context: string): boolean {
   if (interviewChoseSpringBoot(context)) return false;
   if (/Language \(client override\):\s*Java only/i.test(context)) return true;
+  if (/Health-check (?:service )?(?:language|runtime):\s*Java\b/i.test(context)) return true;
   if (/→\s*Language \(client override\):\s*Java\b/i.test(context)) return true;
   // Confirmed-choices arrow or bare answer
   if (/→\s*Java\b/i.test(context) && !/→\s*Spring/i.test(context)) return true;
@@ -53,7 +54,7 @@ function interviewNamedDotNetOnly(context: string): boolean {
 function interviewConfirmedLanguage(context: string): boolean {
   if (/Language(?:\/framework)?\s*\(client override\)/i.test(context)) return true;
   if (
-    /Health-check service language:\s*(Node\.js|Go|Python|Java|\.NET)\b/i.test(
+    /Health-check (?:service )?(?:language|runtime):\s*(Node\.js|Go|Python|Java|\.NET)\b/i.test(
       context
     )
   ) {
@@ -565,13 +566,30 @@ function stripAwsAssumptionLeakage(plan: string, context: string): string {
  * QA #7 — Align plan prose with what Approve & Generate actually emits.
  * AWS-specific honesty (HTTP:80 ALB, Secrets Manager) only when the stack is AWS.
  */
-function honestScaffoldDelivery(plan: string, context: string): string {
+function honestScaffoldDelivery(plan: string, context: string, presets?: Presets): string {
   let out = plan;
   const isAws = planOrContextIsAws(plan, context);
+  const isEks = presets?.cloud === 'aws' && presets.orchestrator === 'eks';
   const oneEnv =
     /→\s*One environment\b/i.test(context) ||
     /Which environments do you need\s*\n\s*→\s*One environment\b/i.test(context) ||
     /Environments:\s*One environment\b/i.test(context);
+
+  if (isAws && isEks) {
+    // EKS has a different deployment and data-store contract from ECS. Do not
+    // let the shared AWS prose append task-definition/RDS assumptions to an
+    // otherwise valid Kubernetes plan.
+    out = out
+      .split('\n')
+      .filter(
+        (line) =>
+          !/locked AWS ECS template|ECS Fargate|ecs task definition|aws ecs update-service|prior task definition ARN/i.test(
+            line
+          )
+      )
+      .join('\n');
+    return out;
+  }
 
   if (isAws) {
     // Architecture / Tools / Networking: do not promise ACM HTTPS as shipped.
@@ -1008,7 +1026,7 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
   out = demoteUnconfirmedRuntime(out, ctx);
   out = demoteUnconfirmedDatabase(out, ctx);
   out = demoteUnconfirmedCi(out, ctx);
-  out = honestScaffoldDelivery(out, ctx);
+  out = honestScaffoldDelivery(out, ctx, presets);
   out = stripCrossCloudCiRegistryConflicts(out, ctx);
   out = sanitizeGcpRegion(out, ctx);
   out = sanitizeAwsRegion(out, ctx);
@@ -1016,6 +1034,31 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
 
   // Ensure top-line Database / Data Service in Confirmed requirements matches parsed scaffoldOptions exactly
   const opts = parseScaffoldOptions(ctx, presets);
+  if (presets?.cloud === 'aws' && presets.orchestrator === 'eks') {
+    out = out
+      .split('\n')
+      .filter(
+        (line) =>
+          !/locked AWS ECS template|ECS Fargate|ecs task definition|aws ecs update-service|prior task definition ARN/i.test(
+            line
+          )
+      )
+      .join('\n');
+  }
+  if (opts.runtime === 'java') {
+    out = out.replace(
+      /^[-*]?\s*Health-check runtime was not confirmed[^\n]*\n?/gim,
+      ''
+    );
+    out = out.replace(
+      /^[-*]?\s*[^\n]*(?:Health-check\s+\*{0,2}runtime was not confirmed|Node\.js is a default scaffold placeholder)[^\n]*\n?/gim,
+      ''
+    );
+    out = out.replace(
+      /^([-*]\s*)?(?:Runtime Stub|Language\/runtime stub):\s*Node\.js[^\n]*/gim,
+      '$1Runtime Stub: Java (plain `/health` service; framework not confirmed)'
+    );
+  }
   if (opts.database === 'redis') {
     out = out.replace(
       /^([-*]\s*)?(Database|Data Service):\s*[^\n]+/gim,

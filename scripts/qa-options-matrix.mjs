@@ -20,7 +20,8 @@ import { mergeLockedBaseFiles } from '../lib/scaffold-base-files.ts';
 import { inferPresetsFromPrompt } from '../lib/infer-presets.ts';
 import { parseScaffoldOptions } from '../lib/scaffold-options.ts';
 import { validateScaffoldContract } from '../lib/scaffold-contract.ts';
-import { buildArchitectureSpec, createRequirementsManifest, readRequirementsManifest } from '../lib/architecture-spec.ts';
+import { buildArchitectureSpec, createRequirementsManifest, readRequirementsManifest, validatePlanAgainstSpec } from '../lib/architecture-spec.ts';
+import { sanitizePlanAgainstInterview } from '../lib/sanitize-plan.ts';
 import type { Presets } from '../types/index.ts';
 
 type Expect = {
@@ -442,6 +443,23 @@ if (
   console.error(\`FAIL  EKS Java + Redis semantic contract: \${javaRedisIssues.join('; ') || JSON.stringify(javaRedisEks.options)}\`);
 } else {
   console.log('PASS  EKS Java + Redis semantic contract');
+}
+
+const staleEksPlan = \`## Confirmed requirements
+- AWS EKS in us-east-1 with GitHub Actions, Redis cache, Java, development, staging, and production.
+## Assumptions
+- The locked AWS ECS template uses Terraform random_password for RDS.
+- Health-check runtime was not confirmed in the interview. Node.js is a default scaffold placeholder.
+## CI/CD
+- GitHub Actions deploys to EKS.
+\`;
+const cleanedEksPlan = sanitizePlanAgainstInterview(staleEksPlan, javaRedisEks.source, javaRedisEks.presets);
+const planIssues = validatePlanAgainstSpec(cleanedEksPlan, javaRedisEks);
+if (/AWS ECS template|Node\.js is a default scaffold placeholder/i.test(cleanedEksPlan) || planIssues.length) {
+  fail++;
+  console.error(\`FAIL  EKS plan cleanup: \${planIssues.join('; ') || cleanedEksPlan}\`);
+} else {
+  console.log('PASS  EKS plan cleanup removes ECS/Node leakage');
 }
 
 if (fail) {

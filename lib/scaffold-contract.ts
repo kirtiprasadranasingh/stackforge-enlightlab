@@ -63,6 +63,14 @@ export function validateScaffoldContract(
         }
       }
     }
+    if (options.access !== 'private') {
+      if (!/type:\s*LoadBalancer/.test(values)) {
+        issues.push('Public EKS access must use a Kubernetes LoadBalancer Service.');
+      }
+      if (!/ingress:\s*\n\s*enabled:\s*false/m.test(values)) {
+        issues.push('Public EKS default-hostname access must not retain an unconfigured ingress host.');
+      }
+    }
   }
 
   if (presets.cloud === 'aws' && presets.orchestrator === 'ecs') {

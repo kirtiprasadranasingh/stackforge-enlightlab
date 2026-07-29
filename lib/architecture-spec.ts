@@ -172,12 +172,28 @@ export function buildArchitectureSpec(params: {
   interviewAnswers?: string;
   presets: Presets;
 }): ArchitectureSpec {
-  const source = [params.prompt, params.interviewAnswers || ''].filter(Boolean).join('\n').trim();
+  const rawSource = [params.prompt, params.interviewAnswers || ''].filter(Boolean).join('\n').trim();
   const presets = inferPresetsFromPrompt(
     [params.prompt, params.interviewAnswers || ''].filter(Boolean).join('\n'),
     params.presets
   );
   const options = mergePromptAndInterviewOptions(params.prompt, params.interviewAnswers, presets);
+  // The original conversation can omit an item that was supplied by the
+  // selected profile (most often CI/CD).  Keep the raw request, but append a
+  // canonical recap so downstream sanitizers and generators never mistake a
+  // selected default for an unconfirmed requirement.
+  const source = [
+    rawSource,
+    'Confirmed requirements (canonical):',
+    `Cloud: ${presets.cloud}`,
+    `Hosting/orchestrator: ${presets.orchestrator}`,
+    `CI/CD system: ${CI_LABELS[presets.ci]}`,
+    `Region: ${options.region}`,
+    `Environments: ${options.environments.join(', ')}`,
+    `API access: ${labelForAccess(options.access)}`,
+    `Data service: ${labelForDatabase(options.database)}`,
+    `Health-check runtime: ${labelForRuntime(options.runtime)}`,
+  ].join('\n');
   const region = validateRegionForCloud(options.region, presets.cloud);
   const issues: string[] = [];
 
@@ -206,6 +222,12 @@ export function buildArchitectureSpec(params: {
 /** Stable, model-readable context for plan generation. */
 export function formatArchitectureSpecForPrompt(spec: ArchitectureSpec): string {
   const { presets, options } = spec;
+  const publicEksDelivery =
+    presets.cloud === 'aws' &&
+    presets.orchestrator === 'eks' &&
+    options.access !== 'private'
+      ? '\n- Public EKS delivery: Kubernetes Service type LoadBalancer (AWS-assigned public hostname, HTTP by default; custom domain required for trusted HTTPS). Do not describe ECS, an ALB controller, NGINX ingress, or app.example.com for this path.'
+      : '';
   return `## Validated architecture specification (authoritative)
 - Cloud: ${presets.cloud}
 - Hosting/orchestrator: ${presets.orchestrator}
@@ -215,7 +237,7 @@ export function formatArchitectureSpecForPrompt(spec: ArchitectureSpec): string 
 - API access: ${labelForAccess(options.access)}${options.access === 'public_basic' ? ' (HTTP on the provider default hostname; custom domain required for trusted HTTPS)' : ''}
 - Data service: ${labelForDatabase(options.database)}
 - Health-check runtime: ${labelForRuntime(options.runtime)}
-- Scale tier: ${options.scale}
+- Scale tier: ${options.scale}${publicEksDelivery}
 
 Use every value above exactly. Do not introduce a different cloud, region, CI/CD system, database/cache, environment, runtime, or access mode.`;
 }
@@ -271,7 +293,14 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   if (!lower.includes(runtime)) {
     issues.push(`Plan is missing the selected ${labelForRuntime(options.runtime)} runtime.`);
   }
-  if (options.runtime === 'java' && /spring boot-based|demoapplication\.java/i.test(normalized)) {
+  const javaFrameworkPromotion = normalized
+    .split('\n')
+    .some(
+      (line) =>
+        /spring boot-based|demoapplication\.java/i.test(line) &&
+        !/\b(?:not|never)\b[^.\n]{0,80}\b(?:confirm|choose|select|request)/i.test(line)
+    );
+  if (options.runtime === 'java' && javaFrameworkPromotion) {
     issues.push('Plan promotes Spring Boot even though only Java was confirmed.');
   }
   if (options.runtime === 'java' && /health-check runtime was not confirmed|node\.js .*default scaffold placeholder/i.test(normalized)) {

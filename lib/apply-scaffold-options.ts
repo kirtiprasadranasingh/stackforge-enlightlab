@@ -828,6 +828,20 @@ export function applyScaffoldOptions(
         '$1true'
       );
     }
+    if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+      // A hostless Kubernetes LoadBalancer Service gives a real AWS-assigned
+      // public hostname without inventing a customer domain or half-configured
+      // ALB controller/Ingress resources.
+      if (options.access === 'private') {
+        v = v.replace(/type:\s*LoadBalancer/, 'type: ClusterIP');
+      } else {
+        v = v.replace(/type:\s*ClusterIP/, 'type: LoadBalancer');
+        v = v.replace(
+          /(ingress:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+enabled:\s*)true/m,
+          '$1false'
+        );
+      }
+    }
     byPath.set(valuesPath, { ...byPath.get(valuesPath)!, content: v });
   }
 
@@ -1544,6 +1558,33 @@ CMD ["node", "server.js"]
           base +
           `\n\n## Scaffold options notes\n\n${notes.map((n) => `- ${n}`).join('\n')}\n`,
       });
+    }
+  }
+
+  // Keep EKS README claims aligned with the selected runtime/data service.
+  // The locked base is intentionally generic Node/PostgreSQL, but leaving that
+  // wording in a Java/Redis ZIP is exactly the false-success QA case.
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+    const readme = byPath.get('README.md');
+    if (readme) {
+      let content = readme.content;
+      if (options.runtime === 'java') {
+        content = content.replace(/private Node\.js API/gi, 'Java health-check service');
+        content = content.replace(/Minimal Express `\/health` stub/gi, 'Minimal plain Java `/health` stub');
+      }
+      if (options.database === 'redis') {
+        content = content.replace(/AWS EKS \+ Helm \+ PostgreSQL Scaffold/gi, 'AWS EKS + Helm + Redis Scaffold');
+        content = content.replace(/Multi-AZ PostgreSQL \(RDS\)/gi, 'private ElastiCache Redis');
+        content = content.replace(/RDS PostgreSQL Multi-AZ/gi, 'ElastiCache Redis replication group');
+        content = content.replace(/Put `db_password` and RDS endpoint/gi, 'Put the Redis endpoint');
+      }
+      if (options.access !== 'private') {
+        content = content.replace(
+          /## After apply/i,
+          '## Public endpoint\n\nThe Helm Service is type `LoadBalancer`, so AWS assigns a public hostname. It serves HTTP by default; use a client-owned domain and TLS termination for trusted HTTPS.\n\n## After apply'
+        );
+      }
+      byPath.set('README.md', { ...readme, content });
     }
   }
 
