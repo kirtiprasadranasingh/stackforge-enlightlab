@@ -1494,6 +1494,15 @@ CMD ["node", "server.js"]
         : '.NET was selected as the **language** only — ASP.NET Controllers/Services were not confirmed. This scaffold keeps a minimal `/health` stub in a supported runtime (Node/Python/Go) so image build and probes pass. Replace the stub with your real .NET service before production.'
     );
   }
+  if (options.runtime === 'dotnet') {
+    const staleDotNetNote = notes.findIndex((note) =>
+      note.includes('ASP.NET Controllers/Services were not confirmed')
+    );
+    if (staleDotNetNote >= 0) {
+      notes[staleDotNetNote] =
+        '.NET was selected as the language only. This scaffold emits a minimal ASP.NET Core `/health` implementation default so the image builds and probes pass; controllers, services, and the application architecture were not selected. Replace the stub with the real service before production.';
+    }
+  }
   if (options.database === 'mongodb') {
     notes.push(
       'MongoDB was selected, but this locked template cannot provision MongoDB/DocumentDB/Atlas. No database infrastructure has been generated; choose a supported data service before deployment.'

@@ -209,6 +209,28 @@ export function buildArchitectureSpec(params: {
       'MongoDB is not supported by the locked infrastructure templates. Choose PostgreSQL, MySQL, Redis cache, or no data service before generating a plan.'
     );
   }
+  // A cache/database request is a production-valid requirement, but it cannot
+  // be silently fulfilled by a different service. Block before approval until
+  // the selected profile has a provider-native locked adapter.
+  if (
+    options.database === 'redis' &&
+    ((presets.cloud === 'gcp' && presets.orchestrator === 'gke') ||
+      (presets.cloud === 'azure' && presets.orchestrator === 'container-apps') ||
+      (presets.cloud === 'oracle' && presets.orchestrator === 'oke'))
+  ) {
+    issues.push(
+      `Redis/Valkey is not yet implemented for the locked ${presets.orchestrator.toUpperCase()} template. Choose PostgreSQL, MySQL, no data service, or a profile with a provider-native Redis adapter before generating a plan.`
+    );
+  }
+  if (
+    options.database === 'postgres' &&
+    presets.cloud === 'oracle' &&
+    presets.orchestrator === 'oke'
+  ) {
+    issues.push(
+      'PostgreSQL is not yet implemented for the locked OKE template. The template must not substitute MySQL HeatWave for a PostgreSQL request; choose MySQL or another supported profile before generating a plan.'
+    );
+  }
   if (
     presets.cloud === 'aws' &&
     options.access === 'public_basic' &&
@@ -308,8 +330,20 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   if (options.runtime === 'java' && /health-check runtime was not confirmed|node\.js .*default scaffold placeholder/i.test(normalized)) {
     issues.push('Plan contradicts the confirmed Java runtime with a Node.js default assumption.');
   }
-  if (options.runtime === 'dotnet' && /asp\.net (?:controllers|services)/i.test(normalized)) {
-    issues.push('Plan promotes an ASP.NET application even though only .NET was confirmed.');
+  // The locked .NET stub is deliberately a minimal ASP.NET Core `/health`
+  // endpoint. It is an implementation default, not a client choice of
+  // controllers, services, or a full application framework.
+  if (options.runtime === 'dotnet') {
+    const undisclosedFrameworkPromotion = normalized
+      .split('\n')
+      .some(
+        (line) =>
+          /asp\.net (?:controllers|services)|full asp\.net application/i.test(line) &&
+          !/not confirmed|implementation default|minimal .*\/health/i.test(line)
+      );
+    if (undisclosedFrameworkPromotion) {
+      issues.push('Plan promotes ASP.NET controllers/services even though only .NET was confirmed.');
+    }
   }
 
   for (const env of options.environments) {

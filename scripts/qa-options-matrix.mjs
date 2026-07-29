@@ -507,6 +507,41 @@ if (
   console.log('PASS  Azure override strips AWS secret leakage');
 }
 
+const dotnetTruth = buildArchitectureSpec({
+  prompt: 'GCP GKE .NET service',
+  interviewAnswers: 'europe-west1. Development and staging. Public HTTP on the default load-balancer hostname. PostgreSQL. Medium — 3 to 5 app copies. Google Cloud Build. → .NET',
+  presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'gcp-cloud-build' },
+});
+const dotnetPlan = sanitizePlanAgainstInterview(
+  '## Confirmed requirements\\n- GCP GKE in europe-west1 with Google Cloud Build, .NET, PostgreSQL, development and staging.\\n- Runtime Stub: Node.js\\n## File manifest\\n- app/Program.cs: health endpoint\\n- app/app.csproj: ASP.NET Core project\\n## Assumptions',
+  dotnetTruth.source,
+  dotnetTruth.presets
+);
+const dotnetPlanIssues = validatePlanAgainstSpec(dotnetPlan, dotnetTruth);
+if (
+  !dotnetPlan.includes('ASP.NET Core') ||
+  !dotnetPlan.includes('implementation default') ||
+  !dotnetPlan.includes('app/Program.cs') ||
+  dotnetPlanIssues.length
+) {
+  fail++;
+  console.error(\`FAIL  .NET plan-to-code disclosure: \${dotnetPlanIssues.join('; ') || dotnetPlan}\`);
+} else {
+  console.log('PASS  .NET plan matches generated ASP.NET Core health stub');
+}
+
+const unsupportedCapability = buildArchitectureSpec({
+  prompt: 'GCP GKE service with Redis',
+  interviewAnswers: 'europe-west1. Development and staging. Private and internal only. Redis cache. Medium — 3 to 5 app copies. Python.',
+  presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'github-actions' },
+});
+if (!unsupportedCapability.issues.some((issue) => issue.includes('Redis/Valkey is not yet implemented'))) {
+  fail++;
+  console.error(\`FAIL  unsupported capability must block before approval: \${unsupportedCapability.issues.join('; ')}\`);
+} else {
+  console.log('PASS  unsupported provider capability blocks before approval');
+}
+
 if (fail) {
   console.error(\`\\nOptions matrix FAILED (\${fail})\`);
   process.exit(1);

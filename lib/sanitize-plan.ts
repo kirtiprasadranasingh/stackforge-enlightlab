@@ -962,19 +962,19 @@ export function sanitizePlanAgainstInterview(
     // the inner ASP.NET and becomes ".NET (.NET (ASP.NET not confirmed) not confirmed)".
     out = out.replace(
       /\.NET\s*\(\s*\.NET\s*\(\s*ASP\.NET[^)]*\)\s*not confirmed\s*\)/gi,
-      '.NET (ASP.NET **not** confirmed)'
+      '.NET (minimal ASP.NET Core `/health` implementation default)'
     );
     out = out.replace(
-      /\bASP\.NET(?:\s+Core)?\b(?!\s*\([^)]*not\s+confirmed)/gi,
-      'ASP.NET (**not** confirmed)'
+      /\bASP\.NET(?:\s+Core)?\b(?!\s*\([^)]*(?:implementation default|minimal `?\/health`?))/gi,
+      'minimal ASP.NET Core `/health` implementation default'
     );
     out = out.replace(
       /^([-*]\s*)?Runtime Stub:\s*Node\.js[^\n]*/gim,
       '$1Runtime Stub: **.NET** (language only — ASP.NET **not** confirmed; Node `/health` stub is a build placeholder)'
     );
     out = out.replace(
-      /^([-*]\s*)?Health-check service language:\s*\.NET(?!\s*\([^)]*not\s+confirmed\))[^\n]*/gim,
-      '$1Health-check service language: **.NET** (framework not confirmed)'
+      /^([-*]\s*)?Health-check service language:\s*\.NET(?!\s*\([^)]*implementation default\))[^\n]*/gim,
+      '$1Health-check service language: **.NET** (minimal ASP.NET Core `/health` implementation default)'
     );
 
     // Clean up duplicate consecutive (not confirmed) or (framework not confirmed) strings
@@ -987,10 +987,9 @@ export function sanitizePlanAgainstInterview(
       '(not confirmed)'
     );
 
-    // File manifesto must not invent a real .NET project when language-only
-    out = out.replace(/^[-*]\s*app\/Program\.cs[^\n]*\n?/gim, '');
-    out = out.replace(/^[-*]\s*app\/app\.csproj[^\n]*\n?/gim, '');
-    out = out.replace(/^[-*]\s*Program\.cs[^\n]*\n?/gim, '');
+    // Keep the real generated .NET project in the file manifest. It is a
+    // minimal implementation default, rather than a claim that a full
+    // controllers/services architecture was selected.
     out = out.replace(
       /Emit Dockerfile and a minimal \.NET health-check application stub[^\n]*/gi,
       'Emit Dockerfile + minimal `/health` stub for the .NET **language** choice (ASP.NET not confirmed; Node/Python/Go stand-in with README honesty)'
@@ -999,7 +998,36 @@ export function sanitizePlanAgainstInterview(
       /A minimal \.NET Kestrel HTTP server will be provided[^\n]*/gi,
       'A minimal `/health` placeholder stub (Node/Python/Go) is emitted so image build passes — not a confirmed ASP.NET/Kestrel app'
     );
-    if (!out.includes('.NET was selected as the **language** only')) {
+    out = out.replace(
+      /(Runtime Stub:\s*\*\*\.NET\*\* \(language only)[^\n]*/gi,
+      'Runtime Stub: **.NET** (minimal ASP.NET Core `/health` implementation default; controllers/services were not selected)'
+    );
+    out = out.replace(
+      /(Health-check service language:\s*\*\*\.NET\*\* \()[^\n]*/gi,
+      'Health-check service language: **.NET** (minimal ASP.NET Core `/health` implementation default)'
+    );
+    // Reconcile older language-only wording with the actual locked output:
+    // Program.cs + Microsoft.NET.Sdk.Web provide a minimal buildable endpoint.
+    out = out.replace(
+      /Emit Dockerfile \+ minimal `\/health` stub for the \.NET \*\*language\*\* choice[^\n]*/gi,
+      'Emit `Program.cs`, `app.csproj`, and Dockerfile for the minimal ASP.NET Core `/health` implementation default (controllers/services were not selected)'
+    );
+    out = out.replace(
+      /A minimal `\/health` placeholder stub \(Node\/Python\/Go\) is emitted so image build passes[^\n]*/gi,
+      'A minimal ASP.NET Core/Kestrel `/health` implementation default is emitted; it is not a client-selected controllers/services architecture'
+    );
+    out = out.replace(
+      /\.NET\*\* \(language only[^\n)]*ASP\.NET[^\n)]*Node `\/health` stub is a build placeholder\)/gi,
+      '.NET** (minimal ASP.NET Core `/health` implementation default; controllers/services were not selected)'
+    );
+    out = prependAssumption(
+      out,
+      '.NET was selected as the language only. StackForge emits a minimal ASP.NET Core `/health` implementation default so the generated image is buildable; controllers, services, and the application architecture remain unselected.'
+    );
+    if (
+      !out.includes('minimal ASP.NET Core `/health` implementation default') &&
+      !out.includes('.NET was selected as the language only. StackForge emits')
+    ) {
       out = prependAssumption(
         out,
         '.NET was selected as the **language** only — ASP.NET was not chosen; any stub is a Node/Python/Go `/health` placeholder, not a confirmed framework.'

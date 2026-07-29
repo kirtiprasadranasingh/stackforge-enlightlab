@@ -4,6 +4,8 @@
 **Scope:** Generator only — does **not** provision cloud resources.  
 **Bar:** Reviewable scaffolds that pass in-app **Scaffold checks** for the golden prompt matrix across AWS / GCP / Azure / Oracle.
 
+**Acceptance source:** Use [docs/QA-ACCEPTANCE-MATRIX.md](docs/QA-ACCEPTANCE-MATRIX.md) with this handoff. It maps every `TEST-1.pdf` scenario to either a supported pass or a required clear block, so QA does not mistake a silent substitution for a successful result.
+
 ---
 
 ## What changed for QA readiness (profile-first)
@@ -54,6 +56,8 @@ Use presets as noted, then Approve & Generate, then **Run all checks**. Prefer *
 ```bash
 npm install
 npm run qa:matrix          # profile + locked base coverage
+npm run qa:options-matrix  # interview parsing + regression cases
+npm run qa:contract-matrix # 7,609 supported option contracts
 # Optional: validate a fixture tree if bash + terraform available
 # bash scripts/validate-scaffold.sh .verify-gcp-fastapi
 ```
