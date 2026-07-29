@@ -46,6 +46,7 @@ import { adaptRequiredPathsForCi } from '@/lib/apply-scaffold-options';
 import { sanitizePlanAgainstInterview } from '@/lib/sanitize-plan';
 import {
   buildArchitectureSpec,
+  createRequirementsManifest,
   formatArchitectureSpecForPrompt,
   validatePlanAgainstSpec,
   type ArchitectureSpec,
@@ -1151,6 +1152,12 @@ Always format your response by wrapping the chat reply in the following markers:
                   scaffoldOptions,
                 });
               }
+              // Persist the exact approved requirements beside the scaffold so
+              // later "Run all checks" can verify semantics, not just syntax.
+              finalized = [
+                ...finalized.filter((file) => file.path !== '.stackforge/requirements.json'),
+                createRequirementsManifest(architectureSpec),
+              ];
               const contractIssues = validateScaffoldContract(
                 finalized,
                 presets,

@@ -8,7 +8,9 @@
 import { CI_LABELS, validateRegionForCloud } from '@/lib/clarifying-questions';
 import { inferPresetsFromPrompt } from '@/lib/infer-presets';
 import { parseScaffoldOptions, type ScaffoldOptions } from '@/lib/scaffold-options';
-import type { Presets } from '@/types';
+import type { GeneratedFile, Presets } from '@/types';
+
+export const REQUIREMENTS_MANIFEST_PATH = '.stackforge/requirements.json';
 
 export interface ArchitectureSpec {
   presets: Presets;
@@ -16,6 +18,95 @@ export interface ArchitectureSpec {
   /** The confirmed interview block, or the original request for direct prompts. */
   source: string;
   issues: string[];
+}
+
+export interface RequirementsManifest {
+  version: 1;
+  presets: Presets;
+  options: ScaffoldOptions;
+}
+
+export function createRequirementsManifest(spec: ArchitectureSpec): GeneratedFile {
+  const manifest: RequirementsManifest = {
+    version: 1,
+    presets: spec.presets,
+    options: spec.options,
+  };
+  return {
+    path: REQUIREMENTS_MANIFEST_PATH,
+    language: 'json',
+    content: `${JSON.stringify(manifest, null, 2)}\n`,
+    description: 'Validated StackForge requirements contract',
+  };
+}
+
+export function readRequirementsManifest(files: GeneratedFile[]): RequirementsManifest | null {
+  const raw = files.find((file) => file.path === REQUIREMENTS_MANIFEST_PATH)?.content;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<RequirementsManifest>;
+    if (
+      parsed.version !== 1 ||
+      !parsed.presets ||
+      !parsed.options ||
+      typeof parsed.presets.cloud !== 'string' ||
+      typeof parsed.presets.orchestrator !== 'string' ||
+      typeof parsed.presets.ci !== 'string' ||
+      typeof parsed.options.runtime !== 'string' ||
+      typeof parsed.options.database !== 'string' ||
+      !Array.isArray(parsed.options.environments)
+    ) {
+      return null;
+    }
+    return parsed as RequirementsManifest;
+  } catch {
+    return null;
+  }
+}
+
+type OptionKey = keyof ScaffoldOptions;
+
+function hasExplicitValue(text: string, key: OptionKey): boolean {
+  const value = text.toLowerCase();
+  switch (key) {
+    case 'region':
+      return /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/.test(value);
+    case 'environments':
+      return /\b(one environment|development|staging|production)\b/.test(value);
+    case 'database':
+      return /\b(redis|valkey|postgres(?:ql)?|mysql|mariadb|mongodb|mongo|no data service|without (?:a )?database)\b/.test(value);
+    case 'databaseMode':
+      return /\b(high availability|multi-?az|7-day|automatic backups|standard private database)\b/.test(value);
+    case 'access':
+      return /\b(private and internal only|private\/internal|public without a custom domain|public http on the default (?:load[- ]?balancer|alb|lb) hostname|public with (?:secure )?https|default (?:load[- ]?balancer|alb|lb) hostname)\b/.test(value);
+    case 'scale':
+      return /\b(small|medium|high traffic|automatic scaling|[2-5] app copies)\b/.test(value);
+    case 'runtime':
+      return /\b(node\.?js|express|python|go(?:lang)?|java|\.net|dotnet|c#)\b/.test(value);
+  }
+}
+
+/**
+ * Preserve requirements named in the original prompt.  An interview response
+ * overrides a field only when it actually names a value for that field; its
+ * parser defaults must never erase (for example) "Java" from the prompt.
+ */
+function mergePromptAndInterviewOptions(
+  prompt: string,
+  interviewAnswers: string | undefined,
+  presets: Presets
+): ScaffoldOptions {
+  const promptOptions = parseScaffoldOptions(prompt, presets);
+  if (!interviewAnswers?.trim()) return promptOptions;
+
+  const answerOptions = parseScaffoldOptions(interviewAnswers, presets);
+  const merged = { ...promptOptions };
+  for (const key of Object.keys(merged) as OptionKey[]) {
+    if (hasExplicitValue(interviewAnswers, key)) {
+      merged[key] = answerOptions[key] as never;
+    }
+  }
+  return merged;
 }
 
 const CLOUD_FORBIDDEN_TERMS: Record<Presets['cloud'], RegExp[]> = {
@@ -81,12 +172,12 @@ export function buildArchitectureSpec(params: {
   interviewAnswers?: string;
   presets: Presets;
 }): ArchitectureSpec {
-  const source = (params.interviewAnswers || params.prompt).trim();
+  const source = [params.prompt, params.interviewAnswers || ''].filter(Boolean).join('\n').trim();
   const presets = inferPresetsFromPrompt(
     [params.prompt, params.interviewAnswers || ''].filter(Boolean).join('\n'),
     params.presets
   );
-  const options = parseScaffoldOptions(source, presets);
+  const options = mergePromptAndInterviewOptions(params.prompt, params.interviewAnswers, presets);
   const region = validateRegionForCloud(options.region, presets.cloud);
   const issues: string[] = [];
 
@@ -98,6 +189,15 @@ export function buildArchitectureSpec(params: {
   if (options.database === 'mongodb') {
     issues.push(
       'MongoDB is not supported by the locked infrastructure templates. Choose PostgreSQL, MySQL, Redis cache, or no data service before generating a plan.'
+    );
+  }
+  if (
+    presets.cloud === 'aws' &&
+    options.access === 'public_basic' &&
+    /https[^\n]{0,80}default (?:load[- ]?balancer|alb|lb) hostname|default (?:load[- ]?balancer|alb|lb) hostname[^\n]{0,80}https/i.test(source)
+  ) {
+    issues.push(
+      'Trusted HTTPS cannot be issued for the provider-owned default AWS load-balancer hostname. Choose public HTTP on the default hostname, or provide a custom domain for ACM HTTPS.'
     );
   }
   return { presets, options, source, issues };
@@ -112,7 +212,7 @@ export function formatArchitectureSpecForPrompt(spec: ArchitectureSpec): string 
 - CI/CD: ${presets.ci}
 - Region: ${options.region}
 - Environments: ${options.environments.join(', ')}
-- API access: ${labelForAccess(options.access)}
+- API access: ${labelForAccess(options.access)}${options.access === 'public_basic' ? ' (HTTP on the provider default hostname; custom domain required for trusted HTTPS)' : ''}
 - Data service: ${labelForDatabase(options.database)}
 - Health-check runtime: ${labelForRuntime(options.runtime)}
 - Scale tier: ${options.scale}
@@ -148,6 +248,9 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
       issues.push(`Plan contains a service from another cloud: ${forbidden.source}.`);
     }
   }
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks' && /\b(ECS Fargate|AWS ECS template|aws_ecs_)\b/i.test(normalized)) {
+    issues.push('EKS plan contains ECS-specific template assumptions.');
+  }
 
   if (options.database === 'redis') {
     if (/data service:\s*(?:no database|no data service|postgres|mysql)/i.test(normalized)) {
@@ -170,6 +273,9 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   }
   if (options.runtime === 'java' && /spring boot-based|demoapplication\.java/i.test(normalized)) {
     issues.push('Plan promotes Spring Boot even though only Java was confirmed.');
+  }
+  if (options.runtime === 'java' && /health-check runtime was not confirmed|node\.js .*default scaffold placeholder/i.test(normalized)) {
+    issues.push('Plan contradicts the confirmed Java runtime with a Node.js default assumption.');
   }
   if (options.runtime === 'dotnet' && /asp\.net (?:controllers|services)/i.test(normalized)) {
     issues.push('Plan promotes an ASP.NET application even though only .NET was confirmed.');

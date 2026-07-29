@@ -13,7 +13,7 @@ export type ScaffoldCheckId = (typeof CHECK_IDS)[number];
 
 export const CHECK_LABELS: Record<ScaffoldCheckId, string> = {
   all: 'Run all checks',
-  terraform: 'terraform init · validate · plan',
+  terraform: 'terraform init · validate (plan requires credentials)',
   helm: 'helm lint · template',
   hadolint: 'hadolint',
   actionlint: 'actionlint',

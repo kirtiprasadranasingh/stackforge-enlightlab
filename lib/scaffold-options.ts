@@ -254,6 +254,7 @@ export function parseScaffoldOptions(
     out.access = 'private';
   } else if (
     /\bpublic without a custom domain\b/.test(t) ||
+    /\bpublic http on the default (load[- ]?balancer|alb|lb) hostname\b/.test(t) ||
     /\bhttps on (the )?default (load[- ]?balancer|alb|lb) hostname\b/.test(t)
   ) {
     out.access = 'public_basic';

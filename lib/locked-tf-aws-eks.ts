@@ -111,6 +111,24 @@ variable "db_multi_az" {
   default     = true
 }
 
+variable "enable_redis" {
+  type        = bool
+  description = "Provision Amazon ElastiCache Redis"
+  default     = false
+}
+
+variable "redis_ha" {
+  type        = bool
+  description = "Use a Multi-AZ Redis replication group with a replica"
+  default     = false
+}
+
+variable "redis_snapshot_retention_days" {
+  type        = number
+  description = "Redis snapshot retention days (0 disables snapshots)"
+  default     = 0
+}
+
 variable "vpc_cidr" {
   type        = string
   description = "VPC CIDR"
@@ -154,6 +172,13 @@ resource "random_password" "db" {
   count   = var.enable_database ? 1 : 0
   length  = 20
   special = false
+}
+
+resource "aws_ecr_repository" "app" {
+  name                 = "\${local.name_prefix}-app"
+  image_tag_mutability = "MUTABLE"
+  force_delete         = true
+  tags                 = local.tags
 }
 `;
 
@@ -307,6 +332,26 @@ resource "aws_security_group" "rds" {
   }
   tags = merge(local.tags, { Name = "\${local.name_prefix}-rds-sg" })
 }
+
+resource "aws_security_group" "redis" {
+  count       = var.enable_redis ? 1 : 0
+  name_prefix = "\${local.name_prefix}-redis-"
+  vpc_id      = aws_vpc.main.id
+  description = "Redis access from EKS nodes only"
+  ingress {
+    from_port       = 6379
+    to_port         = 6379
+    protocol        = "tcp"
+    security_groups = [aws_security_group.eks_nodes.id]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = merge(local.tags, { Name = "\${local.name_prefix}-redis-sg" })
+}
 `;
 
 export const TF_EKS_IAM = `data "aws_iam_policy_document" "eks_cluster_assume" {
@@ -438,6 +483,35 @@ resource "aws_db_instance" "main" {
 }
 `;
 
+export const TF_EKS_REDIS = `resource "aws_elasticache_subnet_group" "redis" {
+  count      = var.enable_redis ? 1 : 0
+  name       = "\${local.name_prefix}-redis"
+  subnet_ids = aws_subnet.private[*].id
+  tags       = local.tags
+}
+
+resource "aws_elasticache_replication_group" "redis" {
+  count                         = var.enable_redis ? 1 : 0
+  replication_group_id          = substr("\${local.name_prefix}-redis", 0, 40)
+  description                   = "Managed Redis for \${local.name_prefix}"
+  engine                        = "redis"
+  engine_version                = "7.1"
+  node_type                     = "cache.t3.micro"
+  port                          = 6379
+  parameter_group_name          = "default.redis7"
+  num_cache_clusters            = var.redis_ha ? 2 : 1
+  automatic_failover_enabled    = var.redis_ha
+  multi_az_enabled              = var.redis_ha
+  snapshot_retention_limit      = var.redis_snapshot_retention_days
+  subnet_group_name             = aws_elasticache_subnet_group.redis[0].name
+  security_group_ids            = [aws_security_group.redis[0].id]
+  at_rest_encryption_enabled    = true
+  transit_encryption_enabled    = true
+  apply_immediately             = true
+  tags                          = local.tags
+}
+`;
+
 export const TF_EKS_OUTPUTS = `output "eks_cluster_name" {
   description = "EKS cluster name for aws eks update-kubeconfig / CI"
   value       = aws_eks_cluster.main.name
@@ -454,6 +528,15 @@ output "vpc_id" {
 
 output "private_subnet_ids" {
   value = aws_subnet.private[*].id
+}
+
+output "ecr_repository_url" {
+  value = aws_ecr_repository.app.repository_url
+}
+
+output "redis_primary_endpoint" {
+  description = "Private Redis endpoint for application configuration"
+  value       = try(aws_elasticache_replication_group.redis[0].primary_endpoint_address, null)
 }
 
 output "rds_endpoint" {

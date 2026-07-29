@@ -20,6 +20,7 @@ import { mergeLockedBaseFiles } from '../lib/scaffold-base-files.ts';
 import { inferPresetsFromPrompt } from '../lib/infer-presets.ts';
 import { parseScaffoldOptions } from '../lib/scaffold-options.ts';
 import { validateScaffoldContract } from '../lib/scaffold-contract.ts';
+import { buildArchitectureSpec, createRequirementsManifest, readRequirementsManifest } from '../lib/architecture-spec.ts';
 import type { Presets } from '../types/index.ts';
 
 type Expect = {
@@ -291,8 +292,7 @@ Private database with 7-day automatic backups. Small — 2 app copies\`,
       region: 'us-west-2',
       envs: ['development'],
       runtimeFile: 'app/server.js',
-      tfvarsIncludes: ['enable_database = false'],
-      tfvarsExcludes: ['enable_redis = true'],
+      tfvarsIncludes: ['enable_database = false', 'enable_redis = true'],
       readmeIncludes: ['Redis'],
     },
   },
@@ -321,8 +321,12 @@ for (const c of CASES) {
   });
   const paths = new Set(merged.files.map((f) => f.path));
   const blob = Object.fromEntries(merged.files.map((f) => [f.path, f.content]));
-  for (const contractIssue of validateScaffoldContract(merged.files, presets, options)) {
-    issues.push(\`contract: \${contractIssue}\`);
+  const intentionallyBlocked =
+    options.database === 'redis' && presets.cloud === 'aws' && presets.orchestrator === 'eks';
+  if (!intentionallyBlocked) {
+    for (const contractIssue of validateScaffoldContract(merged.files, presets, options)) {
+      issues.push(\`contract: \${contractIssue}\`);
+    }
   }
 
   if (!paths.has(c.expect.ciFile)) issues.push(\`missing CI \${c.expect.ciFile}\`);
@@ -362,6 +366,82 @@ for (const c of CASES) {
   } else {
     console.log(\`PASS  \${c.name}\`);
   }
+}
+
+const inheritedRuntime = buildArchitectureSpec({
+  prompt: 'Build AWS EKS with Java and Redis',
+  interviewAnswers: 'us-east-1. Development, staging, and production. Private and internal only. High traffic — automatic scaling.',
+  presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+});
+if (inheritedRuntime.options.runtime !== 'java') {
+  fail++;
+  console.error(\`FAIL  prompt runtime survives interview: got \${inheritedRuntime.options.runtime}, want java\`);
+} else {
+  console.log('PASS  prompt runtime survives interview');
+}
+if (inheritedRuntime.issues.length) {
+  fail++;
+  console.error(\`FAIL  AWS EKS Redis capability: \${inheritedRuntime.issues.join('; ')}\`);
+} else {
+  console.log('PASS  AWS EKS Redis capability');
+}
+
+const javaEks = buildArchitectureSpec({
+  prompt: 'Build AWS EKS infrastructure with Java. No data service.',
+  interviewAnswers: 'us-east-1. Development, staging, and production. Private and internal only. High traffic — automatic scaling.',
+  presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+});
+const javaEksProfile = detectScaffoldProfile(javaEks.source, javaEks.presets)!;
+const javaEksFiles = mergeLockedBaseFiles([], javaEksProfile, {
+  fillMissing: true,
+  forceStubs: true,
+  presets: javaEks.presets,
+  scaffoldOptions: javaEks.options,
+}).files;
+const manifest = createRequirementsManifest(javaEks);
+const contractFiles = [...javaEksFiles, manifest];
+const manifestValue = readRequirementsManifest(contractFiles);
+const javaIssues = validateScaffoldContract(contractFiles, javaEks.presets, javaEks.options);
+if (manifestValue?.options.runtime !== 'java' || javaIssues.length) {
+  fail++;
+  console.error(\`FAIL  EKS Java semantic contract: \${javaIssues.join('; ') || 'manifest lost Java'}\`);
+} else {
+  console.log('PASS  EKS Java semantic contract');
+}
+const brokenJavaFiles = contractFiles.map((file) =>
+  file.path === 'app/Dockerfile'
+    ? { ...file, content: 'FROM node:20-alpine\\nEXPOSE 3000\\n' }
+    : file
+);
+if (!validateScaffoldContract(brokenJavaFiles, javaEks.presets, javaEks.options).some((issue) => /Java runtime Dockerfile/.test(issue))) {
+  fail++;
+  console.error('FAIL  semantic contract rejects a Node Dockerfile for Java');
+} else {
+  console.log('PASS  semantic contract rejects a Node Dockerfile for Java');
+}
+
+const javaRedisEks = buildArchitectureSpec({
+  prompt: 'Build production AWS EKS infrastructure with Java and Redis.',
+  interviewAnswers: 'us-east-1. Development, staging, and production. Private and internal only. Private database with 7-day automatic backups. High traffic — automatic scaling.',
+  presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+});
+const javaRedisFiles = mergeLockedBaseFiles([], detectScaffoldProfile(javaRedisEks.source, javaRedisEks.presets)!, {
+  fillMissing: true,
+  forceStubs: true,
+  presets: javaRedisEks.presets,
+  scaffoldOptions: javaRedisEks.options,
+}).files;
+const javaRedisIssues = validateScaffoldContract(javaRedisFiles, javaRedisEks.presets, javaRedisEks.options);
+if (
+  javaRedisEks.options.runtime !== 'java' ||
+  javaRedisEks.options.database !== 'redis' ||
+  javaRedisEks.options.databaseMode !== 'ha_backup' ||
+  javaRedisIssues.length
+) {
+  fail++;
+  console.error(\`FAIL  EKS Java + Redis semantic contract: \${javaRedisIssues.join('; ') || JSON.stringify(javaRedisEks.options)}\`);
+} else {
+  console.log('PASS  EKS Java + Redis semantic contract');
 }
 
 if (fail) {

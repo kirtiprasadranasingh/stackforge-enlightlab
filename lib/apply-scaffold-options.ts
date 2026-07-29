@@ -661,14 +661,16 @@ export function applyScaffoldOptions(
 
     const enableDb = options.database === 'postgres' || options.database === 'mysql';
     const enableRedis = options.database === 'redis';
+    const multiAz =
+      options.databaseMode === 'ha' || options.databaseMode === 'ha_backup';
     c = patchDefault(c, 'enable_database', enableDb);
     c = patchDefault(c, 'enable_redis', enableRedis);
+    c = patchDefault(c, 'redis_ha', multiAz);
+    c = patchDefault(c, 'redis_snapshot_retention_days', options.databaseMode === 'ha_backup' ? 7 : 0);
     if (options.database === 'mysql') c = patchDefault(c, 'db_engine', 'mysql');
     if (options.database === 'postgres' || options.database === 'mongodb') {
       c = patchDefault(c, 'db_engine', 'postgres');
     }
-    const multiAz =
-      options.databaseMode === 'ha' || options.databaseMode === 'ha_backup';
     c = patchDefault(c, 'db_multi_az', multiAz);
     c = patchDefault(c, 'db_ha', multiAz);
     c = patchDefault(c, 'alb_internal', options.access === 'private');
@@ -766,8 +768,12 @@ export function applyScaffoldOptions(
           `db_engine = "${options.database === 'mysql' ? 'mysql' : 'postgres'}"`
         );
       }
-      if (presets.orchestrator === 'ecs') {
+      if (presets.orchestrator === 'ecs' || presets.orchestrator === 'eks') {
         lines.push(`enable_redis = ${enableRedis}`);
+      }
+      if (enableRedis) {
+        lines.push(`redis_ha = ${multiAz}`);
+        lines.push(`redis_snapshot_retention_days = ${options.databaseMode === 'ha_backup' ? 7 : 0}`);
       }
       lines.push(`db_multi_az = ${multiAz}`);
     }
@@ -805,6 +811,7 @@ export function applyScaffoldOptions(
   const valuesPath = [...byPath.keys()].find((p) => /charts\/.+\/values\.ya?ml$/.test(p));
   if (valuesPath) {
     let v = byPath.get(valuesPath)!.content;
+    v = v.replace(/targetPort:\s*\d+/, `targetPort: ${runtimePort(options.runtime)}`);
     v = v.replace(/replicaCount:\s*\d+/, `replicaCount: ${replicas.replicaCount}`);
     v = v.replace(/minReplicas:\s*\d+/, `minReplicas: ${replicas.minReplicas}`);
     v = v.replace(/maxReplicas:\s*\d+/, `maxReplicas: ${replicas.maxReplicas}`);
@@ -1431,6 +1438,7 @@ CMD ["node", "server.js"]
   }
   const redisSupported =
     (presets.cloud === 'aws' && presets.orchestrator === 'ecs') ||
+    (presets.cloud === 'aws' && presets.orchestrator === 'eks') ||
     (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run') ||
     (presets.cloud === 'azure' && presets.orchestrator === 'aks');
   if (options.database === 'redis' && !redisSupported) {
@@ -1443,6 +1451,13 @@ CMD ["node", "server.js"]
       options.databaseMode === 'ha' || options.databaseMode === 'ha_backup'
         ? 'Redis HA was selected — this Azure AKS locked template provisions **Azure Cache for Redis (Premium)** via `terraform/redis.tf` (`enable_redis = true`, `redis_ha = true`). Wire Private Endpoint / Key Vault before production.'
         : 'Redis was selected — this Azure AKS locked template provisions **Azure Cache for Redis** via `terraform/redis.tf` (`enable_redis = true`). Upgrade SKU / Private Endpoint before production if required.'
+    );
+  }
+  if (options.database === 'redis' && presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+    notes.push(
+      options.databaseMode === 'ha' || options.databaseMode === 'ha_backup'
+        ? 'Redis HA was selected — this EKS template provisions a private Multi-AZ ElastiCache Redis replication group with a replica via `terraform/redis.tf`.'
+        : 'Redis was selected — this EKS template provisions a private ElastiCache Redis replication group via `terraform/redis.tf`.'
     );
   }
   if (options.database === 'mysql' && presets.cloud === 'azure') {

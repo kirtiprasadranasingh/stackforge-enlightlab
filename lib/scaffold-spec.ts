@@ -70,6 +70,7 @@ export const AWS_EKS_HELM_FILES = [
   'terraform/iam.tf',
   'terraform/eks.tf',
   'terraform/database.tf',
+  'terraform/redis.tf',
   'terraform/outputs.tf',
   'environments/staging.tfvars',
   'environments/development.tfvars',

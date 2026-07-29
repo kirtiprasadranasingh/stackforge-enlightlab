@@ -14,6 +14,8 @@ import {
   type ScaffoldCheckId,
 } from '@/lib/scaffold-checks';
 import { normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
+import { readRequirementsManifest } from '@/lib/architecture-spec';
+import { validateScaffoldContract } from '@/lib/scaffold-contract';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -77,6 +79,7 @@ export async function POST(request: NextRequest) {
     applyLockedProfile: true,
     terraformOnly: true,
   });
+  const requirements = readRequirementsManifest(normalizedFiles);
 
   // Free disk from prior runs before terraform init downloads providers again.
   await sweepStaleScaffoldTemp(2 * 60 * 1000).catch(() => {});
@@ -100,6 +103,32 @@ export async function POST(request: NextRequest) {
             })),
           })
         );
+        if (!requirements) {
+          controller.enqueue(
+            sse({
+              type: 'line',
+              text: 'FAIL  - requirements contract manifest is missing or invalid; regenerate this scaffold before approving it.',
+            })
+          );
+          controller.enqueue(
+            sse({ type: 'done', exitCode: 1, ok: false, check: checkId })
+          );
+          return;
+        }
+        const contractIssues = validateScaffoldContract(
+          normalizedFiles,
+          requirements.presets,
+          requirements.options
+        );
+        if (contractIssues.length > 0) {
+          for (const issue of contractIssues) {
+            controller.enqueue(sse({ type: 'line', text: `FAIL  - requirement contract: ${issue}` }));
+          }
+          controller.enqueue(
+            sse({ type: 'done', exitCode: 1, ok: false, check: checkId })
+          );
+          return;
+        }
         tempDir = await writeScaffoldTemp(normalizedFiles);
         const exitCode = await runScaffoldCheck(checkId, tempDir, (line) => {
           controller.enqueue(sse({ type: 'line', text: line }));

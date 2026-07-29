@@ -18,6 +18,7 @@ import {
   TF_EKS_IAM,
   TF_EKS_CLUSTER,
   TF_EKS_DATABASE,
+  TF_EKS_REDIS,
   TF_EKS_OUTPUTS,
   EKS_ENV_STAGING_TFVARS,
   EKS_ENV_DEV_TFVARS,
@@ -531,6 +532,7 @@ on:
 env:
   AWS_REGION: \${{ vars.AWS_REGION || 'us-east-1' }}
   EKS_CLUSTER_NAME: \${{ vars.EKS_CLUSTER_NAME || 'stackforge' }}
+  ECR_REPOSITORY: \${{ vars.ECR_REPOSITORY || 'stackforge' }}
   HELM_RELEASE: \${{ vars.HELM_RELEASE || 'app' }}
   HELM_NAMESPACE: \${{ vars.HELM_NAMESPACE || 'default' }}
 
@@ -549,6 +551,19 @@ jobs:
           role-to-assume: \${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: \${{ env.AWS_REGION }}
 
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          REGISTRY: \${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: \${{ github.sha }}
+        run: |
+          IMAGE_URI="\$REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG"
+          docker build -t "\$IMAGE_URI" -f app/Dockerfile app
+          docker push "\$IMAGE_URI"
+
       - name: Update kubeconfig
         run: aws eks update-kubeconfig --name "\$EKS_CLUSTER_NAME" --region "\$AWS_REGION"
 
@@ -557,6 +572,8 @@ jobs:
           helm upgrade --install "\$HELM_RELEASE" ./charts/app \\
             --namespace "\$HELM_NAMESPACE" \\
             --create-namespace \\
+            --set image.repository="\${{ steps.login-ecr.outputs.registry }}/\$ECR_REPOSITORY" \\
+            --set image.tag="\${{ github.sha }}" \\
             --atomic \\
             --wait
 `;
@@ -914,6 +931,7 @@ function awsEksBase(): BaseFileMap {
     'terraform/iam.tf': TF_EKS_IAM,
     'terraform/eks.tf': TF_EKS_CLUSTER,
     'terraform/database.tf': TF_EKS_DATABASE,
+    'terraform/redis.tf': TF_EKS_REDIS,
     'terraform/outputs.tf': TF_EKS_OUTPUTS,
     'environments/staging.tfvars': EKS_ENV_STAGING_TFVARS,
     'environments/development.tfvars': EKS_ENV_DEV_TFVARS,

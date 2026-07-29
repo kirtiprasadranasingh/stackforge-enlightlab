@@ -620,14 +620,14 @@ export function buildClarifyingQuestions(
         setupQuestion,
         `Where should we host it? (options: ${regionOptions})`,
         buildEnvironmentsQuestion(environments),
-        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain (HTTPS on default load-balancer hostname) / Private and internal only)',
+        'Who should be able to access the API? (options: Public with secure HTTPS and a custom domain / Public HTTP on the default load-balancer hostname / Private and internal only)',
       ]
     : [
         setupQuestion,
         'Which hosting platform should we use? (options: Managed Kubernetes / Serverless containers)',
         `Where should we host it? (options: ${regionOptions})`,
         buildEnvironmentsQuestion(environments),
-        'Who should be able to access the API? (options: Public with secure HTTPS / Public without a custom domain (HTTPS on default load-balancer hostname) / Private and internal only)',
+        'Who should be able to access the API? (options: Public with secure HTTPS and a custom domain / Public HTTP on the default load-balancer hostname / Private and internal only)',
       ];
 
   // If neither a cloud nor a CI system was named in prompt, and setupQuestion is not used, ask CI explicitly.

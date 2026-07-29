@@ -34,9 +34,34 @@ export function validateScaffoldContract(
   if (runtime === 'java') {
     const java = content(files, 'app/src/main/java/com/example/health/Application.java');
     const pom = content(files, 'app/pom.xml');
+    const docker = content(files, 'app/Dockerfile');
     if (!java || !pom) issues.push('Java runtime is missing its minimal health-service files.');
     if (/springframework|spring-boot/i.test(`${java}\n${pom}`)) {
       issues.push('Java-only selection introduced Spring Boot without a framework choice.');
+    }
+    if (!/com\.sun\.net\.httpserver|\/health/.test(java)) {
+      issues.push('Java runtime does not implement the required /health endpoint.');
+    }
+    if (!/FROM\s+maven:|FROM\s+eclipse-temurin:/i.test(docker) || !/EXPOSE\s+8080/.test(docker)) {
+      issues.push('Java runtime Dockerfile must build Java and expose port 8080.');
+    }
+    for (const path of ['app/server.js', 'app/package.json', 'app/package-lock.json']) {
+      if (paths.has(path)) issues.push(`Java runtime contains conflicting Node file ${path}.`);
+    }
+  }
+
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+    const workflow = content(files, '.github/workflows/deploy.yml');
+    const values = content(files, 'charts/app/values.yaml');
+    if (runtime === 'java' && !/targetPort:\s*8080/.test(values)) {
+      issues.push('EKS Helm values do not route to Java port 8080.');
+    }
+    if (presets.ci === 'github-actions') {
+      for (const required of ['amazon-ecr-login', 'docker build', 'docker push', '--set image.repository', '--set image.tag']) {
+        if (!workflow.includes(required)) {
+          issues.push(`EKS GitHub Actions workflow is missing ${required}.`);
+        }
+      }
     }
   }
 
@@ -71,6 +96,7 @@ export function validateScaffoldContract(
 
   const redisIsProvisioned =
     (presets.cloud === 'aws' && presets.orchestrator === 'ecs') ||
+    (presets.cloud === 'aws' && presets.orchestrator === 'eks') ||
     (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run') ||
     (presets.cloud === 'azure' && presets.orchestrator === 'aks');
   if (options.database === 'redis' && redisIsProvisioned) {
@@ -80,6 +106,20 @@ export function validateScaffoldContract(
       .join('\n');
     if (!/enable_redis\s*=\s*true/.test(tfvars) || /enable_database\s*=\s*true/.test(tfvars)) {
       issues.push('Redis selection is not reflected consistently in environment tfvars.');
+    }
+    if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+      const redis = content(files, 'terraform/redis.tf');
+      const securityGroups = content(files, 'terraform/security_groups.tf');
+      const outputs = content(files, 'terraform/outputs.tf');
+      if (!/aws_elasticache_replication_group/.test(redis)) {
+        issues.push('EKS Redis selection is missing an ElastiCache replication group.');
+      }
+      if (!/aws_security_group" "redis"|aws_security_group\s+"redis"/.test(securityGroups)) {
+        issues.push('EKS Redis selection is missing the private Redis security group.');
+      }
+      if (!/redis_primary_endpoint/.test(outputs)) {
+        issues.push('EKS Redis selection is missing its application endpoint output.');
+      }
     }
   }
   if (options.database === 'none') {
