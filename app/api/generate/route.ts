@@ -39,7 +39,6 @@ import {
   buildCompletionPrompt,
   detectScaffoldProfile,
   getMissingPaths,
-  parseFileManifestFromPlan,
 } from '@/lib/scaffold-spec';
 import { mergeLockedBaseFiles, shouldForceLockPath } from '@/lib/scaffold-base-files';
 import { adaptRequiredPathsForCi } from '@/lib/apply-scaffold-options';
@@ -908,19 +907,16 @@ Always format your response by wrapping the chat reply in the following markers:
           }
 
           if (!isFollowUp) {
-            // Prefer plan text for profile detection (same signal formatPrompt uses).
-            const profileDetectText =
-              (approvedPlan || '').trim().length > 80
-                ? approvedPlan || prompt
-                : prompt;
-            const profile = detectScaffoldProfile(profileDetectText, presets);
-            const planPaths = parseFileManifestFromPlan(approvedPlan || '');
+            // The approved plan is prose, never a source of truth for which
+            // infrastructure profile to emit. It may contain a model typo or
+            // an older template term (for example ECS in an EKS explanation).
+            // The validated request contract is the only allowed profile key.
+            const profile = detectScaffoldProfile(
+              `${presets.cloud} ${presets.orchestrator}`,
+              presets
+            );
             const requiredPaths = adaptRequiredPathsForCi(
-              planPaths.length >= 4
-                ? planPaths
-                : profile
-                  ? [...profile.requiredPaths]
-                  : [],
+              profile ? [...profile.requiredPaths] : [],
               presets.ci
             );
 
@@ -1103,7 +1099,7 @@ Always format your response by wrapping the chat reply in the following markers:
             );
           } else {
             if (collectedFiles.length > 0 || (isFollowUp && existingFiles.length > 0)) {
-              // Follow-up / Fix failures: merge workspace + delta BEFORE normalize.
+              // Follow-up edits merge workspace + delta before normalization.
               // Validating only the delta re-seeds placeholder TF over good files.
               const workspaceFiles: GeneratedFile[] = isFollowUp
                 ? (() => {
@@ -1115,7 +1111,7 @@ Always format your response by wrapping the chat reply in the following markers:
                         content: f.content,
                       });
                     }
-                    // Gemini deltas must not overwrite locked CI/stubs on Fix failures.
+                    // Follow-up deltas must not overwrite locked CI/stubs.
                     const rejectLocked =
                       isValidationFixPrompt(prompt) || isFollowUp;
                     for (const f of collectedFiles) {

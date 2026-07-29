@@ -16,14 +16,14 @@
    - `oracle-oke-helm` *(new)*
 2. **Seeded base files** (`lib/scaffold-base-files.ts`): after generation, StackForge fills missing required paths and **force-overwrites** fragile stubs (`main.py`, `server.js`, Dockerfiles, package manifests) with known-good `/health` stubs.
 3. **Deterministic normalize** still repairs common TF/YAML/Docker mistakes (dupes, Artifact Registry URL, curl healthChecks, etc.).
-4. **Validate → repair** + UI **Fix failures** (must stay in repair mode — no re-interview).
+4. **Validate before handoff:** failures are reported for review; the UI does not offer an automatic repair/regeneration action.
 5. **Local QA matrix:** `npm run qa:matrix` (profile detect + base coverage, no Gemini).
 
 ---
 
 ## Golden prompts (run these in the UI)
 
-Use presets as noted, then Approve & Generate, then **Run all checks**. Prefer **PASS**. If FAIL, click **Fix failures** once and re-check.
+Use presets as noted, then Approve & Generate, then **Run all checks**. Prefer **PASS**. If FAIL, inspect the requirement-contract message and regenerate from a corrected approved plan.
 
 | # | Cloud | Presets | Prompt |
 |---|--------|---------|--------|
@@ -39,7 +39,6 @@ Use presets as noted, then Approve & Generate, then **Run all checks**. Prefer *
 - [ ] **Run all checks** → `RESULT: PASSED` (or FAIL only on credential/plan skips marked WARN)  
 - [ ] No full CRUD/ORM app in `main.py` / `server.js` / `main.go`  
 - [ ] Image/registry refs look real (no invented `repository_url` on Artifact Registry)  
-- [ ] **Fix failures** (if used) updates files and does **not** restart clarifying questions  
 - [ ] Download ZIP opens cleanly  
 
 ### Out of scope for this QA gate
@@ -76,7 +75,7 @@ QA must test the **deployed** image that includes profile-first seeding. After m
 
 | Risk | Mitigation in product |
 |------|------------------------|
-| Model still invents invalid TF in non-stub files | validate-scaffold + auto-repair + Fix failures |
+| Model still invents invalid TF in non-stub files | validate-scaffold blocks the handoff; regenerate from the corrected plan |
 | Placeholder TF comments if completion budget expires | Warning lists missing/placeholder paths; re-run Approve |
 | Rate limit on rapid check clicks | Separate validate limiter (40/min) |
 | Free-form prompts outside profiles | Soft artifact set + normalize; quality lower than profiled stacks |

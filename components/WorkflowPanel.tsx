@@ -18,8 +18,6 @@ interface WorkflowPanelProps {
   validationSummary?: string;
   onApprove?: () => void;
   onDiscard?: () => void;
-  /** Send failed scaffold-check output into chat for iterative repair */
-  onFixFailures?: (failReport: string) => void;
   /** Apply validate-stable normalized files into the workspace */
   onNormalizedFiles?: (files: GeneratedFile[]) => void;
 }
@@ -57,7 +55,6 @@ export function WorkflowPanel({
   validationSummary,
   onApprove,
   onDiscard,
-  onFixFailures,
   onNormalizedFiles,
 }: WorkflowPanelProps) {
   const hasFiles = files.length > 0;
@@ -133,7 +130,6 @@ export function WorkflowPanel({
               files={files}
               isGenerating={isGenerating}
               autoRun
-              onFixFailures={onFixFailures}
               onNormalizedFiles={onNormalizedFiles}
               onStatusChange={setCheckStatus}
             />
@@ -296,7 +292,7 @@ function ValidateStatusStrip({
   if (status === 'fail') {
     return (
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-700">
-        Some checks failed — use <span className="font-semibold text-indigo-700">Fix failures</span> in the panel below, then re-run checks.
+        Some checks failed. Review the reported issue, correct the requirements or scaffold, then run the checks again.
       </div>
     );
   }

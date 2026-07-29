@@ -143,7 +143,7 @@
   <tr><td>Scale</td><td>Small (2), Medium (3–5), High traffic (autoscaling)</td></tr>
   <tr><td>Runtime</td><td>Node.js / Express, Python / FastAPI, Go, Java note, .NET note</td></tr>
   <tr><td>Environments</td><td>One env · Dev+Staging+Prod · overrides between clouds</td></tr>
-  <tr><td>UX / safety</td><td>Greetings, off-topic, jailbreak, plan revise, Fix failures, parallel tabs, New Project</td></tr>
+  <tr><td>UX / safety</td><td>Greetings, off-topic, jailbreak, plan revise, validation reporting, parallel tabs, New Project</td></tr>
 </table>
 
 <h2>2. Global pass criteria (apply to every generate case)</h2>
@@ -427,9 +427,9 @@
 </div>
 
 <div class="case">
-  <div><span class="case-id">UX-06</span> <strong>Fix failures flow</strong></div>
-  <div class="prompt">(If any check FAILs) Click Fix / send fix prompt from checks UI</div>
-  <div class="expect"><strong>Expect:</strong> Does not restart clarify interview; re-locks Terraform; checks improve or pass</div>
+  <div><span class="case-id">UX-06</span> <strong>Validation failure reporting</strong></div>
+  <div class="prompt">(If any check FAILs) Review the reported contract or tool failure</div>
+  <div class="expect"><strong>Expect:</strong> No automatic repair button is shown; the user corrects requirements or regenerates from an approved plan</div>
   <div class="check"><strong>Result:</strong> ☐ Pass &nbsp; ☐ Fail &nbsp; ☐ N/A</div>
 </div>
 

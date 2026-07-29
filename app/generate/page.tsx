@@ -42,7 +42,6 @@ import {
   isFullStackPrompt,
   isIterativeEditPrompt,
   requiresPlanApproval,
-  buildValidationFixPrompt,
   resolveStackPromptFromAffirmation,
   isVagueStackPrompt,
 } from '@/lib/stack-intent';
@@ -609,6 +608,10 @@ export default function GeneratePage() {
       let assistantText = '';
       let receivedPlan = '';
       let receivedQuestions: string[] = [];
+      // File events are progressive preview only. Keep the last known-good
+      // workspace so a server-side contract failure cannot be downloaded as a
+      // completed scaffold.
+      const workspaceBefore = filesRef.current.map((file) => ({ ...file }));
       const snapshotBefore =
         phase === 'generate' && !options?.approvedPlan && !startFresh
           ? filesRef.current.map((f) => ({
@@ -619,8 +622,8 @@ export default function GeneratePage() {
 
       const isRepairTurn = isRepairTurnEarly;
 
-      // Fresh generate reuses the original stack prompt; repair turns must keep
-      // the fix text (otherwise Fix failures restarts the clarify interview).
+      // Fresh generation reuses the original stack prompt. Iterative changes
+      // keep their own text so their requested edit reaches the API.
       // Always append interview answers so region/DB/scale/access survive even
       // when history is cleared for Zod payload size.
       const interviewBlock =
@@ -634,7 +637,7 @@ export default function GeneratePage() {
             ? `${lastStackPrompt}\n\nClient answers / revision feedback:\n${text}`
             : text;
 
-      // Generate + Fix failures: files (+ fail logs) only — long chat/plans trip Zod.
+      // Generate requests send files only — long chat/plans trip Zod limits.
       const requestHistory =
         phase === 'generate'
           ? []
@@ -734,6 +737,7 @@ export default function GeneratePage() {
             switch (event.type) {
               case 'clear':
                 setFiles([]);
+                filesRef.current = [];
                 break;
               case 'status':
                 if (event.message) {
@@ -795,7 +799,8 @@ export default function GeneratePage() {
                   ].join('\n');
                   const cleaned = sanitizePlanAgainstInterview(
                     event.plan,
-                    interviewCtx
+                    interviewCtx,
+                    presets
                   );
                   receivedPlan = cleaned;
                   setPendingPlan(cleaned);
@@ -913,22 +918,17 @@ export default function GeneratePage() {
         if (e instanceof Error && e.name === 'AbortError') return;
         const rawMsg = e instanceof Error ? e.message : 'Something went wrong';
 
-        if (filesRef.current.length > 0) {
-          if (options?.approvedPlan) {
-            setPendingPlan(null);
-            setAwaitingApproval(false);
-          }
-          setHasGeneratedFiles(true);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `a-${Date.now()}`,
-              role: 'assistant',
-              content: `Generated ${filesRef.current.length} project files. Review them on the right or click Run all checks.`,
-            },
-          ]);
-          return;
-        }
+        // Never present partial streamed files as a successful scaffold. A
+        // fresh/approved generation has no trusted prior workspace, while an
+        // iterative edit rolls back to its last complete file set.
+        const canRestorePriorWorkspace =
+          workspaceBefore.length > 0 &&
+          !startFresh &&
+          !Boolean(options?.approvedPlan);
+        const safeFiles = canRestorePriorWorkspace ? workspaceBefore : [];
+        setFiles(safeFiles);
+        filesRef.current = safeFiles;
+        setHasGeneratedFiles(safeFiles.length > 0);
 
         const msg =
           /failed to fetch|network\s?error/i.test(rawMsg)
@@ -982,20 +982,6 @@ export default function GeneratePage() {
       skipUserBubble: true,
     });
   }, [pendingPlan, lastStackPrompt, isGenerating, sendMessage]);
-
-  /** One-click repair from Scaffold checks — keeps files, skips clarify/plan. */
-  const fixFailuresFromChecks = useCallback(
-    (failReport: string) => {
-      if (isGenerating || filesRef.current.length === 0) return;
-      const prompt = buildValidationFixPrompt(failReport);
-      void sendMessage(prompt, {
-        phase: 'generate',
-        displayContent:
-          'Fix the failing scaffold checks and make Run all checks pass.',
-      });
-    },
-    [isGenerating, sendMessage]
-  );
 
   /** Workspace picks up validate-stable repairs (safe outputs, pruned refs). */
   const applyNormalizedFromChecks = useCallback((next: GeneratedFile[]) => {
@@ -1619,7 +1605,6 @@ export default function GeneratePage() {
                 awaitingApproval={awaitingApproval}
                 onApprove={approvePlan}
                 onDiscard={discardPlan}
-                onFixFailures={fixFailuresFromChecks}
                 onNormalizedFiles={applyNormalizedFromChecks}
               />
             </div>
