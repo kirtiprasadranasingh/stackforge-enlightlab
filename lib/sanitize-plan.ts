@@ -1,4 +1,5 @@
 import { parseScaffoldOptions } from '@/lib/scaffold-options';
+import type { Presets } from '@/types';
 
 
 /** Affirmative Spring Boot selection — ignore "do NOT confirm Spring Boot" wording. */
@@ -927,7 +928,8 @@ function stripCrossCloudCiRegistryConflicts(
  */
 export function sanitizePlanAgainstInterview(
   plan: string,
-  interviewContext: string
+  interviewContext: string,
+  presets?: Presets
 ): string {
   if (!plan?.trim()) return plan;
   const ctx = interviewContext || '';

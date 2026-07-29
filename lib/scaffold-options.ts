@@ -137,12 +137,13 @@ function databaseFromPhrase(phrase: string): DatabaseKind | null {
 /** Merge prompt + plan + chat text into concrete scaffold options. */
 export function parseScaffoldOptions(
   text: string,
-  presets: Presets
+  presets?: Presets
 ): ScaffoldOptions {
+  const p = presets || { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' };
   const raw = text;
   // Ignore option menus so listed alternatives cannot override the real pick.
   const t = stripOptionMenus(raw).toLowerCase();
-  const out = defaultScaffoldOptions(presets);
+  const out = defaultScaffoldOptions(p);
 
   // Region
   const regionMatch = t.match(
