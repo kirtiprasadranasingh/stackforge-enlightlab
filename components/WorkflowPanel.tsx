@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { WorkflowPhase } from '@/types';
 import { FileViewer } from '@/components/FileViewer';
 import { ScaffoldChecksPanel } from '@/components/ScaffoldChecksPanel';
@@ -31,7 +31,6 @@ const STEPS = [
   { id: 'validate', label: 'Validate' },
 ] as const;
 
-const PLAN_REVEAL_MS = 1200;
 
 function stepIndex(
   phase: WorkflowPhase | 'idle',
@@ -77,21 +76,9 @@ export function WorkflowPanel({
   const [checkStatus, setCheckStatus] = useState<
     'idle' | 'running' | 'ok' | 'fail'
   >('idle');
-
-  // Brief beat after the model finishes so the plan slides in — doesn't pop instantly.
-  const [planReveal, setPlanReveal] = useState<'idle' | 'settling' | 'shown'>(
-    'idle'
-  );
-
-  useEffect(() => {
-    if (!planReady || !pendingPlan) {
-      setPlanReveal('idle');
-      return;
-    }
-    setPlanReveal('settling');
-    const timer = window.setTimeout(() => setPlanReveal('shown'), PLAN_REVEAL_MS);
-    return () => window.clearTimeout(timer);
-  }, [planReady, pendingPlan]);
+  // The completed plan can render immediately; the panel itself supplies the
+  // reveal animation without an effect that schedules a second render.
+  const planReveal = 'shown' as const;
 
   // Cursor-like: show the explorer as soon as the first file streams in
   if (hasFiles && (phase === 'generate' || !draftingPlan)) {

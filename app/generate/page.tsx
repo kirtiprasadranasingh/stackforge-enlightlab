@@ -44,6 +44,7 @@ import {
   requiresPlanApproval,
   buildValidationFixPrompt,
   resolveStackPromptFromAffirmation,
+  isVagueStackPrompt,
 } from '@/lib/stack-intent';
 import { getLanguageFromPath } from '@/lib/utils';
 

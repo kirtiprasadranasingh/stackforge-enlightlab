@@ -117,7 +117,7 @@ function ensureAssumptionsSection(plan: string): string {
 }
 
 function prependAssumption(plan: string, bullet: string): string {
-  let out = ensureAssumptionsSection(plan);
+  const out = ensureAssumptionsSection(plan);
   if (out.includes(bullet.slice(0, 40))) return out;
   return out.replace(
     /(##\s*Assumptions\s*\n)/i,
@@ -736,7 +736,7 @@ function honestScaffoldDelivery(plan: string, context: string): string {
       '**Per-environment databases:** Multi-env (dev/staging/prod) means separate `environments/*.tfvars` applies (or workspaces you add) — not three RDS instances from one apply unless you explicitly extend the module. **One environment** → a single `environments/development.tfvars` apply.'
     );
   } else {
-    out = stripAwsAssumptionLeakage(out);
+    out = stripAwsAssumptionLeakage(out, context);
     const isAzure = planOrContextIsAzure(out, context);
     const accessSecureHttps =
       /Public with secure HTTPS/i.test(context) ||

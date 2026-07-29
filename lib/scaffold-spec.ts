@@ -241,11 +241,20 @@ export function detectScaffoldProfile(
     .replace(/azure\s*devops(?:\s*pipelines)?/gi, ' ')
     .replace(/azure\s*pipelines/gi, ' ');
 
+  // A client-selected hosting platform is authoritative. Do not let an older
+  // cloud mention in the prompt (for example "Amazon ECS ... switch to OKE")
+  // lock the generator into the original profile.
+  const hasExplicitNonAwsHostingOverride =
+    /hosting platform\s*\(client override\)\s*:[^.\n]*(oke|oracle kubernetes|aks|azure kubernetes|container apps?|gke|google kubernetes|cloud run)/i.test(
+      prompt
+    );
+
   // Explicit AWS ECS/Fargate in the prompt beats leftover Azure UI defaults
   // and Azure DevOps CI (which must not flip the locked profile to ACA).
   if (
     (/\baws\b/.test(t) || /amazon\s+ecs/.test(t)) &&
     (/\becs\b/.test(t) || /\bfargate\b/.test(t)) &&
+    !hasExplicitNonAwsHostingOverride &&
     !/container\s*apps?/.test(t) &&
     !/\baks\b/.test(t)
   ) {
@@ -254,6 +263,7 @@ export function detectScaffoldProfile(
   if (
     (/\baws\b/.test(t) || /\beks\b/.test(t)) &&
     /\beks\b/.test(t) &&
+    !hasExplicitNonAwsHostingOverride &&
     !/container\s*apps?/.test(t) &&
     !/\baks\b/.test(t)
   ) {

@@ -244,7 +244,7 @@ instead.
 - Pin \`required_providers\` versions in every Terraform stack (\`aws ~> 5.84\`, \`helm ~> 2.17\`, \`kubernetes ~> 2.23\`, \`google ~> 5.0\` as applicable). Never leave providers unpinned so \`terraform init\` grabs latest major (aws v6 / helm v3). \`terraform validate\` must succeed with \`-backend=false\`.
 - Prefer constructing deploy image URIs as \`\$REGISTRY/\$REPO:\$TAG\` consistently across cloud providers.
 - GitHub Actions YAML: never put \`with:\` under a \`run:\` step; never emit a second job-level \`steps:\` without a new job id (rollback must be its own job).
-- **MongoDB is not a first-class scaffold target**: If the client asked for MongoDB, emit managed **PostgreSQL** (RDS / Cloud SQL / Flexible Server) as a stand-in, document that clearly in README, and **never** emit \`terraform/mongodb.tf\`, \`aws_docdb_*\`, Atlas, or full MongoDB networking/IAM as if it were supported.
+- **MongoDB is not a supported locked-template target**: Do not generate a plan or a substitute database for MongoDB. Ask the client to choose PostgreSQL, MySQL, Redis cache, or no data service. Never emit \`terraform/mongodb.tf\`, \`aws_docdb_*\`, Atlas, or full MongoDB networking/IAM as if it were supported.
 
 ### B7. Final self-verification pass
 Before returning any response, re-read every file specifically hunting for:
@@ -286,7 +286,7 @@ export function getCloudPrompt(cloud: string, orchestrator: string): string {
 - Prefer local state or documented -backend-config; do not leave only placeholder S3 backend bucket names as the sole versions.tf content
 - VPC public+private subnets, **internal** ALB in private subnets when access is private/internal, Fargate tasks in private, SG: ALB→tasks on container_port only; Redis/ElastiCache in private subnets with ingress from ECS task SG on 6379 (no SG cycles)
 - ALWAYS include ECS Service Auto Scaling: aws_appautoscaling_target + aws_appautoscaling_policy (CPU target tracking; optional memory). Never ship fixed desired_count alone for a DevOps/startup scaffold.
-- Public access without custom domain: internet-facing ALB; prefer HTTPS listener on the default ALB DNS (ACM) when feasible — document TLS vs temporary HTTP:80 in README/Assumptions; do not treat plain HTTP as the confirmed product choice
+- Public access without custom domain: internet-facing ALB with HTTP:80. Do not promise a public ACM certificate or HTTPS on the provider-owned default ALB DNS; a client-owned domain is required for trusted public TLS.
 - ECR + CloudWatch log group; ecs task execution role + least-privilege task role (no unused SSM on Resource *)
 - aws_ecs_service: deployment_circuit_breaker { enable = true, rollback = true }; lifecycle ignore_changes = [task_definition] when CI owns deploys
 - Container healthCheck must match Dockerfile capabilities (install curl if used); ALB target group path must match app /health
@@ -400,8 +400,10 @@ export function formatPlanPrompt(params: {
   presets: { cloud: string; orchestrator: string; ci: string };
   priorPlan?: string;
   history?: { role: 'user' | 'assistant'; content: string }[];
+  /** Validated interview state; this outranks all conversational prose. */
+  requirementsSpec?: string;
 }): string {
-  const { userPrompt, presets, priorPlan, history = [] } = params;
+  const { userPrompt, presets, priorPlan, history = [], requirementsSpec } = params;
   const historyBlock =
     history.length === 0
       ? '(none)'
@@ -419,7 +421,9 @@ manifest — never a full product/application codebase.
 ## User request
 "${userPrompt.trim()}"
 
-## Presets (free-text + chat answers win when explicit)
+${requirementsSpec || ''}
+
+## Presets
 - Cloud: ${presets.cloud}
 - Orchestrator: ${presets.orchestrator}
 - CI: ${presets.ci}
@@ -448,11 +452,8 @@ cloud/platform when the client overrode it.
 - Never list both an invalid typed value AND an assumed substitute in Confirmed requirements.
 
 **MongoDB / DocumentDB / Atlas (capability honesty):**
-- If the client selected MongoDB (or Another service → MongoDB), the plan MUST state that StackForge
-  will scaffold a **PostgreSQL stand-in**, not full MongoDB infrastructure.
-- File manifest must NOT include \`terraform/mongodb.tf\`, DocumentDB clusters, or Atlas resources.
-- Put a clear Assumptions / Out of scope bullet: MongoDB requires manual DocumentDB/Atlas after review.
-- Confirmed requirements may say "MongoDB requested → PostgreSQL stand-in in this scaffold".
+- If the client selected MongoDB (or Another service → MongoDB), leave \`<<<PLAN>>>\` empty and ask them to choose PostgreSQL, MySQL, Redis cache, or no data service. Do not silently substitute a relational database.
+- File manifest must NOT include \`terraform/mongodb.tf\`, DocumentDB clusters, Atlas resources, or a substituted database described as MongoDB.
 
 **CI ↔ cloud consistency (critical — never invent cross-cloud wiring):**
 - Presets above are authoritative when interview answers set them. Do not keep silent AWS/EKS defaults
@@ -473,8 +474,8 @@ cloud/platform when the client overrode it.
 - **"Public without a custom domain"** means internet-facing on the **default load-balancer
   hostname**. Confirmed requirements may keep that access *intent*. Under Architecture /
   Assumptions / Implement you **must** state that Approve & Generate emits an **HTTP:80**
-  listener so \`terraform validate\` stays certificate-free, and that ACM/HTTPS:443 is a
-  production follow-up — never claim the scaffold already wires managed TLS on the default DNS.
+  listener so \`terraform validate\` stays certificate-free. A public ACM certificate cannot be
+  issued for the provider-owned default DNS name, so HTTPS:443 requires a client-owned domain.
 - **"Public with secure HTTPS"** → custom domain + TLS is the confirmed path (still document
   any validate-safe HTTP interim in Assumptions if the locked template cannot yet attach ACM).
 - Do **not** claim AWS Secrets Manager (or cloud vault) resources are created unless the locked
@@ -611,7 +612,7 @@ ${planBlock}## Scope boundary (hard)
   minimal \`/health\` stub (plain Java HTTP or Node/Go/Python stand-in) and state that clearly in README.
 - **.NET means language, not a full ASP.NET product**: no Controllers/Services layers unless asked.
 - Label the result as a reviewable starting scaffold — not drop-in production.
-- **MongoDB request → PostgreSQL stand-in only**: never emit \`mongodb.tf\` / DocumentDB / Atlas full stacks. README must say MongoDB is not scaffolded and PostgreSQL is the stand-in.
+- **MongoDB request → stop for a supported choice**: do not emit \`mongodb.tf\`, DocumentDB, Atlas, or a PostgreSQL stand-in. Ask for PostgreSQL, MySQL, Redis cache, or no data service.
 
 ## Resolved stack target (must match the user request; free-text wins when it names cloud/compute/CI)
 - Cloud: ${presets.cloud}

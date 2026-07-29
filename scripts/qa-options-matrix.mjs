@@ -6,10 +6,10 @@
  * Does not call Gemini. For each case: infer presets, detect profile,
  * merge locked base + applyScaffoldOptions, assert CI / runtime / DB / region.
  */
-import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createJiti } from 'jiti';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -19,6 +19,7 @@ import { detectScaffoldProfile } from '../lib/scaffold-spec.ts';
 import { mergeLockedBaseFiles } from '../lib/scaffold-base-files.ts';
 import { inferPresetsFromPrompt } from '../lib/infer-presets.ts';
 import { parseScaffoldOptions } from '../lib/scaffold-options.ts';
+import { validateScaffoldContract } from '../lib/scaffold-contract.ts';
 import type { Presets } from '../types/index.ts';
 
 type Expect = {
@@ -75,10 +76,11 @@ Data service (client override): MongoDB. Python\`,
       ciFile: 'cloudbuild.yaml',
       absentCi: ['.github/workflows/deploy.yml'],
       region: 'europe-west1',
-      envs: ['staging'],
+      envs: ['development'],
       runtimeFile: 'app/main.py',
       absentRuntime: ['app/server.js'],
-      tfvarsIncludes: ['enable_database = true', 'db_engine = "postgres"'],
+      tfvarsIncludes: ['enable_database = false'],
+      tfvarsExcludes: ['db_engine'],
       readmeIncludes: ['MongoDB'],
     },
   },
@@ -124,6 +126,23 @@ Redis cache. High traffic — automatic scaling. Node.js\`,
         'enable_database = false',
       ],
       tfvarsExcludes: ['enable_database = true', 'db_engine'],
+    },
+  },
+  {
+    name: 'Reported case: ECS + Redis + Python + public ALB + GitHub Actions',
+    prompt: \`AWS ECS Fargate API. ap-south-1. Development, staging, and production.
+Public without a custom domain. Redis cache. Python. GitHub Actions\`,
+    presets: { cloud: 'aws', orchestrator: 'ecs', ci: 'github-actions' },
+    expect: {
+      profile: 'aws-ecs-express',
+      cloud: 'aws',
+      orch: 'ecs',
+      ciFile: '.github/workflows/deploy.yml',
+      region: 'ap-south-1',
+      envs: ['development', 'staging', 'production'],
+      runtimeFile: 'app/main.py',
+      absentRuntime: ['app/server.js', 'app/package.json', 'app/package-lock.json'],
+      tfvarsIncludes: ['enable_redis = true', 'enable_database = false'],
     },
   },
   {
@@ -191,7 +210,7 @@ Private and internal only. No data service. Small — 2 app copies. Go\`,
       orch: 'container-apps',
       ciFile: 'azure-pipelines.yml',
       region: 'westeurope',
-      envs: ['staging'],
+      envs: ['development'],
       runtimeFile: 'main.go',
       tfvarsIncludes: [
         'enable_database = false',
@@ -215,7 +234,7 @@ Standard private database. MySQL. High traffic — automatic scaling\`,
       ciFile: '.github/workflows/deploy.yml',
       region: 'eu-frankfurt-1',
       envs: ['development', 'staging', 'production'],
-      runtimeFile: 'app/server.js',
+      runtimeFile: 'app/src/main/java/com/example/health/Application.java',
       tfvarsIncludes: ['node_pool_size = 4', 'enable_database = true', 'db_engine = "mysql"'],
     },
   },
@@ -232,7 +251,7 @@ Standard private database. High traffic — automatic scaling. Node.js\`,
       orch: 'aks',
       ciFile: '.github/workflows/deploy.yml',
       region: 'centralindia',
-      envs: ['staging'],
+      envs: ['development'],
       runtimeFile: 'app/server.js',
       tfvarsIncludes: ['node_count = 4', 'enable_database = true'],
       tfvarsExcludes: ['ingress_external'],
@@ -270,7 +289,7 @@ Private database with 7-day automatic backups. Small — 2 app copies\`,
       orch: 'eks',
       ciFile: '.github/workflows/deploy.yml',
       region: 'us-west-2',
-      envs: ['staging'],
+      envs: ['development'],
       runtimeFile: 'app/server.js',
       tfvarsIncludes: ['enable_database = false'],
       tfvarsExcludes: ['enable_redis = true'],
@@ -302,6 +321,9 @@ for (const c of CASES) {
   });
   const paths = new Set(merged.files.map((f) => f.path));
   const blob = Object.fromEntries(merged.files.map((f) => [f.path, f.content]));
+  for (const contractIssue of validateScaffoldContract(merged.files, presets, options)) {
+    issues.push(\`contract: \${contractIssue}\`);
+  }
 
   if (!paths.has(c.expect.ciFile)) issues.push(\`missing CI \${c.expect.ciFile}\`);
   for (const p of c.expect.absentCi || []) {
@@ -351,16 +373,9 @@ console.log('\\nOptions matrix PASSED — dynamic CI/runtime/DB/region wiring OK
 
 const tmp = path.join(root, 'scripts', '_qa-options-matrix-runner.mts');
 fs.writeFileSync(tmp, runner, 'utf8');
-const r = spawnSync('npx', ['--yes', 'tsx', tmp], {
-  cwd: root,
-  encoding: 'utf8',
-  shell: true,
-});
 try {
+  const jiti = createJiti(import.meta.url, { alias: { '@': root } });
+  await jiti.import(tmp);
+} finally {
   fs.unlinkSync(tmp);
-} catch {
-  /* ignore */
 }
-process.stdout.write(r.stdout || '');
-process.stderr.write(r.stderr || '');
-process.exit(r.status ?? 1);

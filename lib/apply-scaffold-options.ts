@@ -43,6 +43,35 @@ function patchDefault(
   return content;
 }
 
+function runtimePort(runtime: ScaffoldOptions['runtime']): number {
+  return runtime === 'node' ? 3000 : 8080;
+}
+
+/** ECS container health checks must use an executable available in the image. */
+function ecsHealthCheck(runtime: ScaffoldOptions['runtime']): string | null {
+  if (runtime === 'node') {
+    return `healthCheck = {
+      command     = ["CMD-SHELL", "node -e \\\"require('http').get('http://127.0.0.1:'+(process.env.PORT||3000)+'/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1)\\\""]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 20
+    }`;
+  }
+  if (runtime === 'python') {
+    return `healthCheck = {
+      command     = ["CMD-SHELL", "python -c \\\"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')\\\""]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 20
+    }`;
+  }
+  // The Go distroless image and the JVM/.NET images do not guarantee a shell
+  // utility. The ALB target-group probe remains the health authority for them.
+  return null;
+}
+
 /** Drop model-invented sibling app trees and wrong-language leftovers. */
 function stripCompetingAppTrees(
   byPath: Map<string, GeneratedFile>,
@@ -608,6 +637,7 @@ export function applyScaffoldOptions(
   );
   const regionKey = regionVarName(presets.cloud);
   const replicas = scaleToReplicas(options.scale);
+  const notes: string[] = [];
   const regionCheck = validateRegionForCloud(options.region, presets.cloud);
   const effectiveRegion = regionCheck.validatedRegion;
   if (!regionCheck.isValid && regionCheck.feedback) {
@@ -623,12 +653,13 @@ export function applyScaffoldOptions(
     c = patchDefault(c, 'region', effectiveRegion);
     c = patchDefault(c, 'location', effectiveRegion);
     c = patchDefault(c, 'desired_count', replicas.desiredCount);
+    c = patchDefault(c, 'container_port', runtimePort(options.runtime));
     c = patchDefault(c, 'node_desired_size', replicas.desiredCount);
     c = patchDefault(c, 'node_min_size', replicas.minReplicas);
     c = patchDefault(c, 'node_max_size', replicas.maxReplicas);
     c = patchDefault(c, 'node_count', replicas.desiredCount);
 
-    const enableDb = options.database !== 'none' && options.database !== 'redis';
+    const enableDb = options.database === 'postgres' || options.database === 'mysql';
     const enableRedis = options.database === 'redis';
     c = patchDefault(c, 'enable_database', enableDb);
     c = patchDefault(c, 'enable_redis', enableRedis);
@@ -658,6 +689,23 @@ export function applyScaffoldOptions(
     byPath.set(p, { ...f, content: c });
   }
 
+  // Keep the ECS task, ALB target group, and runtime image on one port. The
+  // old Node-locked profile left Python on 8080 while Terraform forwarded 3000.
+  if (presets.cloud === 'aws' && presets.orchestrator === 'ecs') {
+    const ecs = byPath.get('terraform/ecs.tf');
+    if (ecs) {
+      const health = ecsHealthCheck(options.runtime);
+      const replacement = health
+        ? `\n    ${health}\n    logConfiguration`
+        : '\n    logConfiguration';
+      const content = ecs.content.replace(
+        /\n\s{4}healthCheck\s*=\s*\{[\s\S]*?\n\s{4}\}\n\s{4}logConfiguration/,
+        replacement
+      );
+      byPath.set('terraform/ecs.tf', { ...ecs, content });
+    }
+  }
+
   // Drop model-invented terraform/*.tfvars (canonical path is environments/)
   for (const p of [...byPath.keys()]) {
     if (/^terraform\/[^/]+\.tfvars$/.test(p)) byPath.delete(p);
@@ -673,8 +721,7 @@ export function applyScaffoldOptions(
       `environment  = "${env}"`,
       `project_name = "stackforge"`,
     ];
-    const enableDb =
-      options.database !== 'none' && options.database !== 'redis';
+    const enableDb = options.database === 'postgres' || options.database === 'mysql';
     const enableRedis = options.database === 'redis';
     const multiAz =
       options.databaseMode === 'ha' || options.databaseMode === 'ha_backup';
@@ -1154,26 +1201,28 @@ ENTRYPOINT ["dotnet", "app.dll"]
   if (options.runtime === 'java') {
     const javaApp = `package com.example.health;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 
-@SpringBootApplication
-@RestController
 public class Application {
-    public static void main(String[] args) {
-        SpringApplication.run(Application.class, args);
+    private static void respond(HttpExchange exchange) throws IOException {
+        byte[] body = "{\\"status\\":\\"ok\\"}".getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, body.length);
+        exchange.getResponseBody().write(body);
+        exchange.close();
     }
 
-    @GetMapping("/")
-    public String root() {
-        return "{\\"status\\":\\"ok\\"}";
-    }
-
-    @GetMapping("/health")
-    public String health() {
-        return "{\\"status\\":\\"ok\\"}";
+    public static void main(String[] args) throws IOException {
+        int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
+        HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        server.createContext("/", Application::respond);
+        server.createContext("/health", Application::respond);
+        server.start();
+        System.out.println("Health service listening on " + port);
     }
 }
 `;
@@ -1186,25 +1235,21 @@ public class Application {
     <artifactId>health-stub</artifactId>
     <version>1.0.0</version>
 
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.4</version>
-        <relativePath/>
-    </parent>
-
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-        </dependency>
-    </dependencies>
-
     <build>
         <plugins>
             <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration><release>17</release></configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive><manifest><mainClass>com.example.health.Application</mainClass></manifest></archive>
+                </configuration>
             </plugin>
         </plugins>
     </build>
@@ -1356,7 +1401,6 @@ CMD ["node", "server.js"]
   enforceSingleCi(byPath, presets.ci);
 
   // Capability honesty — document unsupported DB/runtime for this cloud profile
-  const notes: string[] = [];
   notes.push(
     `Applied from interview: region=${options.region}; envs=${options.environments.join(', ')}; access=${options.access}; database=${options.database}; scale=${options.scale}; runtime=${options.runtime}; ci=${presets.ci}.`
   );
@@ -1423,7 +1467,7 @@ CMD ["node", "server.js"]
   }
   if (options.database === 'mongodb') {
     notes.push(
-      'MongoDB was selected — StackForge does **not** scaffold full MongoDB/DocumentDB/Atlas infrastructure. This scaffold uses a **PostgreSQL** managed database as a validate-safe relational stand-in (`enable_database = true`, engine postgres). Replace with DocumentDB, Atlas, or your own MongoDB after review; do not treat terraform as production MongoDB.'
+      'MongoDB was selected, but this locked template cannot provision MongoDB/DocumentDB/Atlas. No database infrastructure has been generated; choose a supported data service before deployment.'
     );
   }
   // Strip any model-invented MongoDB / DocumentDB / Atlas Terraform files

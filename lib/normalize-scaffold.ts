@@ -970,7 +970,7 @@ function patchOciValidateSchema(content: string): string {
       }
       const pods = resource.match(/^[ \t]*pods_cidr\s*=\s*.+$/m)?.[0]?.trim();
       const services = resource.match(/^[ \t]*services_cidr\s*=\s*.+$/m)?.[0]?.trim();
-      let next = resource
+      const next = resource
         .replace(/^[ \t]*pods_cidr\s*=.*\r?\n/gm, '')
         .replace(/^[ \t]*services_cidr\s*=.*\r?\n/gm, '');
       const knc = [
@@ -1226,7 +1226,7 @@ function terraformResourceOwnerScore(path: string, type: string): number {
  * `terraform init` / `validate` can succeed after generation.
  */
 function dedupeTerraformResources(files: GeneratedFile[]): GeneratedFile[] {
-  let next = dedupeTerraformDataSources(dedupeTerraformOutputs(files));
+  const next = dedupeTerraformDataSources(dedupeTerraformOutputs(files));
   const tfFiles = next.filter((f) => f.path.endsWith('.tf'));
   if (tfFiles.length < 2) return next;
 
@@ -1607,7 +1607,7 @@ function ensureNodeLockfiles(
 export function normalizeScaffoldFile(
   file: Pick<GeneratedFile, 'path' | 'content'> & Partial<GeneratedFile>
 ): GeneratedFile | null {
-  let path = canonicalPath(file.path);
+  const path = canonicalPath(file.path);
   if (!validateFilePath(path)) return null;
 
   let content = file.content;

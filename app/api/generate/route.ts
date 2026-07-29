@@ -20,7 +20,6 @@ import {
   parseValidationReport,
   shouldAppendValidationWarning,
 } from '@/lib/validation-report';
-import { inferPresetsFromPrompt } from '@/lib/infer-presets';
 import { buildClarifyingQuestions } from '@/lib/clarifying-questions';
 import {
   isFullStackPrompt,
@@ -44,8 +43,14 @@ import {
 } from '@/lib/scaffold-spec';
 import { mergeLockedBaseFiles, shouldForceLockPath } from '@/lib/scaffold-base-files';
 import { adaptRequiredPathsForCi } from '@/lib/apply-scaffold-options';
-import { parseScaffoldOptions } from '@/lib/scaffold-options';
 import { sanitizePlanAgainstInterview } from '@/lib/sanitize-plan';
+import {
+  buildArchitectureSpec,
+  formatArchitectureSpecForPrompt,
+  validatePlanAgainstSpec,
+  type ArchitectureSpec,
+} from '@/lib/architecture-spec';
+import { validateScaffoldContract } from '@/lib/scaffold-contract';
 import type { GeneratedFile, Presets, WorkflowPhase } from '@/types';
 import fs from 'fs/promises';
 import path from 'path';
@@ -142,10 +147,21 @@ async function streamPlanningPhase(params: {
   systemPrompt: string;
   userPrompt: string;
   statusMessage: string;
+  /** Confirmed interview answers, kept separate from prior-plan prose. */
+  requirementsContext?: string;
+  architectureSpec?: ArchitectureSpec;
   /** Casual chat: only emit a summary reply, never questions or a plan. */
   conversational?: boolean;
 }): Promise<NextResponse> {
-  const { cors, systemPrompt, userPrompt, statusMessage, conversational } = params;
+  const {
+    cors,
+    systemPrompt,
+    userPrompt,
+    statusMessage,
+    requirementsContext = userPrompt,
+    architectureSpec,
+    conversational,
+  } = params;
   const stream = new ReadableStream({
     async start(controller) {
       const parseState = createParseState();
@@ -165,6 +181,60 @@ async function streamPlanningPhase(params: {
             thinkingConfig: { thinkingBudget: 0 },
           } as unknown as typeof GENERATION_CONFIG,
         });
+
+        /**
+         * Plans are not allowed to reach the approval UI until the deterministic
+         * contract agrees with the confirmed interview state.  A single repair
+         * pass gives the model a chance to rewrite prose; an unresolved mismatch
+         * stays blocked instead of being "sanitized" into a misleading plan.
+         */
+        const deliverValidatedPlan = async (rawPlan: string): Promise<boolean> => {
+          let cleaned = sanitizePlanAgainstInterview(
+            rawPlan,
+            requirementsContext,
+            architectureSpec?.presets
+          );
+          let issues = architectureSpec
+            ? validatePlanAgainstSpec(cleaned, architectureSpec)
+            : [];
+
+          if (issues.length > 0) {
+            controller.enqueue(
+              sse({ type: 'status', message: 'Checking architecture consistency…' })
+            );
+            const repair = await model.generateContent(
+              `${userPrompt}\n\n## Required correction\nThe draft below failed deterministic validation. Rewrite the complete plan using the validated architecture specification only. Do not explain the repair and do not generate files.\n\nValidation failures:\n${issues.map((issue) => `- ${issue}`).join('\n')}\n\nDraft:\n${cleaned}`
+            );
+            const repairState = createParseState();
+            const repairText = repair.response.text();
+            const parsedRepair = appendAndParse(repairState, repairText);
+            const finalRepair = appendAndParse(repairState, '', true);
+            const candidate =
+              finalRepair.plan ||
+              parsedRepair.plan ||
+              repairText.replace(/<<<[^>]+>>>/g, '').trim();
+            cleaned = sanitizePlanAgainstInterview(
+              candidate,
+              requirementsContext,
+              architectureSpec?.presets
+            );
+            issues = architectureSpec
+              ? validatePlanAgainstSpec(cleaned, architectureSpec)
+              : [];
+          }
+
+          if (issues.length > 0) {
+            controller.enqueue(
+              sse({
+                type: 'error',
+                error: `Architecture plan needs correction before approval: ${issues.join(' ')}`,
+              })
+            );
+            return false;
+          }
+          controller.enqueue(sse({ type: 'plan', plan: cleaned }));
+          return true;
+        };
 
         const geminiStream = await model.generateContentStream(userPrompt);
 
@@ -186,9 +256,7 @@ async function streamPlanningPhase(params: {
             controller.enqueue(sse({ type: 'questions', questions: parsed.questions }));
           }
           if (!conversational && parsed.plan && parsed.plan.length > 40 && !planSent) {
-            planSent = true;
-            const cleaned = sanitizePlanAgainstInterview(parsed.plan, userPrompt);
-            controller.enqueue(sse({ type: 'plan', plan: cleaned }));
+            planSent = await deliverValidatedPlan(parsed.plan);
           }
           if (parsed.summary && !summarySent) {
             summarySent = true;
@@ -202,9 +270,7 @@ async function streamPlanningPhase(params: {
           controller.enqueue(sse({ type: 'questions', questions: finalParsed.questions }));
         }
         if (!conversational && finalParsed.plan && finalParsed.plan.length > 40 && !planSent) {
-          planSent = true;
-          const cleaned = sanitizePlanAgainstInterview(finalParsed.plan, userPrompt);
-          controller.enqueue(sse({ type: 'plan', plan: cleaned }));
+          planSent = await deliverValidatedPlan(finalParsed.plan);
         }
         if (finalParsed.summary && !summarySent) {
           summarySent = true;
@@ -221,12 +287,7 @@ async function streamPlanningPhase(params: {
             /file manifest|assumptions|resources|terraform|ci\/cd/i.test(cleaned) ||
             cleaned.length > 200
           ) {
-            const planBody = sanitizePlanAgainstInterview(
-              cleaned.slice(0, 18000),
-              userPrompt
-            );
-            controller.enqueue(sse({ type: 'plan', plan: planBody }));
-            planSent = true;
+            planSent = await deliverValidatedPlan(cleaned.slice(0, 18000));
           } else if (cleaned) {
             const qLines = cleaned
               .split('\n')
@@ -332,35 +393,22 @@ export async function POST(request: NextRequest) {
       sanitizeInput(rawPrompt),
       history as { role: string; content: string }[]
     );
-    let prompt = sanitizeInput(affirmedStack || rawPrompt);
+    const prompt = sanitizeInput(affirmedStack || rawPrompt);
     // interviewAnswers is critical: generate clears history for payload size,
     // so region/DB/scale/access live here — not only in the approved plan prose.
     const optionsText = [
       prompt,
       interviewAnswers || '',
-      approvedPlan || '',
-      priorPlan || '',
-      ...history.map((h: { content?: string }) => h.content || ''),
     ].join('\n');
-    // Infer from plan + history too — client overrides live in interview answers,
-    // not only in the short approve/generate prompt.
-    const presets = inferPresetsFromPrompt(optionsText, rawPresets as Presets);
-    // Interview Confirmed choices are authoritative for runtime/DB/region — plan
-    // leftovers previously overwrote language after the first successful generate.
-    let scaffoldOptions = parseScaffoldOptions(optionsText, presets);
-    if (interviewAnswers && /Confirmed choices:/i.test(interviewAnswers)) {
-      const fromInterview = parseScaffoldOptions(interviewAnswers, presets);
-      scaffoldOptions = {
-        ...scaffoldOptions,
-        runtime: fromInterview.runtime,
-        database: fromInterview.database,
-        databaseMode: fromInterview.databaseMode,
-        region: fromInterview.region,
-        environments: fromInterview.environments,
-        access: fromInterview.access,
-        scale: fromInterview.scale,
-      };
-    }
+    // The requirements contract only reads the current request and confirmed
+    // answers. Approved-plan prose and chat history must never overwrite it.
+    const architectureSpec = buildArchitectureSpec({
+      prompt,
+      interviewAnswers,
+      presets: rawPresets as Presets,
+    });
+    const presets = architectureSpec.presets;
+    const scaffoldOptions = architectureSpec.options;
     const lowerPrompt = prompt.toLowerCase().trim();
     let phase: WorkflowPhase = requestedPhase || 'generate';
 
@@ -395,6 +443,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Greetings — deterministic (no Gemini inventing a stack). Works with or without files.
+    // A requirements contract is a hard gate. Do not silently map an invalid
+    // cloud/region pair, invent MongoDB support, or generate a plan/code set
+    // that cannot match the client's selected requirements.
+    if (architectureSpec.issues.length > 0) {
+      return replyText(
+        `I need one corrected interview answer before I can draft or generate this scaffold. ${architectureSpec.issues.join(' ')}`,
+        'Validating requirements…'
+      );
+    }
+
     if (isGreetingOnlyPrompt(prompt)) {
       if (existingFiles.length > 0) {
         return replyText(
@@ -683,8 +741,11 @@ Always format your response by wrapping the chat reply in the following markers:
           presets,
           priorPlan,
           history,
+          requirementsSpec: formatArchitectureSpecForPrompt(architectureSpec),
         }),
         statusMessage: priorPlan ? 'Revising plan…' : 'Drafting architecture plan…',
+        requirementsContext: [prompt, interviewAnswers || ''].filter(Boolean).join('\n'),
+        architectureSpec,
       });
     }
 
@@ -1089,6 +1150,16 @@ Always format your response by wrapping the chat reply in the following markers:
                   presets,
                   scaffoldOptions,
                 });
+              }
+              const contractIssues = validateScaffoldContract(
+                finalized,
+                presets,
+                scaffoldOptions
+              );
+              if (contractIssues.length > 0) {
+                throw new Error(
+                  `Generated scaffold failed its architecture contract: ${contractIssues.join(' ')}`
+                );
               }
               for (const file of finalized) {
                 const prev = workspaceFiles.find((f) => f.path === file.path);

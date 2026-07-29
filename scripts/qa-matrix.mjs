@@ -6,27 +6,25 @@
  * Does not call Gemini. Validates that each cloud profile has a locked base
  * set and that detectScaffoldProfile maps the QA prompts correctly.
  */
-import { createRequire } from 'module';
-import { spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createJiti } from 'jiti';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 
-// Compile-on-the-fly via tsx if available; else require built dist is N/A.
-// Prefer dynamic import of TS through node --experimental or spawn npx tsx.
-function loadViaTsx(scriptBody) {
+// Execute the temporary TypeScript fixture in-process. This keeps the QA suite
+// runnable in restricted environments where child-process spawning is blocked.
+async function loadFixture(scriptBody) {
   const tmp = path.join(root, 'scripts', '_qa-matrix-runner.mts');
   fs.writeFileSync(tmp, scriptBody, 'utf8');
-  const r = spawnSync(
-    'npx',
-    ['--yes', 'tsx', tmp],
-    { cwd: root, encoding: 'utf8', shell: true }
-  );
-  fs.unlinkSync(tmp);
-  return r;
+  const jiti = createJiti(import.meta.url, { alias: { '@': root } });
+  try {
+    await jiti.import(tmp);
+  } finally {
+    fs.unlinkSync(tmp);
+  }
 }
 
 const runner = `
@@ -127,7 +125,4 @@ if (fail > 0) {
 console.log('\\nQA matrix PASSED — all cloud profiles detect + seed locked bases.');
 `;
 
-const result = loadViaTsx(runner);
-process.stdout.write(result.stdout || '');
-process.stderr.write(result.stderr || '');
-process.exit(result.status ?? 1);
+await loadFixture(runner);

@@ -109,7 +109,7 @@ export function validateRegionForCloud(
     return {
       isValid: false,
       validatedRegion: mapped,
-      feedback: `'${region}' is not a valid Google Cloud region (GCP regions use syntax like europe-west3, us-central1, asia-south1). Validated and mapped to '${mapped}' for Google Cloud.`,
+      feedback: `'${region}' is not a valid Google Cloud region (GCP regions use syntax like europe-west3, us-central1, asia-south1). Choose a valid Google Cloud region; StackForge will not map it automatically.`,
     };
   }
 
@@ -125,7 +125,7 @@ export function validateRegionForCloud(
     return {
       isValid: false,
       validatedRegion: mapped,
-      feedback: `'${region}' is not a valid Azure region (Azure regions do not use hyphens, e.g. westeurope, eastus, centralindia). Validated and mapped to '${mapped}' for Azure.`,
+      feedback: `'${region}' is not a valid Azure region (Azure regions do not use hyphens, e.g. westeurope, eastus, centralindia). Choose a valid Azure region; StackForge will not map it automatically.`,
     };
   }
 
@@ -142,7 +142,7 @@ export function validateRegionForCloud(
     return {
       isValid: false,
       validatedRegion: mapped,
-      feedback: `'${region}' is not a valid AWS region (AWS regions use syntax like us-east-1, eu-west-1, ap-south-1). Validated and mapped to '${mapped}' for AWS.`,
+      feedback: `'${region}' is not a valid AWS region (AWS regions use syntax like us-east-1, eu-west-1, ap-south-1). Choose a valid AWS region; StackForge will not map it automatically.`,
     };
   }
 
@@ -158,7 +158,7 @@ export function validateRegionForCloud(
     return {
       isValid: false,
       validatedRegion: mapped,
-      feedback: `'${region}' is not a valid Oracle OCI region (Oracle OCI regions use syntax like ap-mumbai-1, us-ashburn-1, eu-frankfurt-1). Validated and mapped to '${mapped}' for Oracle Cloud.`,
+      feedback: `'${region}' is not a valid Oracle OCI region (Oracle OCI regions use syntax like ap-mumbai-1, us-ashburn-1, eu-frankfurt-1). Choose a valid Oracle OCI region; StackForge will not map it automatically.`,
     };
   }
 

@@ -469,11 +469,25 @@ jobs:
           CURRENT=\$(aws ecs describe-services --cluster "\$ECS_CLUSTER_NAME" --services "\$ECS_SERVICE_NAME" --query 'services[0].taskDefinition' --output text)
           echo "current_task_definition_arn=\$CURRENT" >> "\$GITHUB_OUTPUT"
 
-      - name: Deploy ECS service
+      - name: Register task definition with the new image
+        id: register-task-definition
+        run: |
+          set -euo pipefail
+          CURRENT="\${{ steps.get-current-service.outputs.current_task_definition_arn }}"
+          aws ecs describe-task-definition --task-definition "\$CURRENT" --query taskDefinition --output json > task-definition.json
+          jq --arg image "\${{ steps.set-image-uri.outputs.image_uri }}" '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy, .deregisteredAt)
+            | .containerDefinitions |= map(if .name == "app" then .image = \$image else . end)
+          ' task-definition.json > task-definition-next.json
+          ARN=\$(aws ecs register-task-definition --cli-input-json file://task-definition-next.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "task_definition_arn=\$ARN" >> "\$GITHUB_OUTPUT"
+
+      - name: Deploy ECS service revision
         run: |
           aws ecs update-service \\
             --cluster "\$ECS_CLUSTER_NAME" \\
             --service "\$ECS_SERVICE_NAME" \\
+            --task-definition "\${{ steps.register-task-definition.outputs.task_definition_arn }}" \\
             --force-new-deployment
           aws ecs wait services-stable \\
             --cluster "\$ECS_CLUSTER_NAME" \\
