@@ -163,24 +163,21 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
 
   if (!overrides.orchestrator) {
     if (namedCloud && cloud === 'azure') {
-      // AKS / Kubernetes must win over a generic "container" word and UI defaults.
       if (/\baks\b/.test(t) || /azure\s+kubernetes/.test(t) || /kubernetes\s+service/.test(t)) {
         orchestrator = 'aks';
       } else if (/container\s*apps?/.test(t) || /serverless\s*containers?/.test(t)) {
         orchestrator = 'container-apps';
       } else if (/kubernetes/.test(t) || /\bk8s\b/.test(t)) {
         orchestrator = 'aks';
-      } else if (orchestrator !== 'aks' && orchestrator !== 'container-apps') {
-        orchestrator = 'container-apps';
+      } else {
+        orchestrator = 'aks';
       }
     } else if (namedCloud && cloud === 'aws') {
       if (/\becs\b/.test(t) || /\bfargate\b/.test(t)) orchestrator = 'ecs';
-      else if (/\beks\b/.test(t) || /kubernetes/.test(t) || /\bk8s\b/.test(t)) {
-        orchestrator = 'eks';
-      }
+      else orchestrator = 'eks';
     } else if (namedCloud && cloud === 'gcp') {
-      if (/cloud\s*run/.test(t)) orchestrator = 'cloud-run';
-      else if (/\bgke\b/.test(t) || /kubernetes/.test(t)) orchestrator = 'gke';
+      if (/cloud\s*run/.test(t) || /serverless/.test(t)) orchestrator = 'cloud-run';
+      else orchestrator = 'gke';
     } else if (namedCloud && cloud === 'oracle') {
       orchestrator = 'oke';
     }
