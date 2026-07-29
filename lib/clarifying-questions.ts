@@ -166,10 +166,11 @@ export function validateRegionForCloud(
 }
 
 /** Parse "Question text? (options: A / B / C)" into prompt + options. */
-export function parseClarifyingQuestion(raw: string): {
+export function parseClarifyingQuestion(raw?: string | null): {
   prompt: string;
   options: string[];
 } {
+  if (!raw || typeof raw !== 'string') return { prompt: '', options: [] };
   const match = raw.match(/^([\s\S]*?)\s*\(options:\s*([\s\S]*?)\)\s*$/i);
   if (!match) return { prompt: raw, options: [] };
 

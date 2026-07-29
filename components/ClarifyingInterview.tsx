@@ -345,22 +345,27 @@ function mapRegionToNewCloud(currentRegion: string, allowed: string[]): string {
 }
 
   const clearStaleRegionIfNeeded = (nextCloudAnswer: string) => {
-    const regionIndex = adaptedQuestions.findIndex((question) =>
-      /^Where should we host it\?/i.test(question)
-    );
-    if (regionIndex < 0) return;
-    const cloud = cloudFromInterviewAnswer(nextCloudAnswer);
-    if (!cloud) return;
-    const regions = adaptClarifyingQuestions(questions, {
-      ...answers,
-      [currentIndex]: nextCloudAnswer,
-    });
-    const regionQuestion = regions[regionIndex];
-    const allowed = parseClarifyingQuestion(regionQuestion).options;
-    const currentRegion = answers[regionIndex];
-    if (currentRegion && !allowed.includes(currentRegion)) {
-      const fallback = mapRegionToNewCloud(currentRegion, allowed);
-      onAnswer(regionIndex, fallback);
+    try {
+      const regionIndex = adaptedQuestions.findIndex((question) =>
+        question && /^Where should we host it\?/i.test(question)
+      );
+      if (regionIndex < 0) return;
+      const cloud = cloudFromInterviewAnswer(nextCloudAnswer);
+      if (!cloud) return;
+      const regions = adaptClarifyingQuestions(questions, {
+        ...answers,
+        [currentIndex]: nextCloudAnswer,
+      });
+      const regionQuestion = regions[regionIndex];
+      if (!regionQuestion) return;
+      const allowed = parseClarifyingQuestion(regionQuestion).options;
+      const currentRegion = answers[regionIndex];
+      if (currentRegion && Array.isArray(allowed) && allowed.length > 0 && !allowed.includes(currentRegion)) {
+        const fallback = mapRegionToNewCloud(currentRegion, allowed);
+        onAnswer(regionIndex, fallback);
+      }
+    } catch {
+      // Safe fallback: never crash the click handler
     }
   };
 
