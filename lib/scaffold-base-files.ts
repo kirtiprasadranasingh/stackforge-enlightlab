@@ -860,6 +860,8 @@ export function shouldForceLockPath(path: string): boolean {
   if (FORCE_STUB_PATHS.has(path)) return true;
   // Optimal fix: never trust model Terraform — always use profile-validated TF
   if (path.startsWith('terraform/') && path.endsWith('.tf')) return true;
+  // Never trust model Helm manifests — always use profile-validated Helm templates
+  if (path.startsWith('charts/app/')) return true;
   // environments/*.tfvars are owned by applyScaffoldOptions from interview
   // answers — never force locked staging/us-east-1 defaults over them.
   return false;
