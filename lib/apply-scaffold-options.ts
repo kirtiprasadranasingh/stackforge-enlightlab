@@ -152,7 +152,28 @@ function stripCompetingAppTrees(
     if (byPath.has('main.go') || byPath.has('go.mod')) {
       drop(['app/main.go', 'app/go.mod', 'app/go.sum', 'app/Dockerfile']);
     }
-  } else if (runtime === 'node' || runtime === 'java' || runtime === 'dotnet') {
+  } else if (runtime === 'java' || runtime === 'dotnet') {
+    drop([
+      'app/server.js',
+      'app/index.js',
+      'app/package.json',
+      'app/package-lock.json',
+      'app/main.py',
+      'app/requirements.txt',
+      'app/main.go',
+      'app/go.mod',
+      'app/go.sum',
+      'server.js',
+      'index.js',
+      'package.json',
+      'package-lock.json',
+      'main.py',
+      'requirements.txt',
+      'main.go',
+      'go.mod',
+      'go.sum',
+    ]);
+  } else if (runtime === 'node') {
     drop([
       'app/main.py',
       'app/requirements.txt',
@@ -1482,6 +1503,37 @@ CMD ["node", "server.js"]
   } else if (options.database === 'mysql' || options.database === 'postgres') {
     byPath.delete('terraform/redis.tf');
     byPath.delete('terraform/mongodb.tf');
+
+    const dbFile = byPath.get('terraform/database.tf');
+    if (dbFile) {
+      let content = dbFile.content;
+      if (options.database === 'mysql') {
+        if (presets.cloud === 'azure') {
+          content = content
+            .replace(/azurerm_postgresql_flexible_server/g, 'azurerm_mysql_flexible_server')
+            .replace(/version\s*=\s*"15"/g, 'version = "8.0.21"')
+            .replace(/-pg"/g, '-mysql"');
+        } else if (presets.cloud === 'aws') {
+          content = content
+            .replace(/engine\s*=\s*"postgres"/g, 'engine = "mysql"')
+            .replace(/engine_version\s*=\s*"[^"]*"/g, 'engine_version = "8.0"')
+            .replace(/port\s*=\s*5432/g, 'port = 3306');
+        }
+      } else if (options.database === 'postgres') {
+        if (presets.cloud === 'azure') {
+          content = content
+            .replace(/azurerm_mysql_flexible_server/g, 'azurerm_postgresql_flexible_server')
+            .replace(/-mysql"/g, '-pg"');
+        } else if (presets.cloud === 'aws') {
+          content = content
+            .replace(/engine\s*=\s*"mysql"/g, 'engine = "postgres"')
+            .replace(/port\s*=\s*3306/g, 'port = 5432');
+        }
+      }
+      if (content !== dbFile.content) {
+        byPath.set('terraform/database.tf', { ...dbFile, content });
+      }
+    }
   } else if (options.database === 'mongodb') {
     byPath.delete('terraform/database.tf');
     byPath.delete('terraform/mysql.tf');
