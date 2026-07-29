@@ -238,8 +238,10 @@ export function ClarifyingInterview({
   const { prompt, options } = parseClarifyingQuestion(steps[stepIndex].question);
   const currentAnswer = answers[currentIndex] || '';
   const { selectedOption, detail } = parseStructuredAnswer(currentAnswer, options);
-  const { primary: followUpPrimary, hosting: followUpHosting } =
-    parseCompoundDetail(detail);
+  const followUpCompound = parseCompoundDetail(detail);
+  const followUpPrimary = followUpCompound.primary;
+  const followUpHosting = followUpCompound.hosting;
+  const followUpCi = followUpCompound.ci;
 
   const isCloudChange = selectedOption === 'Change the cloud';
   const isHostingChange = selectedOption === 'Change the hosting platform';
