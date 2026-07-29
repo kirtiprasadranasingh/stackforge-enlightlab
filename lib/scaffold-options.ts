@@ -74,7 +74,16 @@ function parseRuntimeFromText(raw: string): RuntimeKind | null {
   const confirmed = extractConfirmedChoicesBlock(raw);
   const scope = confirmed || raw;
 
-  // LAST Language (client override) in scope wins (interview after any stale plan text)
+  // Check explicit language key-value lines first
+  const langMatch = scope.match(
+    /(?:health-check service language|language\/runtime stub|language(?:\/framework)?)\s*(?:\(client override\))?\s*:\s*([^\n.]+)/i
+  );
+  if (langMatch) {
+    const rt = runtimeFromPhrase(langMatch[1]);
+    if (rt) return rt;
+  }
+
+  // LAST Language (client override) in scope wins
   const overrides = [
     ...scope.matchAll(
       /language(?:\/framework)?\s*\(client override\):\s*([^\n]+)/gi
@@ -87,16 +96,15 @@ function parseRuntimeFromText(raw: string): RuntimeKind | null {
     }
   }
 
-  // Arrow answers — only inside Confirmed choices when that block exists
-  const arrowScope = confirmed || '';
+  // Arrow answers — inside Confirmed block or interview text
+  const arrowScope = scope;
   if (arrowScope) {
     let last: RuntimeKind | null = null;
     for (const m of arrowScope.matchAll(/→\s*([^\n]+)/g)) {
       const phrase = m[1].trim();
-      // Accept explicit override lines or bare language chip answers only
       if (
         /language(?:\/framework)?\s*\(client override\)/i.test(phrase) ||
-        /^(node\.?js|go|golang|python|java|\.net|spring(?:\s*boot)?)\b/i.test(
+        /^(node\.?js|go|golang|python|java|\.net|c#|spring(?:\s*boot)?)\b/i.test(
           phrase
         )
       ) {
@@ -106,15 +114,12 @@ function parseRuntimeFromText(raw: string): RuntimeKind | null {
     if (last) return last;
   }
 
-  // No confirmed block: fall back to prompt keywords (menus stripped)
-  if (!confirmed) {
-    const t = stripOptionMenus(raw).toLowerCase();
-    return (
-      runtimeFromPhrase(t) ||
-      (/\bnode\.?js\b|\bexpress\b|\bnext\.?js\b/.test(t) ? 'node' : null)
-    );
-  }
-  return null;
+  // Fall back to keyword scanning on raw text with option menus stripped
+  const t = stripOptionMenus(raw).toLowerCase();
+  return (
+    runtimeFromPhrase(t) ||
+    (/\bnode\.?js\b|\bexpress\b|\bnext\.?js\b/.test(t) ? 'node' : null)
+  );
 }
 
 function databaseFromPhrase(phrase: string): DatabaseKind | null {
