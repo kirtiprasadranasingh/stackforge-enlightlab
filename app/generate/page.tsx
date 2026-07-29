@@ -464,10 +464,19 @@ export default function GeneratePage() {
           : requiresPlanApproval(text, hasFiles && !startFresh);
 
       let phase: WorkflowPhase;
+      const isNewStackRequest =
+        isFullStackPrompt(text) ||
+        isVagueStackPrompt(text) ||
+        /\b(azure|aws|gcp|oracle|infrastructure|eks|gke|aks|oke)\b/i.test(text);
+
       if (options?.phase) {
         phase = options.phase;
       } else if (options?.approvedPlan) {
         phase = 'generate';
+      } else if (isNewStackRequest) {
+        // Brand-new stack prompt typed in chat → reset interview and start fresh clarify phase
+        setPendingQuestions([]);
+        phase = 'clarify';
       } else if (awaitingApproval && pendingPlan) {
         // User is revising an existing plan
         phase = 'plan';
