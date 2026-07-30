@@ -448,6 +448,14 @@ if (
   console.log('PASS  EKS Java + Redis semantic contract');
 }
 
+const privateEksTerraform = javaRedisFiles.find((file) => file.path === 'terraform/eks.tf')?.content || '';
+if (!/endpoint_public_access\\s*=\\s*false/.test(privateEksTerraform)) {
+  fail++;
+  console.error('FAIL  private EKS keeps a public control-plane endpoint');
+} else {
+  console.log('PASS  private EKS disables public control-plane endpoint');
+}
+
 const validatedJavaRedisFiles = normalizeScaffoldFiles(
   [...javaRedisFiles, createRequirementsManifest(javaRedisEks)],
   {
@@ -484,6 +492,41 @@ if (/AWS ECS template|Node\.js is a default scaffold placeholder/i.test(cleanedE
   console.error(\`FAIL  EKS plan cleanup: \${planIssues.join('; ') || cleanedEksPlan}\`);
 } else {
   console.log('PASS  EKS plan cleanup removes ECS/Node leakage');
+}
+
+const stalePrivateEksPlan = [
+  '## Confirmed requirements',
+  '- AWS EKS in us-east-1 with GitHub Actions, Redis cache, Java, development, staging, and production.',
+  '## Architecture',
+  '- An internal AWS Application Load Balancer (ALB) provides private access through the AWS Load Balancer Controller.',
+  '- IRSA and pod identity roles are configured for the application.',
+  '## File manifest',
+  '- terraform/ecr.tf',
+  '- terraform/rds.tf',
+  '- terraform/alb.tf',
+  '- terraform/alb_controller.tf',
+].join('\\n');
+const cleanedPrivateEksPlan = sanitizePlanAgainstInterview(
+  stalePrivateEksPlan,
+  javaRedisEks.source,
+  javaRedisEks.presets
+);
+const privateEksPlanIssues = validatePlanAgainstSpec(cleanedPrivateEksPlan, javaRedisEks);
+const privateEksUnshippedPromise = cleanedPrivateEksPlan
+  .split('\\n')
+  .some((line) => /Application Load Balancer|Load Balancer Controller|IRSA|pod identity/i.test(line) && !line.includes('does **not**'));
+if (
+  privateEksUnshippedPromise ||
+  ['terraform/alb.tf', 'terraform/alb_controller.tf'].some((marker) => cleanedPrivateEksPlan.includes(marker)) ||
+  !cleanedPrivateEksPlan.includes('ClusterIP') ||
+  !cleanedPrivateEksPlan.includes('terraform/main.tf') ||
+  !cleanedPrivateEksPlan.includes('terraform/database.tf') ||
+  privateEksPlanIssues.length
+) {
+  fail++;
+  console.error('FAIL  EKS private plan-to-code boundary: ' + (privateEksPlanIssues.join('; ') || cleanedPrivateEksPlan));
+} else {
+  console.log('PASS  EKS private plan only promises generated delivery');
 }
 
 const publicHttpsEks = buildArchitectureSpec({

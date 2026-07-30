@@ -295,9 +295,9 @@ export function getCloudPrompt(cloud: string, orchestrator: string): string {
       }
       return `AWS + EKS:
 - Terraform: hashicorp/aws provider — pin a real 5.x version (e.g. 5.84.0)
-- EKS with managed node groups (or Fargate if requested), VPC, IAM (IRSA), restricted security groups
-- ALB / AWS Load Balancer Controller pattern for ingress
-- ECR for images; optional terraform-aws-modules/eks/aws only with a real published version (e.g. 20.x)`;
+- Locked delivery: EKS with managed node groups, VPC, cluster/node IAM roles, restricted security groups, ECR, and a Helm application chart
+- Private access: chart uses a ClusterIP Service with ingress disabled. Public access: chart uses a Service type LoadBalancer. Do NOT promise an ALB, AWS Load Balancer Controller, IRSA/pod identity, NGINX ingress, or a custom domain unless that exact resource is generated.
+- File manifest must use the locked EKS paths: terraform/main.tf, network.tf, security_groups.tf, iam.tf, eks.tf, database.tf or redis.tf when selected, outputs.tf; never invent ecr.tf, rds.tf, alb.tf, or alb_controller.tf.`;
     case 'gcp':
       if (orchestrator === 'cloud-run' || orchestrator === 'serverless') {
         return `GCP + Cloud Run:

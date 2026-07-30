@@ -845,6 +845,20 @@ export function applyScaffoldOptions(
     byPath.set(valuesPath, { ...byPath.get(valuesPath)!, content: v });
   }
 
+  // A private EKS choice applies to the control plane as well as to the
+  // application Service. Public profiles retain endpoint access for CI.
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+    const eks = byPath.get('terraform/eks.tf');
+    if (eks) {
+      const endpointPublicAccess = options.access === 'private' ? 'false' : 'true';
+      const content = eks.content.replace(
+        /(endpoint_public_access\s*=\s*)(?:true|false)/,
+        `$1${endpointPublicAccess}`
+      );
+      byPath.set('terraform/eks.tf', { ...eks, content });
+    }
+  }
+
   // CI swap — exactly one pipeline format for the chosen provider
   const ciPaths = [
     '.github/workflows/deploy.yml',

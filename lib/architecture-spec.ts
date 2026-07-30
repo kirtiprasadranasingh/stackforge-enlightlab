@@ -246,13 +246,13 @@ export function buildArchitectureSpec(params: {
 /** Stable, model-readable context for plan generation. */
 export function formatArchitectureSpecForPrompt(spec: ArchitectureSpec): string {
   const { presets, options } = spec;
-  const publicEksDelivery =
-    presets.cloud === 'aws' &&
-    presets.orchestrator === 'eks' &&
-    options.access !== 'private'
-      ? options.access === 'public_https'
-        ? '\n- Public EKS delivery: the locked scaffold emits a Kubernetes Service type LoadBalancer on an AWS-assigned public hostname. It does NOT create a custom domain, Route 53/DNS record, ACM certificate, HTTPS ingress, or Cluster Autoscaler. State those as customer-provided production follow-up configuration; never claim they are generated. Do not describe ECS, an ALB controller, NGINX ingress, or app.example.com for this path.'
-        : '\n- Public EKS delivery: Kubernetes Service type LoadBalancer (AWS-assigned public hostname, HTTP by default). Do not describe ECS, an ALB controller, NGINX ingress, or app.example.com for this path.'
+  const eksDelivery =
+    presets.cloud === 'aws' && presets.orchestrator === 'eks'
+      ? options.access === 'private'
+        ? '\n- Private EKS delivery: the locked scaffold emits a Helm ClusterIP Service with ingress disabled. It does NOT create an ALB, AWS Load Balancer Controller, IRSA/pod identity, NGINX ingress, custom domain, or private DNS. Do not promise those resources or their Terraform files.'
+        : options.access === 'public_https'
+          ? '\n- Public EKS delivery: the locked scaffold emits a Kubernetes Service type LoadBalancer on an AWS-assigned public hostname. It does NOT create a custom domain, Route 53/DNS record, ACM certificate, HTTPS ingress, ALB controller, IRSA/pod identity, or Cluster Autoscaler. State those as customer-provided production follow-up configuration; never claim they are generated. Do not describe ECS, NGINX ingress, or app.example.com for this path.'
+          : '\n- Public EKS delivery: Kubernetes Service type LoadBalancer (AWS-assigned public hostname, HTTP by default). It does NOT create an ALB controller, IRSA/pod identity, or NGINX ingress. Do not describe ECS or app.example.com for this path.'
       : '';
   return `## Validated architecture specification (authoritative)
 - Cloud: ${presets.cloud}
@@ -263,7 +263,7 @@ export function formatArchitectureSpecForPrompt(spec: ArchitectureSpec): string 
 - API access: ${labelForAccess(options.access)}${options.access === 'public_basic' ? ' (HTTP on the provider default hostname; custom domain required for trusted HTTPS)' : ''}
 - Data service: ${labelForDatabase(options.database)}
 - Health-check runtime: ${labelForRuntime(options.runtime)}
-- Scale tier: ${options.scale}${publicEksDelivery}
+- Scale tier: ${options.scale}${eksDelivery}
 
 Use every value above exactly. Do not introduce a different cloud, region, CI/CD system, database/cache, environment, runtime, or access mode.`;
 }
@@ -381,6 +381,18 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
     }
     if (/\bCluster Autoscaler\b/i.test(normalized) && !/does\s+(?:\*+\s*)?not(?:\s*\*+)?\s+create|not\s+create/i.test(normalized)) {
       issues.push('EKS plan promises Cluster Autoscaler even though the locked scaffold only configures application HPA/node-group bounds.');
+    }
+  }
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks') {
+    const unshippedEksIntegration = normalized
+      .split('\n')
+      .some(
+        (line) =>
+          /(?:AWS )?(?:Application )?Load Balancer|AWS Load Balancer Controller|\bIRSA\b|pod identity|terraform\/(?:alb(?:_controller)?|ecr|rds)\.tf/i.test(line) &&
+          !/does\s+(?:\*+\s*)?not(?:\s*\*+)?(?:\s+create|\s+generate)|not\s+(?:create|generated)|follow-up|out of scope/i.test(line)
+      );
+    if (unshippedEksIntegration) {
+      issues.push('EKS plan promises an ALB/controller/IRSA or Terraform file that the locked EKS scaffold does not generate.');
     }
   }
 

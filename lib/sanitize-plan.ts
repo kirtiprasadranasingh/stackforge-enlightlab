@@ -584,7 +584,7 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
       .split('\n')
       .filter(
         (line) =>
-          !/locked AWS ECS template|ECS Fargate|ecs task definition|aws ecs update-service|prior task definition ARN|aws_ecs_service|Cluster Autoscaler/i.test(
+          !/locked AWS ECS template|ECS Fargate|ecs task definition|aws ecs update-service|prior task definition ARN|aws_ecs_service|Cluster Autoscaler|(?:AWS )?(?:Application )?Load Balancer|AWS Load Balancer Controller|\bIRSA\b|pod identity/i.test(
             line
           )
       )
@@ -597,7 +597,15 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
       .replace(/\bjava-app\//gi, 'app/')
       .replace(/\bterraform\/vpc\.tf\b/gi, 'terraform/network.tf')
       .replace(/\bterraform\/elasticache\.tf\b/gi, 'terraform/redis.tf')
+      .replace(/\bterraform\/rds\.tf\b/gi, 'terraform/database.tf')
+      .replace(/\bterraform\/ecr\.tf\b/gi, 'terraform/main.tf')
       .replace(/\bHealthCheckServer\.java\b/gi, 'Application.java');
+    // The locked EKS profile has no ALB/controller adapter. Drop invented
+    // manifest entries instead of renaming them to a different false path.
+    out = out
+      .split('\n')
+      .filter((line) => !/\bterraform\/(?:alb|alb_controller)\.tf\b/i.test(line))
+      .join('\n');
 
     if (options.access === 'public_https') {
       // The EKS starter creates a LoadBalancer Service, not ACM, Route 53,
@@ -615,6 +623,16 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
       out = prependAssumption(
         out,
         '**Custom HTTPS boundary:** The generated EKS scaffold exposes a Kubernetes `Service` of type `LoadBalancer` on its AWS-assigned public hostname. It does **not** create a custom domain, Route 53/DNS record, ACM certificate, HTTPS ingress, or Cluster Autoscaler. Provide the domain and hosted-zone details, then add those production integrations before deployment.'
+      );
+    } else if (options.access === 'private') {
+      out = prependAssumption(
+        out,
+        '**Private EKS delivery:** The generated Helm chart uses a `ClusterIP` Service and has ingress disabled. It does **not** create an ALB, AWS Load Balancer Controller, IRSA/pod identity, NGINX ingress, custom domain, or private DNS. Add a separately designed internal ingress/load-balancing integration only if the client later requires it.'
+      );
+    } else {
+      out = prependAssumption(
+        out,
+        '**Public EKS delivery:** The generated Helm chart exposes a `Service` of type `LoadBalancer` on an AWS-assigned hostname. It does **not** create an ALB controller, IRSA/pod identity, or NGINX ingress.'
       );
     }
     return out;
