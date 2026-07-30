@@ -1,0 +1,54 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GKE_CLUSTER_NAME: ${{ vars.GKE_CLUSTER_NAME || 'stackforge' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'stackforge' }}
+  HELM_RELEASE: ${{ vars.HELM_RELEASE || 'app' }}
+  HELM_NAMESPACE: ${{ vars.HELM_NAMESPACE || 'default' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker build -t "$IMAGE_URI" -f app/Dockerfile app
+          docker push "$IMAGE_URI"
+
+      - name: Update kubeconfig
+        run: echo "gcloud container clusters get-credentials"
+
+      - name: Helm upgrade
+        run: |
+          helm upgrade --install "$HELM_RELEASE" ./charts/app \
+            --namespace "$HELM_NAMESPACE" \
+            --create-namespace \
+            --set image.repository="${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY" \
+            --set image.tag="${{ github.sha }}" \
+            --atomic \
+            --wait

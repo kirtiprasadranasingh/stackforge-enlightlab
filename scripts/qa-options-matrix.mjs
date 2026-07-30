@@ -634,11 +634,15 @@ const gkeRedisFiles = mergeLockedBaseFiles(
   { fillMissing: true, forceStubs: true, presets: gkeRedis.presets, scaffoldOptions: gkeRedis.options }
 ).files;
 const gkeRedisIssues = validateScaffoldContract(gkeRedisFiles, gkeRedis.presets, gkeRedis.options);
+const gkeGithubWorkflow = gkeRedisFiles.find((file) => file.path === '.github/workflows/deploy.yml')?.content || '';
 if (
   gkeRedis.issues.length ||
   gkeRedisIssues.length ||
   !gkeRedisFiles.find((file) => file.path === 'terraform/main.tf')?.content.includes('google_redis_instance') ||
-  !gkeRedisFiles.find((file) => file.path === 'environments/development.tfvars')?.content.includes('enable_redis = true')
+  !gkeRedisFiles.find((file) => file.path === 'environments/development.tfvars')?.content.includes('enable_redis = true') ||
+  !gkeGithubWorkflow.includes('google-github-actions/auth@v2') ||
+  !gkeGithubWorkflow.includes('gcloud auth configure-docker') ||
+  ['aws-actions/', 'Amazon ECR', 'ECR_REPOSITORY'].some((marker) => gkeGithubWorkflow.includes(marker))
 ) {
   fail++;
   console.error('FAIL  GKE Redis Memorystore contract: ' + (gkeRedis.issues.join('; ') || gkeRedisIssues.join('; ')));

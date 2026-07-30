@@ -462,6 +462,18 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
       issues.push('EKS plan promises an ALB/controller/IRSA or Terraform file that the locked EKS scaffold does not generate.');
     }
   }
+  if (presets.cloud === 'gcp' && presets.orchestrator === 'gke') {
+    const unshippedGkeIdentity = normalized
+      .split('\n')
+      .some(
+        (line) =>
+          /google_container_node_pool|Workload Identity Federation|google_service_account|google_project_iam_member|service accounts? for GKE nodes|GitHub Actions service account/i.test(line) &&
+          !/does not|not create|follow-up|extension point/i.test(line)
+      );
+    if (unshippedGkeIdentity) {
+      issues.push('GKE plan promises node-pool or Google IAM/WIF resources that the locked Autopilot profile does not generate.');
+    }
+  }
 
   return [...new Set(issues)];
 }

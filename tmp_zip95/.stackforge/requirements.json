@@ -2,18 +2,18 @@
   "version": 1,
   "presets": {
     "cloud": "gcp",
-    "orchestrator": "cloud-run",
+    "orchestrator": "gke",
     "ci": "github-actions"
   },
   "options": {
-    "region": "europe-west1",
+    "region": "us-central1",
     "environments": [
       "staging"
     ],
-    "database": "postgres",
+    "database": "redis",
     "databaseMode": "standard",
-    "access": "private",
+    "access": "public_basic",
     "scale": "medium",
-    "runtime": "dotnet"
+    "runtime": "python"
   }
 }

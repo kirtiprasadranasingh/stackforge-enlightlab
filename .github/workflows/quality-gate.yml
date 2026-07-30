@@ -1,0 +1,30 @@
+name: StackForge quality gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: stackforge-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  requirements-contract:
+    name: Requirements-to-scaffold contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Exercises every supported profile/option tuple without calling the LLM
+      # or requiring cloud credentials. A failure blocks the change that caused it.
+      - run: npm run qa:matrix
+      - run: npm run qa:options-matrix
+      - run: npm run qa:contract-matrix
+      - run: npm run lint
+      - run: npm run build

@@ -939,7 +939,67 @@ export function applyScaffoldOptions(
     if (p.startsWith('aws-codepipeline/')) byPath.delete(p);
     if (p.startsWith('.devops/')) byPath.delete(p);
   }
-  if (presets.ci === 'github-actions' && existingGha) {
+  if (presets.ci === 'github-actions' && presets.cloud === 'gcp' && presets.orchestrator === 'gke') {
+    set(
+      byPath,
+      '.github/workflows/deploy.yml',
+      `name: Deploy GKE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: \${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: \${{ vars.GCP_REGION || '${options.region}' }}
+  GKE_CLUSTER_NAME: \${{ vars.GKE_CLUSTER_NAME || 'stackforge' }}
+  ARTIFACT_REPOSITORY: \${{ vars.ARTIFACT_REPOSITORY || 'stackforge-staging-images' }}
+  HELM_RELEASE: \${{ vars.HELM_RELEASE || 'app' }}
+  HELM_NAMESPACE: \${{ vars.HELM_NAMESPACE || 'default' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: \${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: \${{ secrets.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: docker/setup-buildx-action@v3
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: \${{ env.GKE_CLUSTER_NAME }}
+          location: \${{ env.GCP_REGION }}
+      - uses: azure/setup-helm@v4
+      - name: Configure Artifact Registry authentication
+        run: gcloud auth configure-docker "\${{ env.GCP_REGION }}-docker.pkg.dev" --quiet
+      - name: Build and push image
+        id: image
+        run: |
+          IMAGE_REPOSITORY="\${{ env.GCP_REGION }}-docker.pkg.dev/\${{ env.GCP_PROJECT_ID }}/\${{ env.ARTIFACT_REPOSITORY }}/app"
+          IMAGE_URI="$IMAGE_REPOSITORY:\${{ github.sha }}"
+          docker build -t "$IMAGE_URI" -f app/Dockerfile app
+          docker push "$IMAGE_URI"
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "image_repository=$IMAGE_REPOSITORY" >> "$GITHUB_OUTPUT"
+      - name: Helm upgrade
+        run: |
+          helm upgrade --install "\${{ env.HELM_RELEASE }}" ./charts/app \\
+            --namespace "\${{ env.HELM_NAMESPACE }}" \\
+            --create-namespace \\
+            --set image.repository="\${{ steps.image.outputs.image_repository }}" \\
+            --set image.tag="\${{ github.sha }}" \\
+            --atomic --wait
+`
+    );
+  } else if (presets.ci === 'github-actions' && existingGha) {
     let w = existingGha.content;
     const regVar =
       presets.cloud === 'gcp'

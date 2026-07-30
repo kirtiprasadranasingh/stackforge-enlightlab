@@ -571,10 +571,30 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
   let out = plan;
   const isAws = planOrContextIsAws(plan, context);
   const isEks = presets?.cloud === 'aws' && presets.orchestrator === 'eks';
+  const isGke = presets?.cloud === 'gcp' && presets.orchestrator === 'gke';
   const oneEnv =
     /→\s*One environment\b/i.test(context) ||
     /Which environments do you need\s*\n\s*→\s*One environment\b/i.test(context) ||
     /Environments:\s*One environment\b/i.test(context);
+
+  if (isGke) {
+    // The locked GKE profile uses Autopilot and does not emit independently
+    // managed node pools or Google IAM identities/WIF. Do not turn generic
+    // Kubernetes best practices into false generated-delivery claims.
+    out = out
+      .split('\n')
+      .filter(
+        (line) =>
+          !/google_container_node_pool|node pools? for the GKE cluster|Workload Identity Federation|google_service_account|google_project_iam_member|google_service_account_iam_member|service accounts? for GKE nodes|GitHub Actions service account/i.test(
+            line
+          )
+      )
+      .join('\n');
+    out = prependAssumption(
+      out,
+      '**GKE locked delivery:** The scaffold creates an Autopilot cluster, VPC, Artifact Registry, selected Cloud SQL or Memorystore Redis resources, and a Helm chart. It does **not** create a separate node pool or Google service-account / Workload Identity Federation bindings; add those IAM integrations with the client project identity before live deployment.'
+    );
+  }
 
   if (isAws && isEks) {
     // EKS has a different deployment and data-store contract from ECS. Do not

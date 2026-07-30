@@ -311,8 +311,9 @@ export function getCloudPrompt(cloud: string, orchestrator: string): string {
       }
       return `GCP + GKE:
 - Terraform: hashicorp/google provider — pin a real 6.x version
-- GKE (Standard or Autopilot as appropriate), VPC, Workload Identity, least-privilege SA
-- Ingress / Cloud Load Balancing; Artifact Registry`;
+- Locked delivery: GKE Autopilot cluster, VPC, Artifact Registry, Cloud SQL when selected, and Memorystore Redis when selected. Autopilot does not create a separately managed node-pool resource.
+- Public access uses the built-in GCE Ingress controller; private access disables ingress. Do not claim nginx, a separately installed controller, or certificate/DNS resources unless those files are generated.
+- IAM file is an extension point unless it contains an actual service-account/IAM binding resource. Do not promise Workload Identity Federation, pod IAM, or service-account bindings when the locked file does not create them.`;
     case 'azure':
       if (orchestrator === 'container-apps' || orchestrator === 'serverless') {
         return `Azure + Container Apps:
