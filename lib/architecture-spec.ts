@@ -250,7 +250,9 @@ export function formatArchitectureSpecForPrompt(spec: ArchitectureSpec): string 
     presets.cloud === 'aws' &&
     presets.orchestrator === 'eks' &&
     options.access !== 'private'
-      ? '\n- Public EKS delivery: Kubernetes Service type LoadBalancer (AWS-assigned public hostname, HTTP by default; custom domain required for trusted HTTPS). Do not describe ECS, an ALB controller, NGINX ingress, or app.example.com for this path.'
+      ? options.access === 'public_https'
+        ? '\n- Public EKS delivery: the locked scaffold emits a Kubernetes Service type LoadBalancer on an AWS-assigned public hostname. It does NOT create a custom domain, Route 53/DNS record, ACM certificate, HTTPS ingress, or Cluster Autoscaler. State those as customer-provided production follow-up configuration; never claim they are generated. Do not describe ECS, an ALB controller, NGINX ingress, or app.example.com for this path.'
+        : '\n- Public EKS delivery: Kubernetes Service type LoadBalancer (AWS-assigned public hostname, HTTP by default). Do not describe ECS, an ALB controller, NGINX ingress, or app.example.com for this path.'
       : '';
   return `## Validated architecture specification (authoritative)
 - Cloud: ${presets.cloud}
@@ -364,6 +366,22 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   }
   if (options.access === 'public_basic' && /client confirmed public with secure https/i.test(normalized)) {
     issues.push('Plan changes default-hostname public access into custom-domain HTTPS.');
+  }
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks' && options.access === 'public_https') {
+    const promisesUnshippedTls = normalized
+      .split('\n')
+      .some(
+        (line) =>
+          /(?:create|provision|configure|generate|deploy).*(?:ACM|AWS Certificate Manager|Route ?53|DNS (?:record|zone)|HTTPS ingress|custom domain)|(?:ACM|AWS Certificate Manager|Route ?53|DNS (?:record|zone)|HTTPS ingress|custom domain).*(?:will be|is generated|is configured)/i.test(
+            line
+          ) && !/does not|not create|follow-up|customer-provided|provide the domain/i.test(line)
+      );
+    if (promisesUnshippedTls) {
+      issues.push('EKS plan promises custom-domain HTTPS resources that the locked scaffold does not generate.');
+    }
+    if (/\bCluster Autoscaler\b/i.test(normalized) && !/does\s+(?:\*+\s*)?not(?:\s*\*+)?\s+create|not\s+create/i.test(normalized)) {
+      issues.push('EKS plan promises Cluster Autoscaler even though the locked scaffold only configures application HPA/node-group bounds.');
+    }
   }
 
   return [...new Set(issues)];

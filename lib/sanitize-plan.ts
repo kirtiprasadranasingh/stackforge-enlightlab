@@ -579,15 +579,44 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
     // EKS has a different deployment and data-store contract from ECS. Do not
     // let the shared AWS prose append task-definition/RDS assumptions to an
     // otherwise valid Kubernetes plan.
+    const options = parseScaffoldOptions(context);
     out = out
       .split('\n')
       .filter(
         (line) =>
-          !/locked AWS ECS template|ECS Fargate|ecs task definition|aws ecs update-service|prior task definition ARN/i.test(
+          !/locked AWS ECS template|ECS Fargate|ecs task definition|aws ecs update-service|prior task definition ARN|aws_ecs_service|Cluster Autoscaler/i.test(
             line
           )
       )
       .join('\n');
+
+    // Keep the plan's file manifest aligned to the locked EKS profile.  These
+    // names are part of the approval contract: promising a different path
+    // makes a correct generated scaffold look incomplete to the customer.
+    out = out
+      .replace(/\bjava-app\//gi, 'app/')
+      .replace(/\bterraform\/vpc\.tf\b/gi, 'terraform/network.tf')
+      .replace(/\bterraform\/elasticache\.tf\b/gi, 'terraform/redis.tf')
+      .replace(/\bHealthCheckServer\.java\b/gi, 'Application.java');
+
+    if (options.access === 'public_https') {
+      // The EKS starter creates a LoadBalancer Service, not ACM, Route 53,
+      // DNS records, an ingress controller, or a TLS certificate.  Remove
+      // affirmative promises and state the exact, visible delivery instead.
+      out = out
+        .split('\n')
+        .filter(
+          (line) =>
+            !/AWS Certificate Manager|\bACM\b|Route ?53|DNS (?:record|zone)|custom domain.*(?:will|is) (?:be )?(?:created|configured|provided)|secure HTTPS (?:will|is) (?:be )?(?:handled|configured|terminated)/i.test(
+              line
+            )
+        )
+        .join('\n');
+      out = prependAssumption(
+        out,
+        '**Custom HTTPS boundary:** The generated EKS scaffold exposes a Kubernetes `Service` of type `LoadBalancer` on its AWS-assigned public hostname. It does **not** create a custom domain, Route 53/DNS record, ACM certificate, HTTPS ingress, or Cluster Autoscaler. Provide the domain and hosted-zone details, then add those production integrations before deployment.'
+      );
+    }
     return out;
   }
 

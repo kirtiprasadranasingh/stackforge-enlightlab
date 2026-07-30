@@ -486,6 +486,49 @@ if (/AWS ECS template|Node\.js is a default scaffold placeholder/i.test(cleanedE
   console.log('PASS  EKS plan cleanup removes ECS/Node leakage');
 }
 
+const publicHttpsEks = buildArchitectureSpec({
+  prompt: 'Build production AWS EKS infrastructure with Java and Redis.',
+  interviewAnswers: 'us-east-1. Production only. Public with secure HTTPS and a custom domain. Private database with 7-day automatic backups. High traffic — automatic scaling.',
+  presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+});
+const stalePublicHttpsEksPlan = [
+  '## Confirmed requirements',
+  '- AWS EKS in us-east-1 with GitHub Actions, Redis, Java, and production.',
+  '## Architecture',
+  '- Kubernetes Service LoadBalancer with secure HTTPS handled via a custom domain and AWS Certificate Manager (ACM).',
+  '- Route 53 DNS record and ACM certificate will be created by Terraform.',
+  '- Cluster Autoscaler will scale EKS nodes.',
+  '## File manifest',
+  '- java-app/src/main/java/com/stackforge/HealthCheckServer.java',
+  '- terraform/vpc.tf',
+  '- terraform/elasticache.tf',
+].join('\\n');
+const cleanedPublicHttpsEksPlan = sanitizePlanAgainstInterview(
+  stalePublicHttpsEksPlan,
+  publicHttpsEks.source,
+  publicHttpsEks.presets
+);
+const publicHttpsPlanIssues = validatePlanAgainstSpec(cleanedPublicHttpsEksPlan, publicHttpsEks);
+const stalePublicHttpsMarkers = [
+  'ACM certificate will be created',
+  'Route 53 DNS record',
+  'Cluster Autoscaler will',
+  'java-app/',
+  'terraform/vpc.tf',
+  'terraform/elasticache.tf',
+];
+if (
+  stalePublicHttpsMarkers.some((marker) => cleanedPublicHttpsEksPlan.includes(marker)) ||
+  !cleanedPublicHttpsEksPlan.includes('does **not** create a custom domain') ||
+  !cleanedPublicHttpsEksPlan.includes('app/src/main/java/com/stackforge/Application.java') ||
+  publicHttpsPlanIssues.length
+) {
+  fail++;
+  console.error('FAIL  EKS custom HTTPS plan-to-code boundary: ' + (publicHttpsPlanIssues.join('; ') || cleanedPublicHttpsEksPlan));
+} else {
+  console.log('PASS  EKS custom HTTPS plan only promises generated delivery');
+}
+
 const azureOverride = buildArchitectureSpec({
   prompt: 'Generate AWS EKS stack with Python',
   interviewAnswers: 'Microsoft Azure. Hosting platform (client override): Azure Container Apps. westeurope. Development and staging. Public HTTP on the default load-balancer hostname. MySQL. Medium — 3 to 5 app copies.',
