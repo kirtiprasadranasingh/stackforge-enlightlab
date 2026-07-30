@@ -167,6 +167,7 @@ export function validateScaffoldContract(
     (presets.cloud === 'aws' && presets.orchestrator === 'ecs') ||
     (presets.cloud === 'aws' && presets.orchestrator === 'eks') ||
     (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run') ||
+    (presets.cloud === 'gcp' && presets.orchestrator === 'gke') ||
     (presets.cloud === 'azure' && presets.orchestrator === 'aks');
   if (options.database === 'redis' && redisIsProvisioned) {
     const tfvars = files
@@ -188,6 +189,16 @@ export function validateScaffoldContract(
       }
       if (!/redis_primary_endpoint/.test(outputs)) {
         issues.push('EKS Redis selection is missing its application endpoint output.');
+      }
+    }
+    if (presets.cloud === 'gcp' && presets.orchestrator === 'gke') {
+      const main = content(files, 'terraform/main.tf');
+      const outputs = content(files, 'terraform/outputs.tf');
+      if (!/google_redis_instance/.test(main)) {
+        issues.push('GKE Redis selection is missing a private Memorystore Redis instance.');
+      }
+      if (!/redis_host/.test(outputs)) {
+        issues.push('GKE Redis selection is missing its application endpoint output.');
       }
     }
   }

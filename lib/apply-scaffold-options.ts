@@ -798,6 +798,8 @@ export function applyScaffoldOptions(
       }
       if (presets.orchestrator === 'gke') {
         lines.push(`# node pool sizing reflected in Helm replicaCount / HPA`);
+        lines.push(`enable_redis = ${enableRedis}`);
+        if (enableRedis) lines.push(`redis_ha = ${multiAz}`);
       }
       if (options.databaseMode === 'ha_backup' && enableDb) {
         lines.push('backup_retention_count = 7');

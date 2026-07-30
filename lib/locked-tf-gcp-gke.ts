@@ -38,6 +38,14 @@ variable "enable_database" {
   type    = bool
   default = true
 }
+variable "enable_redis" {
+  type    = bool
+  default = false
+}
+variable "redis_ha" {
+  type    = bool
+  default = false
+}
 variable "db_engine" {
   type    = string
   default = "postgres"
@@ -49,6 +57,7 @@ export const TF_GKE_MAIN = `resource "google_project_service" "apis" {
     "container.googleapis.com",
     "compute.googleapis.com",
     "artifactregistry.googleapis.com",
+    "redis.googleapis.com",
     "sqladmin.googleapis.com",
     "servicenetworking.googleapis.com",
   ])
@@ -71,6 +80,22 @@ resource "google_artifact_registry_repository" "app" {
 
   depends_on = [google_project_service.apis]
 }
+
+resource "google_redis_instance" "main" {
+  count              = var.enable_redis ? 1 : 0
+  name               = "\${var.cluster_name}-\${var.environment}-redis"
+  region             = var.region
+  tier               = var.redis_ha ? "STANDARD_HA" : "BASIC"
+  memory_size_gb     = 1
+  redis_version      = "REDIS_7_0"
+  authorized_network = google_compute_network.vpc.id
+  connect_mode       = "PRIVATE_SERVICE_ACCESS"
+
+  depends_on = [
+    google_project_service.apis,
+    google_service_networking_connection.private_vpc,
+  ]
+}
 `;
 
 export const TF_GKE_NETWORK = `resource "google_compute_network" "vpc" {
@@ -86,7 +111,7 @@ resource "google_compute_subnetwork" "nodes" {
 }
 
 resource "google_compute_global_address" "private_ip" {
-  count         = var.enable_database ? 1 : 0
+  count         = var.enable_database || var.enable_redis ? 1 : 0
   name          = "\${var.cluster_name}-\${var.environment}-sql"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
@@ -95,7 +120,7 @@ resource "google_compute_global_address" "private_ip" {
 }
 
 resource "google_service_networking_connection" "private_vpc" {
-  count                   = var.enable_database ? 1 : 0
+  count                   = var.enable_database || var.enable_redis ? 1 : 0
   network                 = google_compute_network.vpc.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip[0].name]
@@ -152,6 +177,12 @@ output "gke_endpoint" {
 }
 output "artifact_registry_repository" {
   value = google_artifact_registry_repository.app.repository_id
+}
+output "redis_host" {
+  value = try(google_redis_instance.main[0].host, null)
+}
+output "redis_port" {
+  value = try(google_redis_instance.main[0].port, null)
 }
 output "sql_connection_name" {
   value = try(google_sql_database_instance.main[0].connection_name, null)

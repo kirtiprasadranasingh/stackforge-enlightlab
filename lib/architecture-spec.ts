@@ -260,8 +260,7 @@ export function buildArchitectureSpec(params: {
   // the selected profile has a provider-native locked adapter.
   if (
     options.database === 'redis' &&
-    ((presets.cloud === 'gcp' && presets.orchestrator === 'gke') ||
-      (presets.cloud === 'azure' && presets.orchestrator === 'container-apps') ||
+    ((presets.cloud === 'azure' && presets.orchestrator === 'container-apps') ||
       (presets.cloud === 'oracle' && presets.orchestrator === 'oke'))
   ) {
     issues.push(

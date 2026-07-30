@@ -623,6 +623,29 @@ if (
   console.log('PASS  GKE GitLab manifest/ingress/pipeline contract');
 }
 
+const gkeRedis = buildArchitectureSpec({
+  prompt: 'Google Cloud GKE application with Redis',
+  interviewAnswers: 'asia-south1. Development only. Private and internal only. Redis cache. High availability. Python.',
+  presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'github-actions' },
+});
+const gkeRedisFiles = mergeLockedBaseFiles(
+  [],
+  detectScaffoldProfile(gkeRedis.source, gkeRedis.presets)!,
+  { fillMissing: true, forceStubs: true, presets: gkeRedis.presets, scaffoldOptions: gkeRedis.options }
+).files;
+const gkeRedisIssues = validateScaffoldContract(gkeRedisFiles, gkeRedis.presets, gkeRedis.options);
+if (
+  gkeRedis.issues.length ||
+  gkeRedisIssues.length ||
+  !gkeRedisFiles.find((file) => file.path === 'terraform/main.tf')?.content.includes('google_redis_instance') ||
+  !gkeRedisFiles.find((file) => file.path === 'environments/development.tfvars')?.content.includes('enable_redis = true')
+) {
+  fail++;
+  console.error('FAIL  GKE Redis Memorystore contract: ' + (gkeRedis.issues.join('; ') || gkeRedisIssues.join('; ')));
+} else {
+  console.log('PASS  GKE Redis Memorystore contract');
+}
+
 const azurePlan = sanitizePlanAgainstInterview(
   '## Confirmed requirements\\n- Azure Container Apps in westeurope with GitHub Actions, Python, MySQL, development and staging.\\n## Assumptions\\n- AWS Secrets Manager will store credentials.',
   azureOverride.source,
@@ -665,9 +688,9 @@ if (
 }
 
 const unsupportedCapability = buildArchitectureSpec({
-  prompt: 'GCP GKE service with Redis',
+  prompt: 'Azure Container Apps service with Redis',
   interviewAnswers: 'europe-west1. Development and staging. Private and internal only. Redis cache. Medium — 3 to 5 app copies. Python.',
-  presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'github-actions' },
+  presets: { cloud: 'azure', orchestrator: 'container-apps', ci: 'github-actions' },
 });
 if (!unsupportedCapability.issues.some((issue) => issue.includes('Redis/Valkey is not yet implemented'))) {
   fail++;
