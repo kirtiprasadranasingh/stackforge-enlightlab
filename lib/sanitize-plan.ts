@@ -1,4 +1,5 @@
 import { parseScaffoldOptions } from '@/lib/scaffold-options';
+import { generatedFilePathsForSpec, type ArchitectureSpec } from '@/lib/architecture-spec';
 import type { Presets } from '@/types';
 
 
@@ -987,6 +988,26 @@ function stripCrossCloudCiRegistryConflicts(
   return out;
 }
 
+/** Replace an LLM-written manifest with the exact paths that generation emits. */
+function syncGeneratedFileManifest(plan: string, spec: ArchitectureSpec): string {
+  const manifest = generatedFilePathsForSpec(spec).map((path) => `- \`${path}\``).join('\n');
+  const heading = /^##\s*File manifest\s*$/im.exec(plan);
+  if (!heading || heading.index === undefined) {
+    const insertion = `## File manifest\n\n${manifest}\n\n`;
+    const nextSection = /^##\s*(?:Implement stage|Networking|CI\/CD|Out of scope|Validation expectations)\b/im.exec(plan);
+    if (nextSection?.index !== undefined) {
+      return `${plan.slice(0, nextSection.index)}${insertion}${plan.slice(nextSection.index)}`;
+    }
+    return `${plan.trim()}\n\n${insertion}`;
+  }
+
+  const bodyStart = heading.index + heading[0].length;
+  const afterHeading = plan.slice(bodyStart);
+  const nextHeaderOffset = afterHeading.search(/\n##\s+/);
+  const bodyEnd = nextHeaderOffset === -1 ? plan.length : bodyStart + nextHeaderOffset;
+  return `${plan.slice(0, bodyStart)}\n\n${manifest}\n${plan.slice(bodyEnd)}`;
+}
+
 /**
  * Demote Spring Boot / ASP.NET from Confirmed when the client only chose Java / .NET,
  * and mark unasked runtime/DB as scaffold defaults (not Confirmed).
@@ -1158,6 +1179,14 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
 
   out = sanitizeNoDatabase(out, ctx);
   out = sanitizeMongoDB(out, ctx);
+  if (presets) {
+    out = syncGeneratedFileManifest(out, {
+      presets,
+      options: opts,
+      source: ctx,
+      issues: [],
+    });
+  }
 
   return out;
 }

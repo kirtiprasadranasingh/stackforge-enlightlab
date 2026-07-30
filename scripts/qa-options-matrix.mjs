@@ -520,7 +520,7 @@ if (
   ['terraform/alb.tf', 'terraform/alb_controller.tf'].some((marker) => cleanedPrivateEksPlan.includes(marker)) ||
   !cleanedPrivateEksPlan.includes('ClusterIP') ||
   !cleanedPrivateEksPlan.includes('terraform/main.tf') ||
-  !cleanedPrivateEksPlan.includes('terraform/database.tf') ||
+  !cleanedPrivateEksPlan.includes('terraform/redis.tf') ||
   privateEksPlanIssues.length
 ) {
   fail++;
@@ -563,7 +563,7 @@ const stalePublicHttpsMarkers = [
 if (
   stalePublicHttpsMarkers.some((marker) => cleanedPublicHttpsEksPlan.includes(marker)) ||
   !cleanedPublicHttpsEksPlan.includes('does **not** create a custom domain') ||
-  !cleanedPublicHttpsEksPlan.includes('app/src/main/java/com/stackforge/Application.java') ||
+  !cleanedPublicHttpsEksPlan.includes('app/src/main/java/com/example/health/Application.java') ||
   publicHttpsPlanIssues.length
 ) {
   fail++;
