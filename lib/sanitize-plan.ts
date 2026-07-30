@@ -585,14 +585,14 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
       .split('\n')
       .filter(
         (line) =>
-          !/google_container_node_pool|node pools? for the GKE cluster|Workload Identity Federation|google_service_account|google_project_iam_member|google_service_account_iam_member|service accounts? for GKE nodes|GitHub Actions service account/i.test(
+          !/google_container_node_pool|\b(?:separate |managed )?node[ -]?pools?\b|Workload Identity(?: Federation)?|\b(?:Google|GCP) IAM\b|google_service_account|google_project_iam_member|google_service_account_iam_member|service accounts? for GKE nodes|GitHub Actions service account/i.test(
             line
           )
       )
       .join('\n');
     out = prependAssumption(
       out,
-      '**GKE locked delivery:** The scaffold creates an Autopilot cluster, VPC, Artifact Registry, selected Cloud SQL or Memorystore Redis resources, and a Helm chart. It does **not** create a separate node pool or Google service-account / Workload Identity Federation bindings; add those IAM integrations with the client project identity before live deployment.'
+      '**GKE locked delivery:** The scaffold creates an Autopilot cluster, VPC, Artifact Registry, selected Cloud SQL or Memorystore Redis resources, and a Helm chart. It does not create a separate node pool or Google service-account / Workload Identity Federation bindings; add those IAM integrations with the client project identity before live deployment.'
     );
   }
 

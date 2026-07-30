@@ -623,6 +623,18 @@ if (
   console.log('PASS  GKE GitLab manifest/ingress/pipeline contract');
 }
 
+const gkeOverclaimPlan = sanitizePlanAgainstInterview(
+  ['## GKE delivery', '- Create a managed node-pool for application workloads.', '- Configure Google IAM and Workload Identity for the GitHub Actions service account.', '## File manifest', '- terraform/main.tf'].join('\\n'),
+  gkeGitlab.source,
+  gkeGitlab.presets
+);
+if (validatePlanAgainstSpec(gkeOverclaimPlan, gkeGitlab).some((issue) => issue.includes('node-pool') || issue.includes('IAM/WIF'))) {
+  fail++;
+  console.error('FAIL  GKE Autopilot plan cleanup retains ungenerated node/IAM claims');
+} else {
+  console.log('PASS  GKE Autopilot plan cleanup strips ungenerated node/IAM claims');
+}
+
 const gkeRedis = buildArchitectureSpec({
   prompt: 'Google Cloud GKE application with Redis',
   interviewAnswers: 'asia-south1. Development only. Private and internal only. Redis cache. High availability. Python.',

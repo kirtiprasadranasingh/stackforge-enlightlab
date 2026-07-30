@@ -467,7 +467,7 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
       .split('\n')
       .some(
         (line) =>
-          /google_container_node_pool|Workload Identity Federation|google_service_account|google_project_iam_member|service accounts? for GKE nodes|GitHub Actions service account/i.test(line) &&
+          /google_container_node_pool|\b(?:separate |managed )?node[ -]?pools?\b|Workload Identity(?: Federation)?|\b(?:Google|GCP) IAM\b|google_service_account|google_project_iam_member|service accounts? for GKE nodes|GitHub Actions service account/i.test(line) &&
           !/does not|not create|follow-up|extension point/i.test(line)
       );
     if (unshippedGkeIdentity) {
