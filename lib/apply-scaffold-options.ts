@@ -1658,34 +1658,37 @@ CMD ["node", "server.js"]
     byPath.delete('terraform/redis.tf');
   }
 
-  // Azure AKS outputs must only reference resources that remain in the
-  // selected data-service scaffold. Terraform validates resource references
-  // statically, so try(...) cannot protect an output pointing at a removed
-  // PostgreSQL or Redis resource.
-  if (presets.cloud === 'azure' && presets.orchestrator === 'aks') {
-    const outputs = byPath.get('terraform/outputs.tf');
-    if (outputs) {
-      const removeOutput = (content: string, name: string) =>
-        content.replace(
-          new RegExp(`\\n?output\\s+"${name}"\\s*\\{[\\s\\S]*?\\n\\}\\n?`, 'g'),
-          '\n'
-        );
-      let content = outputs.content;
-      const hasRelationalDb = options.database === 'postgres' || options.database === 'mysql';
-      if (!hasRelationalDb) {
-        content = removeOutput(content, 'postgres_fqdn');
-      } else if (options.database === 'mysql') {
-        content = content.replace(
-          /output\s+"postgres_fqdn"\s*\{\s*value\s*=\s*try\(azurerm_postgresql_flexible_server\.main\[0\]\.fqdn, null\)\s*\}/g,
-          'output "mysql_fqdn" {\n  value = try(azurerm_mysql_flexible_server.main[0].fqdn, null)\n}'
-        );
-      }
-      if (options.database !== 'redis') {
-        content = removeOutput(content, 'redis_hostname');
-      }
-      if (content !== outputs.content) {
-        byPath.set('terraform/outputs.tf', { ...outputs, content });
-      }
+  // Terraform validates references statically, so `try(...)` cannot protect
+  // an output that names a resource removed by a different data-service
+  // choice. Apply this invariant to every locked profile, not only AKS.
+  const outputs = byPath.get('terraform/outputs.tf');
+  if (outputs) {
+    const removeOutputsReferencing = (content: string, reference: RegExp) =>
+      content.replace(
+        /(?:^|\n)output\s+"[^"]+"\s*\{[\s\S]*?^\}/gm,
+        (block) => (reference.test(block) ? '' : block)
+      );
+    let content = outputs.content;
+    const hasRelationalDb = options.database === 'postgres' || options.database === 'mysql';
+    const relationalReference =
+      /aws_db_instance\.main|google_sql_database_instance\.main|azurerm_(?:postgresql|mysql)_flexible_server\.main|random_password\.db/;
+    const redisReference =
+      /aws_elasticache(?:_cluster|_replication_group)\.redis|google_redis_instance\.cache|azurerm_redis_cache\.main/;
+
+    if (!hasRelationalDb) {
+      content = removeOutputsReferencing(content, relationalReference);
+    }
+    if (options.database !== 'redis') {
+      content = removeOutputsReferencing(content, redisReference);
+    }
+    if (presets.cloud === 'azure' && presets.orchestrator === 'aks' && options.database === 'mysql') {
+      content = content.replace(
+        /output\s+"postgres_fqdn"\s*\{\s*value\s*=\s*try\(azurerm_postgresql_flexible_server\.main\[0\]\.fqdn, null\)\s*\}/g,
+        'output "mysql_fqdn" {\n  value = try(azurerm_mysql_flexible_server.main[0].fqdn, null)\n}'
+      );
+    }
+    if (content !== outputs.content) {
+      byPath.set('terraform/outputs.tf', { ...outputs, content: `${content.trim()}\n` });
     }
   }
 

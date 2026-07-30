@@ -19,6 +19,8 @@ import { detectScaffoldProfile } from '../lib/scaffold-spec.ts';
 import { mergeLockedBaseFiles } from '../lib/scaffold-base-files.ts';
 import { inferPresetsFromPrompt } from '../lib/infer-presets.ts';
 import { parseScaffoldOptions } from '../lib/scaffold-options.ts';
+import { buildClarifyingQuestions } from '../lib/clarifying-questions.ts';
+import { requiresPlanApproval } from '../lib/stack-intent.ts';
 import { validateScaffoldContract } from '../lib/scaffold-contract.ts';
 import { buildArchitectureSpec, createRequirementsManifest, readRequirementsManifest, validatePlanAgainstSpec } from '../lib/architecture-spec.ts';
 import { sanitizePlanAgainstInterview } from '../lib/sanitize-plan.ts';
@@ -540,6 +542,144 @@ if (!unsupportedCapability.issues.some((issue) => issue.includes('Redis/Valkey i
   console.error(\`FAIL  unsupported capability must block before approval: \${unsupportedCapability.issues.join('; ')}\`);
 } else {
   console.log('PASS  unsupported provider capability blocks before approval');
+}
+
+const crossCloudPresets = inferPresetsFromPrompt(
+  'Build a Google Cloud Run stack using Azure Key Vault and AWS Secrets Manager',
+  { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' }
+);
+if (crossCloudPresets.cloud !== 'gcp' || crossCloudPresets.orchestrator !== 'cloud-run') {
+  fail++;
+  console.error(\`FAIL  Cloud Run must win over conflicting service names: \${JSON.stringify(crossCloudPresets)}\`);
+} else {
+  console.log('PASS  host-first cloud detection ignores conflicting service names');
+}
+
+const dotnetQuestions = buildClarifyingQuestions(
+  'Provision AWS EKS cluster with .NET, RDS MySQL, and GitLab CI',
+  { cloud: 'aws', orchestrator: 'eks', ci: 'gitlab-ci' }
+);
+if (dotnetQuestions.some((question) => question.includes('Which language should'))) {
+  fail++;
+  console.error('FAIL  .NET prompt asked for runtime again');
+} else {
+  console.log('PASS  .NET prompt does not ask a duplicate runtime question');
+}
+
+const environmentQuestions = buildClarifyingQuestions(
+  'Build an AWS EKS API',
+  { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' }
+);
+const environmentQuestion = environmentQuestions.find((question) => question.includes('Which environments')) || '';
+if (!/Development only.*Staging only.*Production only/.test(environmentQuestion)) {
+  fail++;
+  console.error(\`FAIL  single-environment choices are incomplete: \${environmentQuestion}\`);
+} else {
+  console.log('PASS  client can choose the specific single environment');
+}
+
+const correctedDatabase = parseScaffoldOptions(
+  'GCP Cloud Run with MongoDB. Client correction: PostgreSQL',
+  { cloud: 'gcp', orchestrator: 'cloud-run', ci: 'gitlab-ci' }
+);
+if (correctedDatabase.database !== 'postgres') {
+  fail++;
+  console.error(\`FAIL  corrected database did not win: \${correctedDatabase.database}\`);
+} else {
+  console.log('PASS  latest corrected database wins');
+}
+
+const correctedRegion = parseScaffoldOptions(
+  'Azure Container Apps in us-central1 with Python. Corrected region: eastus.',
+  { cloud: 'azure', orchestrator: 'container-apps', ci: 'github-actions' }
+);
+if (correctedRegion.region !== 'eastus') {
+  fail++;
+  console.error(\`FAIL  corrected region did not win: \${correctedRegion.region}\`);
+} else {
+  console.log('PASS  latest corrected region wins');
+}
+
+const outputCases: Array<{ name: string; presets: Presets; database: 'none' | 'postgres' | 'redis'; forbidden: RegExp[] }> = [
+  {
+    name: 'ECS Redis removes relational outputs',
+    presets: { cloud: 'aws', orchestrator: 'ecs', ci: 'github-actions' },
+    database: 'redis',
+    forbidden: [/aws_db_instance\.main/, /rds_endpoint/],
+  },
+  {
+    name: 'EKS no-data removes data outputs',
+    presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+    database: 'none',
+    forbidden: [/aws_db_instance\.main/, /aws_elasticache.*\.redis/, /rds_endpoint/, /redis_primary_endpoint/],
+  },
+  {
+    name: 'Cloud Run PostgreSQL removes Redis outputs',
+    presets: { cloud: 'gcp', orchestrator: 'cloud-run', ci: 'gitlab-ci' },
+    database: 'postgres',
+    forbidden: [/google_redis_instance\.cache/, /redis_host/],
+  },
+  {
+    name: 'Cloud Run no-data removes all data outputs',
+    presets: { cloud: 'gcp', orchestrator: 'cloud-run', ci: 'gitlab-ci' },
+    database: 'none',
+    forbidden: [/google_redis_instance\.cache/, /google_sql_database_instance\.main/, /redis_host/, /sql_connection_name/],
+  },
+];
+for (const outputCase of outputCases) {
+  const profile = detectScaffoldProfile(outputCase.presets.cloud + ' ' + outputCase.presets.orchestrator, outputCase.presets)!;
+  const optionSet = {
+    region: outputCase.presets.cloud === 'gcp' ? 'us-central1' : 'us-east-1',
+    environments: ['development'],
+    database: outputCase.database,
+    databaseMode: 'standard' as const,
+    access: 'private' as const,
+    scale: 'small' as const,
+    runtime: 'node' as const,
+  };
+  const outputContent = mergeLockedBaseFiles([], profile, {
+    fillMissing: true,
+    forceStubs: true,
+    presets: outputCase.presets,
+    scaffoldOptions: optionSet,
+  }).files.find((file) => file.path === 'terraform/outputs.tf')?.content || '';
+  if (outputCase.forbidden.some((pattern) => pattern.test(outputContent))) {
+    fail++;
+    console.error(\`FAIL  \${outputCase.name}: \${outputContent}\`);
+  } else {
+    console.log(\`PASS  \${outputCase.name}\`);
+  }
+}
+
+const azureProfile = detectScaffoldProfile('azure aks', {
+  cloud: 'azure', orchestrator: 'aks', ci: 'gitlab-ci',
+})!;
+const azureFiles = mergeLockedBaseFiles([], azureProfile, {
+  fillMissing: true,
+  forceStubs: true,
+  presets: { cloud: 'azure', orchestrator: 'aks', ci: 'gitlab-ci' },
+  scaffoldOptions: {
+    region: 'eastus', environments: ['development'], database: 'mysql', databaseMode: 'standard',
+    access: 'private', scale: 'small', runtime: 'java',
+  },
+}).files;
+const azureDatabase = azureFiles.find((file) => file.path === 'terraform/database.tf')?.content || '';
+if (
+  azureDatabase.includes('storage_mb') ||
+  !azureDatabase.includes('storage {') ||
+  !azureDatabase.includes('size_gb = 32')
+) {
+  fail++;
+  console.error(\`FAIL  Azure flexible server uses obsolete storage syntax: \${azureDatabase}\`);
+} else {
+  console.log('PASS  Azure flexible server uses provider-v4 storage syntax');
+}
+
+if (!requiresPlanApproval('Re-generate the stack with Go instead of Python', true)) {
+  fail++;
+  console.error('FAIL  regeneration did not require a replacement plan');
+} else {
+  console.log('PASS  regeneration requires a replacement architecture plan');
 }
 
 if (fail) {

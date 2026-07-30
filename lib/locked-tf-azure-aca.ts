@@ -127,7 +127,9 @@ export const TF_ACA_DATABASE = `resource "azurerm_postgresql_flexible_server" "m
   administrator_login    = "appuser"
   administrator_password = random_password.db[0].result
   sku_name               = var.db_ha ? "GP_Standard_D2s_v3" : "B_Standard_B1ms"
-  storage_mb             = 32768
+  storage {
+    size_gb = 32
+  }
   zone                   = "1"
   backup_retention_days  = var.backup_retention_days
   public_network_access_enabled = false

@@ -359,6 +359,7 @@ export function requiresPlanApproval(
   prompt: string,
   hasExistingFiles: boolean
 ): boolean {
+  if (/\b(?:re[-\s]?generate|regenerate)\b/i.test(prompt)) return true;
   if (hasExistingFiles && isIterativeEditPrompt(prompt)) return false;
   if (isOutOfScopeOpsPrompt(prompt)) return false; // handled as a scoped reply, not generate
   // Vague "Deploy my app" etc. — always interview on a new project

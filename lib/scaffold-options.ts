@@ -146,16 +146,28 @@ export function parseScaffoldOptions(
   const out = defaultScaffoldOptions(p);
 
   // Region
-  const regionMatch = t.match(
-    /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/
-  );
+  const regionMatches = [
+    ...t.matchAll(
+      /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/g
+    ),
+  ];
+  // The most recent explicit answer wins during a correction turn. This
+  // prevents an earlier rejected region from continuing to block a valid
+  // replacement later in the conversation.
+  const regionMatch = regionMatches[regionMatches.length - 1];
   if (regionMatch) out.region = regionMatch[1];
 
   // Environments — prefer explicit interview phrases; avoid matching
   // "production-grade" / accidental "prod" substrings.
   // "One environment" must win over plan prose that lists all three names.
   // Use development (not staging) so Confirmed/"dev" and tfvars stay aligned (QA #23).
-  if (/\bone environment\b/.test(t)) {
+  if (/\bdevelopment only\b/.test(t)) {
+    out.environments = ['development'];
+  } else if (/\bstaging only\b/.test(t)) {
+    out.environments = ['staging'];
+  } else if (/\bproduction only\b/.test(t)) {
+    out.environments = ['production'];
+  } else if (/\bone environment\b/.test(t)) {
     out.environments = ['development'];
   } else if (/\bdevelopment,\s*staging,\s*and\s*production\b/.test(t)) {
     out.environments = ['development', 'staging', 'production'];
@@ -200,6 +212,20 @@ export function parseScaffoldOptions(
   } else if (dbFromArrow) {
     out.database = dbFromArrow;
   } else {
+    const databaseMentions = [
+      ...t.matchAll(
+        /\b(no data service|without (?:a )?database|mongodb|mongo|documentdb|redis|valkey|mysql|mariadb|postgresql|postgres)\b/g
+      ),
+    ];
+    const latestDatabase = databaseMentions[databaseMentions.length - 1];
+    const latestDatabaseChoice = latestDatabase
+      ? databaseFromPhrase(latestDatabase[1])
+      : null;
+    if (latestDatabaseChoice) {
+      // A correction appended to an earlier stack request must override the
+      // rejected value (for example, MongoDB followed by PostgreSQL).
+      out.database = latestDatabaseChoice;
+    } else {
     // Keyword scan on text with option menus stripped (QA #4: don't wipe Mongo via "stateless")
     const askedNoData =
       /\bno data service\b/.test(t) ||
@@ -229,6 +255,7 @@ export function parseScaffoldOptions(
       out.database = 'postgres';
     } else if (askedNoData) {
       out.database = 'none';
+    }
     }
   }
 

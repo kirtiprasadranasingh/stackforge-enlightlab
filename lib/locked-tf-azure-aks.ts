@@ -114,7 +114,9 @@ export const TF_AKS_DATABASE = `resource "azurerm_postgresql_flexible_server" "m
   administrator_login    = "appuser"
   administrator_password = random_password.db[0].result
   sku_name               = "GP_Standard_D2s_v3"
-  storage_mb             = 32768
+  storage {
+    size_gb = 32
+  }
   zone                   = var.availability_zones[0]
   public_network_access_enabled = false
 }

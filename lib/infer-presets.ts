@@ -115,6 +115,15 @@ function detectCloudFromText(rawText: string): Presets['cloud'] | null {
     .replace(/google\s*cloud\s*build/gi, ' ')
     .replace(/oci\s*devops/gi, ' ');
 
+  // A named hosting platform is the strongest cloud signal. Service names
+  // from another cloud can appear in a conflicting request (for example,
+  // "Cloud Run using Azure Key Vault") and must not redirect the scaffold to
+  // the service provider's cloud.
+  if (/\boke\b|oracle\s+kubernetes/.test(tCloud)) return 'oracle';
+  if (/\baks\b|azure\s+kubernetes|container\s*apps?/.test(tCloud)) return 'azure';
+  if (/\bgke\b|google\s+kubernetes|cloud\s*run/.test(tCloud)) return 'gcp';
+  if (/\beks\b|amazon\s+ecs|\becs\b|\bfargate\b/.test(tCloud)) return 'aws';
+
   const mentionsOracle =
     /\boracle\b/.test(tCloud) ||
     /\boci\b/.test(tCloud) ||

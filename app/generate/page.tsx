@@ -455,8 +455,15 @@ export default function GeneratePage() {
       const text =
         resolveStackPromptFromAffirmation(typed, priorHistory)?.trim() || typed;
 
+      // Regeneration is a new reviewed artifact, not a small edit to the
+      // existing workspace. It must return to planning so the old plan/files
+      // cannot remain visible as if they describe the new runtime or stack.
+      const isRegenerationRequest = /\b(?:re[-\s]?generate|regenerate)\b/i.test(text);
+      const isRequirementCorrection = /^(?:postgres(?:ql)?|mysql|mariadb|redis(?:\s+cache)?|valkey|no data service|development only|staging only|production only)$/i.test(
+        text
+      );
       const startFresh =
-        isFullStackPrompt(text) && !isIterativeEditPrompt(text);
+        (isFullStackPrompt(text) || isRegenerationRequest) && !isIterativeEditPrompt(text);
       const hasFiles = filesRef.current.length > 0;
       const gated =
         options?.phase === 'generate'
@@ -467,6 +474,8 @@ export default function GeneratePage() {
       const isNewStackRequest =
         isFullStackPrompt(text) ||
         isVagueStackPrompt(text) ||
+        isRegenerationRequest ||
+        isRequirementCorrection ||
         /\b(azure|aws|gcp|oracle|infrastructure|eks|gke|aks|oke)\b/i.test(text);
 
       if (options?.phase) {
@@ -476,7 +485,7 @@ export default function GeneratePage() {
       } else if (isNewStackRequest) {
         // Brand-new stack prompt typed in chat → reset interview and start fresh clarify phase
         setPendingQuestions([]);
-        phase = 'clarify';
+        phase = (isRegenerationRequest || isRequirementCorrection) && lastStackPromptRef.current ? 'plan' : 'clarify';
       } else if (awaitingApproval && pendingPlan) {
         // User is revising an existing plan
         phase = 'plan';
@@ -626,8 +635,11 @@ export default function GeneratePage() {
       // keep their own text so their requested edit reaches the API.
       // Always append interview answers so region/DB/scale/access survive even
       // when history is cleared for Zod payload size.
-      const interviewBlock =
+      const savedInterviewBlock =
         lastInterviewAnswersRef.current || lastInterviewAnswers || '';
+      const interviewBlock = isRequirementCorrection
+        ? [savedInterviewBlock, `Client correction: ${text}`].filter(Boolean).join('\n')
+        : savedInterviewBlock;
       const requestPrompt =
         phase === 'generate' && lastStackPrompt && !isRepairTurn
           ? interviewBlock

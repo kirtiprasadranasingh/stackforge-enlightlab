@@ -459,7 +459,7 @@ function detectRuntime(prompt: string): string | null {
   if (/\b(python|fastapi|django|flask)\b/.test(text)) return 'Python';
   if (/\b(go|golang)\b/.test(text)) return 'Go';
   if (/\b(java|spring(?:\s+boot)?)\b/.test(text)) return 'Java';
-  if (/\b(\.net|dotnet|c#)\b/.test(text)) return '.NET';
+  if (/(?:^|[^\w])(?:\.net|dotnet|c#)\b/.test(text)) return '.NET';
   return null;
 }
 
@@ -562,14 +562,15 @@ function buildEnvironmentsQuestion(environments: string[]): string {
   };
 
   const alternatives = [
+    'Development only',
+    'Staging only',
+    'Production only',
     'Development and staging',
     'Development, staging, and production',
   ];
 
   if (!environments.length) {
-    return `Which environments do you need? (options: One environment / ${alternatives.join(
-      ' / '
-    )})`;
+    return `Which environments do you need? (options: ${alternatives.join(' / ')})`;
   }
 
   const detectedLabel = labelFor(environments);
