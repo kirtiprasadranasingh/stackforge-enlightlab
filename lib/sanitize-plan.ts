@@ -1054,6 +1054,10 @@ export function sanitizePlanAgainstInterview(
       /\(not confirmed\)\s*\(not confirmed\)/gi,
       '(not confirmed)'
     );
+    out = out.replace(
+      /minimal\s+(?:minimal\s+)?ASP\.NET\s+Core\s+`?\/health`?\s+implementation\s+default\s+`?\/health`?\s+implementation\s+default/gi,
+      'minimal ASP.NET Core `/health` implementation default'
+    );
 
     // Keep the real generated .NET project in the file manifest. It is a
     // minimal implementation default, rather than a claim that a full

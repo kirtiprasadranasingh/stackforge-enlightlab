@@ -52,7 +52,19 @@ export function generatedFilePathsForSpec(spec: ArchitectureSpec): string[] {
     presets: spec.presets,
     scaffoldOptions: spec.options,
   });
-  return [REQUIREMENTS_MANIFEST_PATH, ...files.map((file) => file.path.replace(/\\/g, '/'))]
+  const paths = files.map((file) => file.path.replace(/\\/g, '/')).map((path) => {
+    // Cloud Run and Container Apps runtime stubs are emitted at repository
+    // root. Keep the plan manifest aligned even if an intermediate normalizer
+    // retained an app/ path before the final generation pass.
+    if (
+      (spec.presets.orchestrator === 'cloud-run' || spec.presets.orchestrator === 'container-apps') &&
+      /^app\/(?:Dockerfile|Program\.cs|app\.csproj|main\.py|requirements\.txt|main\.go|go\.mod|go\.sum)$/.test(path)
+    ) {
+      return path.slice(4);
+    }
+    return path;
+  });
+  return [REQUIREMENTS_MANIFEST_PATH, ...paths]
     .filter((path, index, paths) => paths.indexOf(path) === index);
 }
 

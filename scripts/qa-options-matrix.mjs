@@ -583,6 +583,22 @@ const gkeGitlab = buildArchitectureSpec({
   interviewAnswers: 'GitLab CI. us-central1. Production only. Public HTTP on the default load-balancer hostname. PostgreSQL. Java.',
   presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'github-actions' },
 });
+
+const cloudRunDotnet = buildArchitectureSpec({
+  prompt: 'Google Cloud Run .NET service',
+  interviewAnswers: 'europe-west1. Staging only. Private and internal only. PostgreSQL. .NET.',
+  presets: { cloud: 'gcp', orchestrator: 'cloud-run', ci: 'github-actions' },
+});
+const cloudRunDotnetManifest = generatedFilePathsForSpec(cloudRunDotnet);
+if (
+  !['Dockerfile', 'Program.cs', 'app.csproj'].every((path) => cloudRunDotnetManifest.includes(path)) ||
+  ['app/Dockerfile', 'app/Program.cs', 'app/app.csproj'].some((path) => cloudRunDotnetManifest.includes(path))
+) {
+  fail++;
+  console.error('FAIL  Cloud Run .NET manifest uses an intermediate app/ layout');
+} else {
+  console.log('PASS  Cloud Run .NET manifest matches final root layout');
+}
 const gkeGitlabFiles = mergeLockedBaseFiles(
   [],
   detectScaffoldProfile(gkeGitlab.source, gkeGitlab.presets)!,

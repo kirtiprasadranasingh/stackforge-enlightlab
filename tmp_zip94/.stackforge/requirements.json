@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "gcp",
+    "orchestrator": "cloud-run",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "europe-west1",
+    "environments": [
+      "staging"
+    ],
+    "database": "postgres",
+    "databaseMode": "standard",
+    "access": "private",
+    "scale": "medium",
+    "runtime": "dotnet"
+  }
+}
