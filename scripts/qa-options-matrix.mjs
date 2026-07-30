@@ -22,7 +22,7 @@ import { parseScaffoldOptions } from '../lib/scaffold-options.ts';
 import { buildClarifyingQuestions } from '../lib/clarifying-questions.ts';
 import { requiresPlanApproval } from '../lib/stack-intent.ts';
 import { validateScaffoldContract } from '../lib/scaffold-contract.ts';
-import { buildArchitectureSpec, createRequirementsManifest, readRequirementsManifest, validatePlanAgainstSpec } from '../lib/architecture-spec.ts';
+import { buildArchitectureSpec, createRequirementsManifest, generatedFilePathsForSpec, readRequirementsManifest, validatePlanAgainstSpec } from '../lib/architecture-spec.ts';
 import { sanitizePlanAgainstInterview } from '../lib/sanitize-plan.ts';
 import { normalizeScaffoldFiles } from '../lib/normalize-scaffold.ts';
 import type { Presets } from '../types/index.ts';
@@ -577,6 +577,36 @@ const azureOverride = buildArchitectureSpec({
   interviewAnswers: 'Microsoft Azure. Hosting platform (client override): Azure Container Apps. westeurope. Development and staging. Public HTTP on the default load-balancer hostname. MySQL. Medium — 3 to 5 app copies.',
   presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
 });
+
+const gkeGitlab = buildArchitectureSpec({
+  prompt: 'Secure Google Cloud GKE application',
+  interviewAnswers: 'GitLab CI. us-central1. Production only. Public HTTP on the default load-balancer hostname. PostgreSQL. Java.',
+  presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'github-actions' },
+});
+const gkeGitlabFiles = mergeLockedBaseFiles(
+  [],
+  detectScaffoldProfile(gkeGitlab.source, gkeGitlab.presets)!,
+  { fillMissing: true, forceStubs: true, presets: gkeGitlab.presets, scaffoldOptions: gkeGitlab.options }
+).files;
+const gkeGitlabManifest = generatedFilePathsForSpec(gkeGitlab);
+const gkeValues = gkeGitlabFiles.find((file) => file.path === 'charts/app/values.yaml')?.content || '';
+const gkePipeline = gkeGitlabFiles.find((file) => file.path === '.gitlab-ci.yml')?.content || '';
+const gkeMain = gkeGitlabFiles.find((file) => file.path === 'terraform/main.tf')?.content || '';
+if (
+  gkeGitlab.presets.ci !== 'gitlab-ci' ||
+  !gkeGitlabManifest.includes('.gitlab-ci.yml') ||
+  gkeGitlabManifest.some((path) => path.startsWith('.github/workflows/')) ||
+  !gkeValues.includes('className: gce') ||
+  !gkePipeline.includes('docker build -t') ||
+  !gkePipeline.includes('helm upgrade --install') ||
+  !gkeMain.includes('google_artifact_registry_repository')
+) {
+  fail++;
+  console.error('FAIL  GKE GitLab manifest/ingress/pipeline contract');
+} else {
+  console.log('PASS  GKE GitLab manifest/ingress/pipeline contract');
+}
+
 const azurePlan = sanitizePlanAgainstInterview(
   '## Confirmed requirements\\n- Azure Container Apps in westeurope with GitHub Actions, Python, MySQL, development and staging.\\n## Assumptions\\n- AWS Secrets Manager will store credentials.',
   azureOverride.source,

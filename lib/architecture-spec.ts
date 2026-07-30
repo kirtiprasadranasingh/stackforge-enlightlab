@@ -10,6 +10,7 @@ import { inferPresetsFromPrompt } from '@/lib/infer-presets';
 import { parseScaffoldOptions, type ScaffoldOptions } from '@/lib/scaffold-options';
 import { detectScaffoldProfile } from '@/lib/scaffold-spec';
 import { mergeLockedBaseFiles } from '@/lib/scaffold-base-files';
+import { normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import type { GeneratedFile, Presets } from '@/types';
 
 export const REQUIREMENTS_MANIFEST_PATH = '.stackforge/requirements.json';
@@ -37,12 +38,20 @@ export interface RequirementsManifest {
 export function generatedFilePathsForSpec(spec: ArchitectureSpec): string[] {
   const profile = detectScaffoldProfile(spec.source, spec.presets);
   if (!profile) return [REQUIREMENTS_MANIFEST_PATH];
-  const files = mergeLockedBaseFiles([], profile, {
+  const merged = mergeLockedBaseFiles([], profile, {
     fillMissing: true,
     forceStubs: true,
     presets: spec.presets,
     scaffoldOptions: spec.options,
   }).files;
+  // Production generation normalizes after the locked merge (including the
+  // selected CI file). The plan must mirror that final output, not the
+  // intermediate base where a profile may still carry GitHub Actions.
+  const files = normalizeScaffoldFiles(merged, {
+    profile,
+    presets: spec.presets,
+    scaffoldOptions: spec.options,
+  });
   return [REQUIREMENTS_MANIFEST_PATH, ...files.map((file) => file.path.replace(/\\/g, '/'))]
     .filter((path, index, paths) => paths.indexOf(path) === index);
 }

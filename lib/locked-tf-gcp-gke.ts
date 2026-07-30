@@ -48,6 +48,7 @@ export const TF_GKE_MAIN = `resource "google_project_service" "apis" {
   for_each = toset([
     "container.googleapis.com",
     "compute.googleapis.com",
+    "artifactregistry.googleapis.com",
     "sqladmin.googleapis.com",
     "servicenetworking.googleapis.com",
   ])
@@ -60,6 +61,15 @@ resource "random_password" "db" {
   count   = var.enable_database ? 1 : 0
   length  = 20
   special = false
+}
+
+resource "google_artifact_registry_repository" "app" {
+  location      = var.region
+  repository_id = "\${var.cluster_name}-\${var.environment}-images"
+  description   = "Container images for the StackForge GKE application"
+  format        = "DOCKER"
+
+  depends_on = [google_project_service.apis]
 }
 `;
 
@@ -139,6 +149,9 @@ export const TF_GKE_OUTPUTS = `output "gke_cluster_name" {
 output "gke_endpoint" {
   value     = google_container_cluster.primary.endpoint
   sensitive = true
+}
+output "artifact_registry_repository" {
+  value = google_artifact_registry_repository.app.repository_id
 }
 output "sql_connection_name" {
   value = try(google_sql_database_instance.main[0].connection_name, null)

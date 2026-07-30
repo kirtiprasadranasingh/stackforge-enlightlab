@@ -295,6 +295,58 @@ function ciSkeleton(
 
   switch (ci) {
     case 'gitlab-ci':
+      if (presets.cloud === 'gcp' && presets.orchestrator === 'gke') {
+        return {
+          path: '.gitlab-ci.yml',
+          content: `stages: [test, build, deploy]
+
+variables:
+  GCP_REGION: "${region}"
+  K8S_NAMESPACE: "default"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+
+test:
+  image: alpine:3.20
+  stage: test
+  script:
+    - test -f app/Dockerfile
+    - test -f charts/app/Chart.yaml
+
+build:
+  image: docker:27
+  services: [docker:27-dind]
+  stage: build
+  script:
+    - test -n "$GCP_PROJECT_ID" -a -n "$GCP_SERVICE_ACCOUNT_KEY" -a -n "$ARTIFACT_REPOSITORY"
+    - export REGISTRY="$GCP_REGION-docker.pkg.dev"
+    - export IMAGE_URI="$REGISTRY/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/app:$IMAGE_TAG"
+    - echo "$GCP_SERVICE_ACCOUNT_KEY" | docker login -u _json_key --password-stdin "https://$REGISTRY"
+    - docker build -t "$IMAGE_URI" -f app/Dockerfile app
+    - docker push "$IMAGE_URI"
+    - echo "IMAGE_URI=$IMAGE_URI" > build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+
+deploy:
+  image: google/cloud-sdk:slim
+  stage: deploy
+  needs: [build]
+  script:
+    - test -n "$GCP_PROJECT_ID" -a -n "$GCP_SERVICE_ACCOUNT_KEY" -a -n "$GKE_CLUSTER_NAME"
+    - echo "$GCP_SERVICE_ACCOUNT_KEY" > /tmp/gcp-key.json
+    - gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
+    - gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" --region "$GCP_REGION" --project "$GCP_PROJECT_ID"
+    - apt-get update && apt-get install -y curl
+    - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    - helm upgrade --install app ./charts/app --namespace "$K8S_NAMESPACE" --create-namespace --set image.repository="\${IMAGE_URI%:*}" --set image.tag="$IMAGE_TAG" --atomic --wait
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+`,
+        };
+      }
       return {
         path: '.gitlab-ci.yml',
         content: `stages: [test, build, deploy]
@@ -841,6 +893,11 @@ export function applyScaffoldOptions(
           '$1false'
         );
       }
+    }
+    if (presets.cloud === 'gcp' && presets.orchestrator === 'gke' && options.access !== 'private') {
+      // GKE ships a managed GCE Ingress controller. Do not point public
+      // scaffolds at nginx when no nginx controller is installed.
+      v = v.replace(/className:\s*nginx/, 'className: gce');
     }
     byPath.set(valuesPath, { ...byPath.get(valuesPath)!, content: v });
   }
