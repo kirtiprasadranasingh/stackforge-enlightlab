@@ -37,7 +37,6 @@ import { validateInterviewAnswer } from '@/lib/interview-answer-validation';
 import { ConfirmedChoicesCard } from '@/components/ConfirmedChoicesCard';
 import { WorkflowPanel } from '@/components/WorkflowPanel';
 import { inferPresetsFromPrompt } from '@/lib/infer-presets';
-import { sanitizePlanAgainstInterview } from '@/lib/sanitize-plan';
 import {
   isFullStackPrompt,
   isIterativeEditPrompt,
@@ -459,9 +458,15 @@ export default function GeneratePage() {
       // existing workspace. It must return to planning so the old plan/files
       // cannot remain visible as if they describe the new runtime or stack.
       const isRegenerationRequest = /\b(?:re[-\s]?generate|regenerate)\b/i.test(text);
-      const isRequirementCorrection = /^(?:postgres(?:ql)?|mysql|mariadb|redis(?:\s+cache)?|valkey|no data service|development only|staging only|production only)$/i.test(
-        text
-      );
+      // A customer normally writes corrections in natural language (for
+      // example, "change to europe-west1" or "use GKE instead"), not only as
+      // a bare database name. Treat those messages as a new requirements pass
+      // so the plan and final ZIP are rebuilt from the latest choice.
+      const isRequirementCorrection =
+        /^(?:postgres(?:ql)?|mysql|mariadb|redis(?:\s+cache)?|valkey|no data service|development only|staging only|production only)$/i.test(text) ||
+        /\b(?:change|switch|use|set|update|correct|replace)\b[\s\S]{0,100}\b(?:aws|azure|gcp|google cloud|oracle|ecs|eks|gke|cloud run|container apps|aks|oke|github actions|gitlab|jenkins|cloud build|azure devops|us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|private|public|https|http|postgres|mysql|redis|valkey|no data|development|staging|production|node|python|go|java|\.net|dotnet|small|medium|high traffic)\b/i.test(
+          text
+        );
       const startFresh =
         (isFullStackPrompt(text) || isRegenerationRequest) && !isIterativeEditPrompt(text);
       const hasFiles = filesRef.current.length > 0;
@@ -640,6 +645,10 @@ export default function GeneratePage() {
       const interviewBlock = isRequirementCorrection
         ? [savedInterviewBlock, `Client correction: ${text}`].filter(Boolean).join('\n')
         : savedInterviewBlock;
+      if (isRequirementCorrection && interviewBlock) {
+        lastInterviewAnswersRef.current = interviewBlock;
+        setLastInterviewAnswers(interviewBlock);
+      }
       const requestPrompt =
         phase === 'generate' && lastStackPrompt && !isRepairTurn
           ? interviewBlock
@@ -805,17 +814,13 @@ export default function GeneratePage() {
                 break;
               case 'plan':
                 if (event.plan) {
-                  const interviewCtx = [
-                    lastInterviewAnswersRef.current || lastInterviewAnswers || '',
-                    lastStackPrompt || text || '',
-                  ].join('\n');
-                  const cleaned = sanitizePlanAgainstInterview(
-                    event.plan,
-                    interviewCtx,
-                    presets
-                  );
-                  receivedPlan = cleaned;
-                  setPendingPlan(cleaned);
+                  // The route has already sanitized and validated this plan
+                  // against the authoritative, latest requirements contract.
+                  // Re-sanitizing in the browser with stale state caused a
+                  // correction (Cloud Run -> GKE, region, DB, etc.) to be
+                  // rewritten back to the old interview values.
+                  receivedPlan = event.plan;
+                  setPendingPlan(event.plan);
                   setPendingQuestions([]);
                   setQuestionAnswers({});
                   questionAnswersRef.current = {};

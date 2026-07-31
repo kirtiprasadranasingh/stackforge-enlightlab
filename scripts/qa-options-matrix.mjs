@@ -853,6 +853,42 @@ if (!requiresPlanApproval('Re-generate the stack with Go instead of Python', tru
   console.log('PASS  regeneration requires a replacement architecture plan');
 }
 
+const noDataTruth = buildArchitectureSpec({
+  prompt: 'AWS ECS Python health service',
+  interviewAnswers: 'ap-south-1. Production only. Private and internal only. No data service. Python. Small - 2 app copies.',
+  presets: { cloud: 'aws', orchestrator: 'ecs', ci: 'github-actions' },
+});
+const noDataPlan = sanitizePlanAgainstInterview(
+  ['## Confirmed requirements', '- AWS ECS with RDS PostgreSQL.', '## Architecture', '- Provision a Redis cache and Cloud SQL database.', '## File manifest', '- terraform/database.tf'].join('\\n'),
+  noDataTruth.source,
+  noDataTruth.presets
+);
+const noDataIssues = validatePlanAgainstSpec(noDataPlan, noDataTruth);
+if (['RDS', 'PostgreSQL', 'Redis', 'Cloud SQL'].some((term) => noDataPlan.includes(term)) || noDataIssues.length) {
+  fail++;
+  console.error('FAIL  no-data plan cleanup: ' + (noDataIssues.join('; ') || noDataPlan));
+} else {
+  console.log('PASS  no-data plan strips generic database/cache leakage');
+}
+
+const productionOnlyTruth = buildArchitectureSpec({
+  prompt: 'Azure AKS Go health service',
+  interviewAnswers: 'westeurope. Production only. Private and internal only. No data service. Go. Small - 2 app copies.',
+  presets: { cloud: 'azure', orchestrator: 'aks', ci: 'github-actions' },
+});
+const productionOnlyPlan = sanitizePlanAgainstInterview(
+  ['## Confirmed requirements', '- Azure AKS in eastus.', '- Environments: One environment (development/staging/production).', '## Architecture', '- Private service.', '## File manifest', '- terraform/main.tf'].join('\\n'),
+  productionOnlyTruth.source,
+  productionOnlyTruth.presets
+);
+const productionOnlyIssues = validatePlanAgainstSpec(productionOnlyPlan, productionOnlyTruth);
+if (!productionOnlyPlan.includes('Region: westeurope') || !productionOnlyPlan.includes('Environments: production') || productionOnlyIssues.length) {
+  fail++;
+  console.error('FAIL  production-only requirements summary: ' + (productionOnlyIssues.join('; ') || productionOnlyPlan));
+} else {
+  console.log('PASS  locked summary preserves region and one selected environment');
+}
+
 if (fail) {
   console.error(\`\\nOptions matrix FAILED (\${fail})\`);
   process.exit(1);

@@ -524,6 +524,54 @@ stages:
 `,
       };
     case 'jenkins':
+      if (presets.cloud === 'gcp') {
+        const buildCommand = presets.orchestrator === 'cloud-run'
+          ? 'docker build -t "$IMAGE_URI" .'
+          : 'docker build -t "$IMAGE_URI" -f app/Dockerfile app';
+        const deployCommand = presets.orchestrator === 'gke'
+          ? 'gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" --region "$GCP_REGION" --project "$GCP_PROJECT_ID"\n          helm upgrade --install app ./charts/app --namespace default --create-namespace --set image.repository="\${IMAGE_URI%:*}" --set image.tag="$IMAGE_TAG" --atomic --wait'
+          : 'gcloud run deploy "$CLOUD_RUN_SERVICE" --image "$IMAGE_URI" --region "$GCP_REGION" --project "$GCP_PROJECT_ID"';
+        return {
+          path: 'Jenkinsfile',
+          content: `pipeline {
+  agent any
+  environment {
+    GCP_REGION = '${region}'
+    IMAGE_TAG = "\${env.GIT_COMMIT.take(7)}"
+  }
+  stages {
+    stage('Test') {
+      steps { sh 'test -f ${presets.orchestrator === 'cloud-run' ? 'Dockerfile' : 'app/Dockerfile'}' }
+    }
+    stage('Build and push Artifact Registry image') {
+      steps {
+        sh '''
+          set -euo pipefail
+          test -n "$GCP_PROJECT_ID" -a -n "$GCP_SERVICE_ACCOUNT_KEY" -a -n "$ARTIFACT_REPOSITORY"
+          echo "$GCP_SERVICE_ACCOUNT_KEY" > /tmp/gcp-key.json
+          gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
+          gcloud auth configure-docker "$GCP_REGION-docker.pkg.dev" --quiet
+          IMAGE_URI="$GCP_REGION-docker.pkg.dev/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/app:$IMAGE_TAG"
+          ${buildCommand}
+          docker push "$IMAGE_URI"
+          echo "$IMAGE_URI" > .stackforge-image-uri
+        '''
+      }
+    }
+    stage('Deploy') {
+      steps {
+        sh '''
+          set -euo pipefail
+          IMAGE_URI="$(cat .stackforge-image-uri)"
+          ${deployCommand}
+        '''
+      }
+    }
+  }
+}
+`,
+        };
+      }
       return {
         path: 'Jenkinsfile',
         content: `pipeline {

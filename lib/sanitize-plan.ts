@@ -47,6 +47,7 @@ function interviewNamedDotNetOnly(context: string): boolean {
   if (interviewChoseAspNet(context)) return false;
   return (
     /Language \(client override\):\s*\.NET only/i.test(context) ||
+    /Health-check runtime:\s*\.NET\b/i.test(context) ||
     (/→\s*\.NET\b/i.test(context) && !/→\s*ASP/i.test(context))
   );
 }
@@ -465,6 +466,16 @@ function sanitizeNoDatabase(plan: string, context: string): string {
   out = out.replace(/^[-*]\s*[^\n]*database credentials[^\n]*\n?/gim, '');
   out = out.replace(/^[-*]\s*[^\n]*PostgreSQL instance[^\n]*\n?/gim, '');
   out = out.replace(/^[-*]\s*[^\n]*Redis cache instance[^\n]*\n?/gim, '');
+  // Generic plans sometimes mention a provisioned database in a prose
+  // sentence instead of a neat bullet. A no-data selection must never be
+  // blocked because of that model residue.
+  out = out
+    .split('\n')
+    .filter((line) => {
+      if (/\b(?:no data service|no database|without a database)\b/i.test(line)) return true;
+      return !/\b(?:RDS|Cloud SQL|PostgreSQL|MySQL|Redis|Valkey|ElastiCache|Memorystore|database credentials|DB connection strings)\b/i.test(line);
+    })
+    .join('\n');
   return out;
 }
 
@@ -888,7 +899,10 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
   }
 
   // One environment selected — do not invent staging / production-like / multi-env var wording
-  if (oneEnv) {
+  const selectedEnvironments = parseScaffoldOptions(context, presets).environments;
+  const isSingleEnvironment = selectedEnvironments.length === 1;
+  const selectedEnvironment = selectedEnvironments[0] || 'development';
+  if (oneEnv || isSingleEnvironment) {
     out = out.replace(
       /\bOne\s*\(\s*development\s*\/\s*staging\s*\)/gi,
       'One environment (development)'
@@ -929,6 +943,15 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
       /single ['"]dev['"] environment/gi,
       'single development environment'
     );
+    // Keep one-environment cleanup aligned to the actual selected environment
+    // (production-only used to be rewritten as development-only).
+    if (selectedEnvironment !== 'development') {
+      out = out
+        .replace(/environments\/development\.tfvars/g, `environments/${selectedEnvironment}.tfvars`)
+        .replace(/environment = "development"/g, `environment = "${selectedEnvironment}"`)
+        .replace(/single development environment/gi, `single ${selectedEnvironment} environment`)
+        .replace(/One environment \(development\)/gi, `One environment (${selectedEnvironment})`);
+    }
   }
 
   // Azure DevOps CI — never leave GitHub Actions AWS Auth template lines
@@ -1026,6 +1049,53 @@ function syncGeneratedFileManifest(plan: string, spec: ArchitectureSpec): string
   const nextHeaderOffset = afterHeading.search(/\n##\s+/);
   const bodyEnd = nextHeaderOffset === -1 ? plan.length : bodyStart + nextHeaderOffset;
   return `${plan.slice(0, bodyStart)}\n\n${manifest}\n${plan.slice(bodyEnd)}`;
+}
+
+/**
+ * The model can explain an architecture, but it must not be the authority for
+ * the selected values. Stamp a compact deterministic recap into every plan so
+ * a valid Azure/GKE/no-data/one-environment run is never blocked merely
+ * because prose omitted a region or copied an old default.
+ */
+function syncLockedRequirementsSummary(
+  plan: string,
+  context: string,
+  presets: Presets,
+  options = parseScaffoldOptions(context, presets)
+): string {
+  const cloud = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Microsoft Azure', oracle: 'Oracle Cloud' }[presets.cloud];
+  const platform = {
+    ecs: 'Amazon ECS', eks: 'Amazon EKS', 'cloud-run': 'Cloud Run', gke: 'Google Kubernetes Engine (GKE)',
+    'container-apps': 'Azure Container Apps', aks: 'Azure Kubernetes Service (AKS)', oke: 'Oracle Kubernetes Engine (OKE)',
+  }[presets.orchestrator];
+  const ci = {
+    'github-actions': 'GitHub Actions', 'gitlab-ci': 'GitLab CI', 'azure-devops': 'Azure DevOps',
+    jenkins: 'Jenkins', 'gcp-cloud-build': 'Google Cloud Build', 'oci-devops': 'OCI DevOps',
+  }[presets.ci] || presets.ci;
+  const access = options.access === 'private'
+    ? 'Private and internal only'
+    : options.access === 'public_https'
+      ? 'Public with secure HTTPS and a custom domain'
+      : 'Public HTTP on the default load-balancer hostname';
+  const database = options.database === 'none'
+    ? 'No data service'
+    : options.database === 'redis'
+      ? `Redis/Valkey (${options.databaseMode === 'standard' ? 'standard' : options.databaseMode === 'ha' ? 'high availability' : 'high availability with backups'})`
+      : `${options.database === 'postgres' ? 'PostgreSQL' : 'MySQL'} (${options.databaseMode === 'standard' ? 'standard' : 'high availability with backups'})`;
+  const runtime = options.runtime === 'dotnet'
+    ? '.NET (minimal ASP.NET Core `/health` implementation default)'
+    : options.runtime === 'node'
+      ? 'Node.js'
+      : options.runtime[0].toUpperCase() + options.runtime.slice(1);
+  const scale = options.scale === 'small' ? 'Small' : options.scale === 'medium' ? 'Medium' : 'High traffic with automatic scaling';
+  const summary = `## Locked requirements\n\n- Cloud: ${cloud}\n- Hosting platform: ${platform}\n- CI/CD: ${ci}\n- Region: ${options.region}\n- Environments: ${options.environments.join(', ')}\n- API access: ${access}\n- Data service: ${database}\n- Health-check runtime: ${runtime}\n- Scale tier: ${scale}\n\n`;
+  const existing = /^#{1,3}\s*(?:confirmed|locked) requirements\s*$/im.exec(plan);
+  if (!existing || existing.index === undefined) return `${summary}${plan.trimStart()}`;
+  const bodyStart = existing.index + existing[0].length;
+  const afterHeading = plan.slice(bodyStart);
+  const nextHeaderOffset = afterHeading.search(/\n#{1,3}\s+/);
+  const bodyEnd = nextHeaderOffset === -1 ? plan.length : bodyStart + nextHeaderOffset;
+  return `${plan.slice(0, existing.index)}${summary}${plan.slice(bodyEnd)}`;
 }
 
 /**
@@ -1204,6 +1274,7 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
   out = sanitizeNoDatabase(out, ctx);
   out = sanitizeMongoDB(out, ctx);
   if (presets) {
+    out = syncLockedRequirementsSummary(out, ctx, presets, opts);
     out = syncGeneratedFileManifest(out, {
       presets,
       options: opts,
