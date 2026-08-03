@@ -1077,18 +1077,20 @@ function syncLockedRequirementsSummary(
     : options.access === 'public_https'
       ? 'Public with secure HTTPS and a custom domain'
       : 'Public HTTP on the default load-balancer hostname';
+  const explicitDatabaseMode = /(?:How should (?:Redis\/Valkey|MySQL|PostgreSQL) be configured|database mode|availability)[\s\S]{0,160}(?:standard|high availability|7-day automatic backups|automatic backups)/i.test(context);
+  const explicitScale = /(?:How much traffic should we plan for|Scale tier)[\s\S]{0,160}(?:small|medium|high traffic|automatic scaling|\d+\s*(?:to|-)?\s*\d+\s*app copies)/i.test(context);
   const database = options.database === 'none'
     ? 'No data service'
     : options.database === 'redis'
-      ? `Redis/Valkey (${options.databaseMode === 'standard' ? 'standard' : options.databaseMode === 'ha' ? 'high availability' : 'high availability with backups'})`
-      : `${options.database === 'postgres' ? 'PostgreSQL' : 'MySQL'} (${options.databaseMode === 'standard' ? 'standard' : 'high availability with backups'})`;
+      ? `Redis/Valkey (${options.databaseMode === 'standard' ? 'standard' : options.databaseMode === 'ha' ? 'high availability' : 'high availability with backups'}${explicitDatabaseMode ? '' : ' — recommended default; availability tier not confirmed'})`
+      : `${options.database === 'postgres' ? 'PostgreSQL' : 'MySQL'} (${options.databaseMode === 'standard' ? 'standard' : 'high availability with backups'}${explicitDatabaseMode ? '' : ' — recommended default; availability tier not confirmed'})`;
   const runtime = options.runtime === 'dotnet'
     ? '.NET (minimal ASP.NET Core `/health` implementation default)'
     : options.runtime === 'node'
       ? 'Node.js'
       : options.runtime[0].toUpperCase() + options.runtime.slice(1);
   const scale = options.scale === 'small' ? 'Small' : options.scale === 'medium' ? 'Medium' : 'High traffic with automatic scaling';
-  const summary = `## Locked requirements\n\n- Cloud: ${cloud}\n- Hosting platform: ${platform}\n- CI/CD: ${ci}\n- Region: ${options.region}\n- Environments: ${options.environments.join(', ')}\n- API access: ${access}\n- Data service: ${database}\n- Health-check runtime: ${runtime}\n- Scale tier: ${scale}\n\n`;
+  const summary = `## Locked requirements\n\n- Cloud: ${cloud}\n- Hosting platform: ${platform}\n- CI/CD: ${ci}\n- Region: ${options.region}\n- Environments: ${options.environments.join(', ')}\n- API access: ${access}\n- Data service: ${database}\n- Health-check runtime: ${runtime}\n- Scale tier: ${scale}${explicitScale ? '' : ' (recommended default; traffic tier not confirmed)'}\n\n`;
   const existing = /^#{1,3}\s*(?:confirmed|locked) requirements\s*$/im.exec(plan);
   if (!existing || existing.index === undefined) return `${summary}${plan.trimStart()}`;
   const bodyStart = existing.index + existing[0].length;
@@ -1096,6 +1098,39 @@ function syncLockedRequirementsSummary(
   const nextHeaderOffset = afterHeading.search(/\n#{1,3}\s+/);
   const bodyEnd = nextHeaderOffset === -1 ? plan.length : bodyStart + nextHeaderOffset;
   return `${plan.slice(0, existing.index)}${summary}${plan.slice(bodyEnd)}`;
+}
+
+/** Add the production delivery detail the model often omits from Cloud Run plans. */
+function syncCloudRunDeliveryDetails(
+  plan: string,
+  presets: Presets | undefined,
+  options: ReturnType<typeof parseScaffoldOptions>
+): string {
+  if (presets?.cloud !== 'gcp' || presets.orchestrator !== 'cloud-run') return plan;
+  const ciDetails = presets.ci === 'gcp-cloud-build'
+    ? 'Cloud Build uses the project build identity with Artifact Registry Writer, Cloud Run Admin, and Service Account User. These IAM bindings are generated only for the Cloud Build selection.'
+    : 'The CI deployer identity has Artifact Registry Writer, Cloud Run Admin, and Service Account User. Prefer workload identity federation instead of a long-lived key.';
+  const dbDetails = options.database === 'mysql' || options.database === 'postgres'
+    ? 'Cloud Run reaches private Cloud SQL through the generated VPC Access connector and private IP. Store the host and credentials in Secret Manager; use a Cloud SQL connector only if the application chooses the Cloud SQL socket connection model.'
+    : 'No relational Cloud SQL connection is generated for the selected data service.';
+  const details = `## Delivery and implementation defaults
+
+- **Sizing:** ${options.scale === 'medium' ? 'Medium is a recommended default only when no traffic tier was confirmed; it enables autoscaling and must be finalized by the client.' : 'The selected traffic tier drives autoscaling values.'}
+- **Environment isolation:** Separate data services per environment are a recommendation for isolation, not a client-confirmed requirement. The generated environment files remain independently configurable.
+- **Identity and registry:** The runtime service account is separate from the CI deployment identity. ${ciDetails}
+- **Database connectivity:** ${dbDetails}
+- **State:** Configure a client-owned GCS Terraform backend, state prefix, retention, and access policy before team deployment; these account-specific values are intentionally not hard-coded.
+- **Rollback:** Deploy and verify a new Cloud Run revision, then route traffic back to the previous revision on failure. Traffic splitting/canary rollout is optional and is not enabled without a client request.
+- **Validation:** Run \`terraform fmt -check\`, \`terraform validate\`, the selected runtime build (Java: \`mvn package\`), Docker build, and the selected CI/CD pipeline in a non-production environment.
+
+`;
+  const existing = /##\s*Delivery and implementation defaults\b/i.exec(plan);
+  if (!existing || existing.index === undefined) return `${plan.trimEnd()}\n\n${details}`;
+  const bodyStart = existing.index + existing[0].length;
+  const afterHeading = plan.slice(bodyStart);
+  const nextHeaderOffset = afterHeading.search(/\n##\s+/);
+  const bodyEnd = nextHeaderOffset === -1 ? plan.length : bodyStart + nextHeaderOffset;
+  return `${plan.slice(0, existing.index)}${details}${plan.slice(bodyEnd)}`;
 }
 
 /**
@@ -1248,6 +1283,12 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
       /^([-*]\s*)?(?:Runtime Stub|Language\/runtime stub):\s*Node\.js[^\n]*/gim,
       '$1Runtime Stub: Java (plain `/health` service; framework not confirmed)'
     );
+    // Java is the selected runtime. Do not leave generic stand-in language in
+    // the plan when the locked scaffold emits a real plain-Java health service.
+    out = out
+      .replace(/Node\/Python\/Go stand-in acceptable with README honesty/gi, 'plain Java HTTP service')
+      .replace(/Node\/Python\/Go `\/health` placeholder/gi, 'plain Java `/health` service')
+      .replace(/Any `\/health` stub is a placeholder \(Node\/Python\/Go or plain Java HTTP\)/gi, 'The generated `/health` service is plain Java HTTP');
   }
   if (opts.database === 'redis') {
     out = out.replace(
@@ -1275,6 +1316,7 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
   out = sanitizeMongoDB(out, ctx);
   if (presets) {
     out = syncLockedRequirementsSummary(out, ctx, presets, opts);
+    out = syncCloudRunDeliveryDetails(out, presets, opts);
     out = syncGeneratedFileManifest(out, {
       presets,
       options: opts,

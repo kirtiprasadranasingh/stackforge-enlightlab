@@ -889,6 +889,55 @@ if (!productionOnlyPlan.includes('Region: westeurope') || !productionOnlyPlan.in
   console.log('PASS  locked summary preserves region and one selected environment');
 }
 
+const cloudRunJavaOptions = {
+  region: 'europe-west1', environments: ['development', 'staging', 'production'], database: 'mysql' as const,
+  databaseMode: 'standard' as const, access: 'private' as const, scale: 'medium' as const, runtime: 'java' as const,
+};
+const cloudRunJavaProfile = detectScaffoldProfile('Google Cloud Cloud Run Java', {
+  cloud: 'gcp', orchestrator: 'cloud-run', ci: 'gcp-cloud-build',
+})!;
+const cloudRunJavaFiles = mergeLockedBaseFiles([], cloudRunJavaProfile, {
+  fillMissing: true, forceStubs: true,
+  presets: { cloud: 'gcp', orchestrator: 'cloud-run', ci: 'gcp-cloud-build' },
+  scaffoldOptions: cloudRunJavaOptions,
+}).files;
+const javaSource = cloudRunJavaFiles.find((file) => file.path === 'src/main/java/com/example/health/Application.java')?.content || '';
+const cloudBuild = cloudRunJavaFiles.find((file) => file.path === 'cloudbuild.yaml')?.content || '';
+const cloudRunIam = cloudRunJavaFiles.find((file) => file.path === 'terraform/iam.tf')?.content || '';
+const cloudRunReadme = cloudRunJavaFiles.find((file) => file.path === 'README.md')?.content || '';
+if (
+  !javaSource.includes('catch (NumberFormatException') ||
+  !javaSource.includes('? 200 : 404') ||
+  !cloudBuild.includes('mvn -B package') ||
+  !cloudBuild.includes('docker.pkg.dev') ||
+  !cloudRunIam.includes('roles/artifactregistry.writer') ||
+  !cloudRunIam.includes('roles/run.admin') ||
+  !cloudRunReadme.includes('GCS backend') ||
+  !cloudRunReadme.includes('VPC Access connector')
+) {
+  fail++;
+  console.error('FAIL  Cloud Run Java production defaults are incomplete');
+} else {
+  console.log('PASS  Cloud Run Java emits safe runtime, IAM, CI, state, and DB guidance');
+}
+
+const defaultsPlan = sanitizePlanAgainstInterview(
+  ['## Architecture', '- Cloud Run service', '## File manifest', '- terraform/main.tf'].join('\\n'),
+  'Google Cloud Cloud Run Java service with MySQL. europe-west1. Development, staging, and production. Private and internal only. Google Cloud Build. Java.',
+  { cloud: 'gcp', orchestrator: 'cloud-run', ci: 'gcp-cloud-build' }
+);
+if (
+  !defaultsPlan.includes('recommended default; availability tier not confirmed') ||
+  !defaultsPlan.includes('recommended default; traffic tier not confirmed') ||
+  !defaultsPlan.includes('Delivery and implementation defaults') ||
+  !defaultsPlan.includes('Cloud Run Admin')
+) {
+  fail++;
+  console.error('FAIL  plan does not disclose generated defaults and delivery guidance: ' + defaultsPlan);
+} else {
+  console.log('PASS  plan labels defaults and includes Cloud Run delivery guidance');
+}
+
 if (fail) {
   console.error(\`\\nOptions matrix FAILED (\${fail})\`);
   process.exit(1);

@@ -67,6 +67,11 @@ variable "redis_ha" {
   type    = bool
   default = true
 }
+variable "enable_cloud_build" {
+  type        = bool
+  description = "Grant the Cloud Build project service account deployment roles"
+  default     = false
+}
 variable "min_instance_count" {
   type    = number
   default = 1
@@ -81,6 +86,7 @@ export const TF_CR_MAIN = `resource "google_project_service" "apis" {
   for_each = toset([
     "run.googleapis.com",
     "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
     "sqladmin.googleapis.com",
     "secretmanager.googleapis.com",
     "vpcaccess.googleapis.com",
@@ -260,7 +266,7 @@ resource "google_project_iam_member" "gitlab_artifact_writer" {
 
 resource "google_project_iam_member" "gitlab_run_developer" {
   project = var.project_id
-  role    = "roles/run.developer"
+  role    = "roles/run.admin"
   member  = "serviceAccount:\${google_service_account.gitlab_ci.email}"
 }
 
@@ -268,6 +274,37 @@ resource "google_project_iam_member" "gitlab_sa_user" {
   project = var.project_id
   role    = "roles/iam.serviceAccountUser"
   member  = "serviceAccount:\${google_service_account.gitlab_ci.email}"
+}
+
+# The Cloud Build project service account needs these permissions only when
+# cloudbuild.yaml is the selected CI/CD provider.
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+locals {
+  cloudbuild_service_account = "serviceAccount:\${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "cloudbuild_artifact_writer" {
+  count   = var.enable_cloud_build ? 1 : 0
+  project = var.project_id
+  role    = "roles/artifactregistry.writer"
+  member  = local.cloudbuild_service_account
+}
+
+resource "google_project_iam_member" "cloudbuild_run_admin" {
+  count   = var.enable_cloud_build ? 1 : 0
+  project = var.project_id
+  role    = "roles/run.admin"
+  member  = local.cloudbuild_service_account
+}
+
+resource "google_project_iam_member" "cloudbuild_sa_user" {
+  count   = var.enable_cloud_build ? 1 : 0
+  project = var.project_id
+  role    = "roles/iam.serviceAccountUser"
+  member  = local.cloudbuild_service_account
 }
 `;
 
@@ -291,11 +328,11 @@ output "ci_deployer_service_account" {
 }
 `;
 
-export const CLOUDRUN_README = `# GCP Cloud Run + FastAPI + Cloud SQL + GitLab CI
+export const CLOUDRUN_README = `# GCP Cloud Run scaffold
 
-Reviewable StackForge scaffold: private Cloud SQL (Postgres), public Cloud Run URL
-(no custom domain), GitLab CI build/deploy, and least-privilege IAM for runtime
-and GitLab deployer service accounts.
+Reviewable StackForge scaffold: Cloud Run, Artifact Registry, optional private
+Cloud SQL or Memorystore, and one selected CI/CD pipeline. Runtime and CI/CD
+files are rewritten to match the confirmed interview choices.
 
 ## Apply per environment
 
@@ -305,6 +342,24 @@ terraform apply -var-file=environments/staging.tfvars -var="project_id=YOUR_PROJ
 terraform apply -var-file=environments/development.tfvars -var="project_id=YOUR_PROJECT"
 \`\`\`
 
-Set GitLab CI variables: \`GCP_PROJECT_ID\`, \`GCP_REGION\`, \`AR_REPO\`, and workload
-federation / key for \`gitlab_ci\` service account.
+## Production integration required
+
+- **Remote Terraform state:** configure a client-owned GCS backend bucket and
+  state prefix before team use; bucket names, retention, and access policy are
+  organization-specific and are therefore not hard-coded into this scaffold.
+- **Service accounts:** the runtime account has only Cloud SQL Client when SQL
+  is selected. The CI deployer needs Artifact Registry Writer, Cloud Run Admin,
+  and Service Account User. Use workload identity federation where possible.
+- **Private Cloud SQL:** Cloud Run reaches the private database IP through the
+  generated VPC Access connector. Provide the private host and credentials via
+  Secret Manager; do not expose a public database IP.
+- **Rollback:** deploy a new Cloud Run revision, verify it, then route traffic
+  back to the prior revision on failure. Traffic splitting/canary rollout is an
+  optional client policy, not an unrequested default.
+
+## Validation
+
+Run \`terraform fmt -check\`, \`terraform validate\`, the selected runtime
+build (for Java: \`mvn package\`), Docker build, and the selected CI/CD pipeline
+in a non-production environment before promotion.
 `;

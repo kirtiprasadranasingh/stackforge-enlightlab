@@ -666,6 +666,37 @@ artifacts:
 `,
       };
     case 'gcp-cloud-build':
+      if (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run') {
+        return {
+          path: 'cloudbuild.yaml',
+          content: `steps:
+  - name: maven:3.9-eclipse-temurin-17
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -f pom.xml ]; then mvn -B package; fi
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${region}-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA', '.']
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '${region}-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA']
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_SERVICE_NAME
+      - --image=${region}-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA
+      - --region=${region}
+      - --quiet
+images:
+  - '${region}-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA'
+substitutions:
+  _ARTIFACT_REPOSITORY: stackforge
+  _SERVICE_NAME: stackforge-api
+`,
+        };
+      }
       return {
         path: 'cloudbuild.yaml',
         content: `steps:
@@ -758,6 +789,7 @@ export function applyScaffoldOptions(
     c = patchDefault(c, 'node_min_size', replicas.minReplicas);
     c = patchDefault(c, 'node_max_size', replicas.maxReplicas);
     c = patchDefault(c, 'node_count', replicas.desiredCount);
+    c = patchDefault(c, 'enable_cloud_build', presets.ci === 'gcp-cloud-build');
 
     const enableDb = options.database === 'postgres' || options.database === 'mysql';
     const enableRedis = options.database === 'redis';
@@ -1399,6 +1431,13 @@ ENTRYPOINT ["dotnet", "app.dll"]
       }
     }
   }
+  if (options.runtime === 'java') {
+    const staleJavaNote = notes.findIndex((note) => note.includes('Java was selected as the'));
+    if (staleJavaNote >= 0) {
+      notes[staleJavaNote] =
+        'Java was selected as the language only. This scaffold emits a minimal plain Java `/health` service so the image builds and probes pass; Spring Boot / Quarkus were not selected. Replace the stub with the real Java service before production.';
+    }
+  }
 
   if (options.runtime === 'java') {
     const javaApp = `package com.example.health;
@@ -1410,19 +1449,35 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 
 public class Application {
-    private static void respond(HttpExchange exchange) throws IOException {
+    private static void respond(HttpExchange exchange, int status) throws IOException {
         byte[] body = "{\\"status\\":\\"ok\\"}".getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().set("Content-Type", "application/json");
-        exchange.sendResponseHeaders(200, body.length);
+        exchange.sendResponseHeaders(status, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
     }
 
+    private static void handle(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        respond(exchange, ("/".equals(path) || "/health".equals(path)) ? 200 : 404);
+    }
+
+    private static int port() {
+        String raw = System.getenv().getOrDefault("PORT", "8080");
+        try {
+            int value = Integer.parseInt(raw);
+            if (value >= 1 && value <= 65535) return value;
+        } catch (NumberFormatException ignored) {
+            // Use the safe container default below.
+        }
+        System.err.println("Invalid PORT value '" + raw + "'; using 8080");
+        return 8080;
+    }
+
     public static void main(String[] args) throws IOException {
-        int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
+        int port = port();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/", Application::respond);
-        server.createContext("/health", Application::respond);
+        server.createContext("/", Application::handle);
         server.start();
         System.out.println("Health service listening on " + port);
     }

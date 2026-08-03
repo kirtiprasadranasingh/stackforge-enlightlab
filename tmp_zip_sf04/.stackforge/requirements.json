@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "gcp",
+    "orchestrator": "gke",
+    "ci": "gitlab-ci"
+  },
+  "options": {
+    "region": "us-central1",
+    "environments": [
+      "production"
+    ],
+    "database": "postgres",
+    "databaseMode": "standard",
+    "access": "public_basic",
+    "scale": "medium",
+    "runtime": "java"
+  }
+}
