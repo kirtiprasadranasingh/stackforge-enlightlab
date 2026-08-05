@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "gcp",
+    "orchestrator": "gke",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "europe-west1",
+    "environments": [
+      "development",
+      "staging"
+    ],
+    "database": "none",
+    "databaseMode": "standard",
+    "access": "private",
+    "scale": "medium",
+    "runtime": "python"
+  }
+}

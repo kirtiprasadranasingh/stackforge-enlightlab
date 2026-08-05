@@ -7,7 +7,7 @@ export function hasInfraSignal(prompt: string): boolean {
   const raw = prompt.toLowerCase();
   // Languages alone are NOT infra (blocks "hello world in Python" jailbreaks).
   // Require cloud/orchestrator/IaC/CI or a clear stack-shaped ask.
-  return /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s|terraform|helm|dockerfile|docker|pipeline|ci\s*\/?\s*cd|gitlab|github\s*actions|jenkins|circleci|azure\s*devops|codepipeline|code\s*build|cloud\s*build|oci\s*devops|microservice|micro-?service|serverless|cluster|ingress|autoscal|replica|hpa|nsg|vpc|subnet|load\s*balancer|database|postgres|postgresql|mysql|mongo|mongodb|redis|dynamodb|scaffold|provision|infrastructure|infra\b)\b/.test(
+  return /\b(aws|azure|gcp|google\s*cloud|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s|terraform|helm|dockerfile|docker|pipeline|ci\s*\/?\s*cd|gitlab|github\s*actions|jenkins|circleci|azure\s*devops|codepipeline|code\s*build|cloud\s*build|oci\s*devops|microservice|micro-?service|serverless|cluster|ingress|autoscal|replica|hpa|nsg|vpc|subnet|load\s*balancer|database|postgres|postgresql|mysql|mongo|mongodb|redis|dynamodb|scaffold|provision|infrastructure|infra\b)\b/.test(
     raw
   );
 }
@@ -77,9 +77,67 @@ export function resolveStackPromptFromAffirmation(
   return null;
 }
 
+/**
+ * Preserve short discovery fragments that precede the first concrete cloud
+ * choice. Examples from manual QA are:
+ *   "Small deployment" -> "game app and cloud" -> "AWS"
+ *   "Medium deployment" -> "Google Cloud and health-related application"
+ *
+ * Without this handoff the final cloud token starts an interview by itself and
+ * silently loses workload, scale, and access intent from the same conversation.
+ */
+export function resolveDiscoveryPrompt(
+  prompt: string,
+  history: { role: string; content: string }[]
+): string | null {
+  const current = prompt.trim();
+  if (!current || !history?.length) return null;
+  if (!hasCloudOrOrchestratorSignal(current) && !hasInfraSignal(current)) return null;
+
+  const fragments: string[] = [];
+  for (let i = history.length - 1; i >= 0 && fragments.length < 4; i--) {
+    const message = history[i];
+    if (message.role !== 'user') continue;
+    const value = (message.content || '').trim();
+    if (!value || value === current || isAffirmativeContinuePrompt(value) || isGreetingOnlyPrompt(value)) {
+      continue;
+    }
+    // Stop at an older fully specified request; only collect the short
+    // discovery fragments immediately leading into this project.
+    if (hasCloudOrOrchestratorSignal(value) && value.length > 80) break;
+    if (
+      /\b(?:small|medium|large|high traffic|scalable|deployment|workload|service|api|app|application|game|gaming|healthcare|health[- ]?related|e-?commerce|public|private|https?|vpc|cloud|production|staging|development)\b/i.test(
+        value
+      )
+    ) {
+      fragments.unshift(value);
+    }
+  }
+
+  return fragments.length ? [...fragments, current].join('\n') : null;
+}
+
+/**
+ * A follow-up that changes one locked requirement must revise the saved
+ * interview rather than start a new discovery turn. Region chips are often
+ * answered as a bare value (for example `westeurope`), so requiring a verb
+ * such as "change" caused the prior invalid region to win forever.
+ */
+export function isRequirementCorrectionPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+
+  const bareRequirement =
+    /^(?:postgres(?:ql)?|mysql|mariadb|redis(?:\s+cache)?|valkey|no data service|development only|staging only|production only|us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1)$/i;
+  if (bareRequirement.test(text)) return true;
+
+  return /\b(?:change|switch|use|set|update|correct|replace)\b[\s\S]{0,100}\b(?:aws|azure|gcp|google cloud|oracle|ecs|eks|gke|cloud run|container apps|aks|oke|github actions|gitlab|jenkins|cloud build|azure devops|us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|private|public|https|http|postgres|mysql|redis|valkey|no data|development|staging|production|node|python|go|java|\.net|dotnet|small|medium|high traffic)\b/i.test(
+    text
+  );
+}
 /** Named cloud / orchestrator — enough to start an interview even on short prompts. */
 export function hasCloudOrOrchestratorSignal(prompt: string): boolean {
-  return /\b(aws|azure|gcp|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s)\b/i.test(
+  return /\b(aws|azure|gcp|google\s*cloud|oci|oracle|eks|gke|aks|oke|ecs|fargate|lambda|container\s*apps?|cloud\s*run|kubernetes|k8s)\b/i.test(
     prompt
   );
 }
@@ -168,6 +226,14 @@ export function isOutOfScopeOpsPrompt(prompt: string): boolean {
 export function isVagueStackPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase().trim().replace(/[.!?]+$/g, '');
   if (!lower) return false;
+  // Requirement fragments are valid interview starters even without a cloud.
+  // Keep them out of casual chat so the missing axes are collected.
+  if (
+    /^(?:small|medium|large|high[- ]traffic)\s+(?:deployment|scale|workload|service)$/.test(lower) ||
+    /^(?:public\s+(?:https?|without (?:a )?custom domain)|private(?:\s+vpc)?(?:\s+only)?|private and internal only)$/.test(lower)
+  ) {
+    return true;
+  }
   // Named cloud/orchestrator/CI → not vague (interview still runs via other gates)
   if (hasCloudOrOrchestratorSignal(lower)) return false;
   if (

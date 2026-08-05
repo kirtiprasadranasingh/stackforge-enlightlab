@@ -101,10 +101,8 @@ resource "azurerm_subnet" "apps" {
   delegation {
     name = "aca"
     service_delegation {
-      name = "Microsoft.App/environments"
-      actions = [
-        "Microsoft.Network/virtualNetworks/subnets/join/action",
-      ]
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
     }
   }
 }
@@ -115,9 +113,30 @@ resource "azurerm_subnet" "db" {
   resource_group_name  = azurerm_resource_group.main.name
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.60.2.0/24"]
+
+  delegation {
+    name = "postgres-flexible-server"
+    service_delegation {
+      name    = "Microsoft.DBforPostgreSQL/flexibleServers"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+
+resource "azurerm_private_dns_zone" "db" {
+  count               = var.enable_database ? 1 : 0
+  name                = "\${var.project_name}-\${var.environment}.private.postgres.database.azure.com"
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "db" {
+  count                 = var.enable_database ? 1 : 0
+  name                  = "\${var.project_name}-\${var.environment}-db-dns-link"
+  private_dns_zone_name = azurerm_private_dns_zone.db[0].name
+  virtual_network_id    = azurerm_virtual_network.main.id
+  resource_group_name   = azurerm_resource_group.main.name
 }
 `;
-
 export const TF_ACA_DATABASE = `resource "azurerm_postgresql_flexible_server" "main" {
   count                  = var.enable_database ? 1 : 0
   name                   = "\${var.project_name}-\${var.environment}-pg"
@@ -127,12 +146,14 @@ export const TF_ACA_DATABASE = `resource "azurerm_postgresql_flexible_server" "m
   administrator_login    = "appuser"
   administrator_password = random_password.db[0].result
   sku_name               = var.db_ha ? "GP_Standard_D2s_v3" : "B_Standard_B1ms"
-  storage {
-    size_gb = 32
-  }
+  storage_mb             = 32768
   zone                   = "1"
   backup_retention_days  = var.backup_retention_days
+  delegated_subnet_id    = azurerm_subnet.db[0].id
+  private_dns_zone_id    = azurerm_private_dns_zone.db[0].id
   public_network_access_enabled = false
+
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.db]
 }
 
 resource "azurerm_postgresql_flexible_server_database" "app" {
@@ -141,7 +162,6 @@ resource "azurerm_postgresql_flexible_server_database" "app" {
   server_id = azurerm_postgresql_flexible_server.main[0].id
 }
 `;
-
 export const TF_ACA_IDENTITY = `data "azurerm_client_config" "current" {}
 
 resource "azurerm_user_assigned_identity" "app" {

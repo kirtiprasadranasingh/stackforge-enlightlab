@@ -731,6 +731,41 @@ steps:
 `,
       };
     default:
+      if (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run') {
+        return {
+          path: '.github/workflows/deploy.yml',
+          content: `name: Deploy Cloud Run
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+env:
+  GCP_REGION: ${region}
+  SERVICE_NAME: stackforge-api
+  ARTIFACT_REPOSITORY: stackforge
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: \${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: \${{ secrets.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and deploy
+        run: |
+          IMAGE_URI="\${{ env.GCP_REGION }}-docker.pkg.dev/\${{ vars.GCP_PROJECT_ID }}/\${{ env.ARTIFACT_REPOSITORY }}/app:\${{ github.sha }}"
+          gcloud auth configure-docker "\${{ env.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          gcloud run deploy "\${{ env.SERVICE_NAME }}" --image "$IMAGE_URI" --region "\${{ env.GCP_REGION }}" --project "\${{ vars.GCP_PROJECT_ID }}" --quiet
+`,
+        };
+      }
       return {
         path: '.github/workflows/deploy.yml',
         content: `name: Deploy
@@ -1009,9 +1044,11 @@ export function applyScaffoldOptions(
     'build_spec.yaml',
   ];
   const chosen = ciSkeleton(presets.ci, presets, options.region);
+  const existingGhaCandidate = byPath.get('.github/workflows/deploy.yml');
   const existingGha =
-    presets.ci === 'github-actions'
-      ? byPath.get('.github/workflows/deploy.yml')
+    presets.ci === 'github-actions' &&
+    /Locked (?:validated template|base file)/i.test(existingGhaCandidate?.description || '')
+      ? existingGhaCandidate
       : undefined;
   for (const p of ciPaths) byPath.delete(p);
   for (const p of [...byPath.keys()]) {
@@ -1712,7 +1749,7 @@ CMD ["node", "server.js"]
   }
   if (options.database === 'mysql' && presets.cloud === 'azure') {
     notes.push(
-      'MySQL was selected — this Azure locked template provisions PostgreSQL Flexible Server as a validate-safe stand-in. Swap engine before production if MySQL is required.'
+      'MySQL was selected — this Azure locked template provisions a private Azure Database for MySQL Flexible Server with a delegated subnet and private DNS.'
     );
   }
   if (
@@ -1865,7 +1902,21 @@ CMD ["node", "server.js"]
           content = content
             .replace(/azurerm_postgresql_flexible_server/g, 'azurerm_mysql_flexible_server')
             .replace(/version\s*=\s*"15"/g, 'version = "8.0.21"')
+            .replace(/sku_name\s*=\s*"[^"]+"/g, 'sku_name               = "GP_Standard_D2ds_v4"')
+            .replace(/^\s*storage_mb\s*=\s*32768\s*$/gm, '  storage {\n    size_gb = 32\n  }')
+            .replace(/public_network_access_enabled\s*=\s*false/g, 'public_network_access = "Disabled"')
             .replace(/-pg"/g, '-mysql"');
+
+          const network = byPath.get('terraform/network.tf');
+          if (network) {
+            byPath.set('terraform/network.tf', {
+              ...network,
+              content: network.content
+                .replace(/Microsoft\.DBforPostgreSQL\/flexibleServers/g, 'Microsoft.DBforMySQL/flexibleServers')
+                .replace(/postgres-flexible-server/g, 'mysql-flexible-server')
+                .replace(/\.private\.postgres\.database\.azure\.com/g, '.private.mysql.database.azure.com'),
+            });
+          }
         } else if (presets.cloud === 'aws') {
           content = content
             .replace(/engine\s*=\s*"postgres"/g, 'engine = "mysql"')
@@ -1909,7 +1960,7 @@ CMD ["node", "server.js"]
     const relationalReference =
       /aws_db_instance\.main|google_sql_database_instance\.main|azurerm_(?:postgresql|mysql)_flexible_server\.main|random_password\.db/;
     const redisReference =
-      /aws_elasticache(?:_cluster|_replication_group)\.redis|google_redis_instance\.cache|azurerm_redis_cache\.main/;
+      /aws_elasticache(?:_cluster|_replication_group)\.redis|google_redis_instance\.(?:cache|main)|azurerm_redis_cache\.main/;
 
     if (!hasRelationalDb) {
       content = removeOutputsReferencing(content, relationalReference);

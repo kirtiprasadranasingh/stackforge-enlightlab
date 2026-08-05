@@ -10,3 +10,5 @@ Dockerfile
 .dockerignore
 k8s
 deploy
+tmp_zip*/
+qa-*/

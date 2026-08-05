@@ -729,11 +729,13 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
     );
 
     // HA Postgres → Multi-AZ RDS instance ONLY (never Aurora / rds_cluster) — QA #23 100%
+    // A relational database alone is not permission to turn on a costly
+    // Multi-AZ topology.  Only the confirmed availability choice can do it.
+    const confirmedDatabaseOptions = parseScaffoldOptions(context, presets);
     const haPostgres =
-      /PostgreSQL|postgres|High availability|Multi-AZ|aws_rds_cluster|Aurora|aws_db_instance/i.test(
-        `${context}\n${out}`
-      );
-    if (haPostgres || /Database:\s*PostgreSQL/i.test(out)) {
+      confirmedDatabaseOptions.database === 'postgres' &&
+      confirmedDatabaseOptions.databaseMode !== 'standard';
+    if (haPostgres) {
       // Drop cluster resource lines entirely (do not leave duplicate db_instance lines)
       out = out.replace(
         /^[-*]\s*aws_rds_cluster[^\n]*\n?/gim,
@@ -1064,21 +1066,26 @@ function syncLockedRequirementsSummary(
   options = parseScaffoldOptions(context, presets)
 ): string {
   const cloud = { aws: 'AWS', gcp: 'Google Cloud', azure: 'Microsoft Azure', oracle: 'Oracle Cloud' }[presets.cloud];
-  const platform = {
+  const platformLabels: Record<Presets['orchestrator'], string> = {
     ecs: 'Amazon ECS', eks: 'Amazon EKS', 'cloud-run': 'Cloud Run', gke: 'Google Kubernetes Engine (GKE)',
     'container-apps': 'Azure Container Apps', aks: 'Azure Kubernetes Service (AKS)', oke: 'Oracle Kubernetes Engine (OKE)',
-  }[presets.orchestrator];
-  const ci = {
+    serverless: 'Serverless',
+  };
+  const platform = platformLabels[presets.orchestrator];
+  const ciLabels: Record<Presets['ci'], string> = {
     'github-actions': 'GitHub Actions', 'gitlab-ci': 'GitLab CI', 'azure-devops': 'Azure DevOps',
-    jenkins: 'Jenkins', 'gcp-cloud-build': 'Google Cloud Build', 'oci-devops': 'OCI DevOps',
-  }[presets.ci] || presets.ci;
+    jenkins: 'Jenkins', 'gcp-cloud-build': 'Google Cloud Build', 'oci-devops': 'OCI DevOps', 'aws-codepipeline': 'AWS CodePipeline',
+  };
+  const ci = ciLabels[presets.ci];
   const access = options.access === 'private'
     ? 'Private and internal only'
     : options.access === 'public_https'
       ? 'Public with secure HTTPS and a custom domain'
       : 'Public HTTP on the default load-balancer hostname';
   const explicitDatabaseMode = /(?:How should (?:Redis\/Valkey|MySQL|PostgreSQL) be configured|database mode|availability)[\s\S]{0,160}(?:standard|high availability|7-day automatic backups|automatic backups)/i.test(context);
-  const explicitScale = /(?:How much traffic should we plan for|Scale tier)[\s\S]{0,160}(?:small|medium|high traffic|automatic scaling|\d+\s*(?:to|-)?\s*\d+\s*app copies)/i.test(context);
+  const explicitScale =
+    /(?:How much traffic should we plan for|Scale tier)[\s\S]{0,160}(?:small|medium|high traffic|automatic scaling|\d+\s*(?:to|-)?\s*\d+\s*app copies)/i.test(context) ||
+    /\b(?:small|medium)\s+(?:deployment|scale|workload|service)\b|\bhigh[- ]traffic\s+(?:deployment|workload|service)\b/i.test(context);
   const database = options.database === 'none'
     ? 'No data service'
     : options.database === 'redis'
@@ -1131,6 +1138,154 @@ function syncCloudRunDeliveryDetails(
   const nextHeaderOffset = afterHeading.search(/\n##\s+/);
   const bodyEnd = nextHeaderOffset === -1 ? plan.length : bodyStart + nextHeaderOffset;
   return `${plan.slice(0, existing.index)}${details}${plan.slice(bodyEnd)}`;
+}
+
+/**
+ * Last deterministic pass for requirements that must never be overridden by
+ * generic plan prose. This adds only transparent boundaries; it never claims
+ * an ungenerated cloud integration exists.
+ */
+function syncRequirementBoundaries(
+  plan: string,
+  context: string,
+  presets: Presets,
+  options: ReturnType<typeof parseScaffoldOptions>
+): string {
+  let out = plan;
+  const productionOnly = options.environments.length === 1 && options.environments[0] === 'production';
+
+  if (options.databaseMode === 'standard') {
+    out = out
+      .split('\n')
+      .filter((line) => !/\b(?:multi[- ]?az|high availability|regional ha)\b/i.test(line))
+      .join('\n');
+  }
+
+  if (options.scale === 'small') {
+    out = out
+      .split('\n')
+      .filter((line) => !/\b(?:small to medium|medium[- ]?(?:tier|sized|scale|deployment))\b/i.test(line))
+      .join('\n');
+  }
+
+  if (productionOnly) {
+    out = out
+      .split('\n')
+      .filter((line) => !/\b(?:development[- ]?oriented|small to medium deployment)\b/i.test(line))
+      .join('\n');
+  }
+
+  if (options.runtime === 'dotnet') {
+    out = out
+      .split('\n')
+      .filter((line) => !/no specific \.net framework is assumed|Node\/Python\/Go or plain Java HTTP/i.test(line))
+      .join('\n');
+    out = prependAssumption(
+      out,
+      '**.NET implementation boundary:** .NET is the confirmed language. The generated stub is a minimal ASP.NET Core `/health` endpoint; controllers, services, and the wider application framework were not selected.'
+    );
+  }
+
+  if (options.runtime === 'java') {
+    out = out
+      .split('\n')
+      .filter((line) => !/\bJava(?:\s*\([^)]*\))?\s+is not selected\b/i.test(line))
+      .join('\n');
+  }
+
+  if (presets.cloud === 'aws' && presets.orchestrator === 'eks' && options.access === 'public_basic') {
+    out = out
+      .split('\n')
+      .filter((line) => !/\b(?:ingress resource|nginx ingress|ingress controller|ingress is enabled)\b/i.test(line))
+      .join('\n');
+    out = prependAssumption(
+      out,
+      '**EKS public delivery boundary:** The chart deploys a `Service` of type `LoadBalancer`. Its optional Ingress template remains disabled; no Ingress resource or controller is generated.'
+    );
+  }
+
+  if (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run' && options.access === 'public_https') {
+    out = out
+      .split('\n')
+      .filter(
+        (line) =>
+          !/\bgoogle_dns_(?:managed_zone|record_set)\b|\bCloud Run Domain Mapping\b|\bgoogle_cloud_run_domain_mapping\b|\bGoogle-managed (?:SSL )?certificate\b/i.test(
+            line
+          )
+      )
+      .join('\n');
+    out = prependAssumption(
+      out,
+      '**Cloud Run custom-domain boundary:** Cloud Run supplies HTTPS on its generated `run.app` service URL. The locked scaffold does not create Cloud DNS, a domain mapping, or a custom-domain certificate because no domain/zone value was collected; add those resources after the client supplies them.'
+    );
+  }
+
+  if (presets.cloud === 'azure' && presets.orchestrator === 'aks' && options.access === 'private') {
+    out = out
+      .split('\n')
+      .filter(
+        (line) =>
+          !/\bprivate AKS cluster\b|\bAKS cluster.*private (?:API|control plane|endpoint|VNet)\b|\binternal ingress controller\b|\bInternal CA\b|\bcert-manager\b|\bAzure Private DNS Zone\b|\bPrivate Link\b|\bPrivate Endpoint\b|\bAzure Container Registry \(ACR\).*\b(?:create|provision|will be used|store)\b/i.test(
+            line
+          )
+      )
+      .join('\n');
+    out = prependAssumption(
+      out,
+      '**Private AKS delivery boundary:** Private/internal refers to the application: the Helm chart uses `ClusterIP` and keeps Ingress disabled. The locked scaffold does not create a private AKS control plane, internal ingress controller, Private Link/DNS, Key Vault CSI integration, or ACR; those require separately confirmed client networking and identity choices.'
+    );
+    if (options.database === 'postgres' || options.database === 'mysql') {
+      out = prependAssumption(
+        out,
+        '**AKS database boundary:** The generated flexible-server resource disables public network access, but a delegated database subnet and private DNS integration are not generated. Add them before a live deployment; the plan must not claim end-to-end private database reachability yet.'
+      );
+    }
+  }
+
+  if (options.access === 'public_https') {
+    out = out
+      .split('\n')
+      .filter((line) => !/\b(?:http-only|http only|HTTP:80)\b.*(?:final|custom domain|secure HTTPS)|(?:custom domain|secure HTTPS).*(?:http-only|http only|HTTP:80)/i.test(line))
+      .join('\n');
+    out = prependAssumption(
+      out,
+      '**Custom HTTPS boundary:** HTTPS and a custom domain are confirmed requirements. The client must supply the domain ownership/DNS details; this plan must not describe an HTTP-only endpoint as the final production result.'
+    );
+  } else if (options.access === 'public_basic' && options.environments.includes('production')) {
+    out = prependAssumption(
+      out,
+      '**Production HTTP warning:** Public HTTP on the provider default hostname was selected. It is valid for the requested scaffold, but it has no transport encryption; use a custom domain and TLS before sending sensitive production traffic.'
+    );
+  }
+
+  if (options.environments.includes('production')) {
+    out = out.replace(/\bproduction-ready\b/gi, 'production-targeted starting');
+    out = prependAssumption(
+      out,
+      '**Production-readiness boundary:** “Production” is the selected environment, not a certification that this generated scaffold can be deployed without review. Validate credentials, secrets, security policy, observability, recovery objectives, and live cloud behavior before promotion.'
+    );
+  }
+
+  const lowerContext = context.toLowerCase();
+  if (/\b(?:healthcare|health[- ]?related|hipaa|phi)\b/.test(lowerContext)) {
+    out = prependAssumption(
+      out,
+      '**Healthcare decision required:** The request is healthcare-related, but no compliance jurisdiction, PHI scope, BAA, retention, audit, or access-control policy was confirmed. This scaffold must not claim HIPAA compliance; confirm those controls before handling health data.'
+    );
+  }
+  if (/\b(?:game|gaming)\b/.test(lowerContext)) {
+    out = prependAssumption(
+      out,
+      '**Game-workload decision required:** The generated application remains a minimal `/health` stub. Confirm sessions, real-time/WebSocket use, matchmaking, latency targets, and cache/state needs before adding game-specific infrastructure.'
+    );
+  }
+  if (/\b(?:ecommerce|e-commerce|payment|checkout)\b/.test(lowerContext)) {
+    out = prependAssumption(
+      out,
+      '**E-commerce decision required:** Confirm payment/PCI scope, CDN behavior, recovery objectives, and monitoring requirements before those integrations are designed or generated.'
+    );
+  }
+  return out;
 }
 
 /**
@@ -1315,6 +1470,7 @@ function syncConfirmedRegionIntoPlan(plan: string, context: string): string {
   out = sanitizeNoDatabase(out, ctx);
   out = sanitizeMongoDB(out, ctx);
   if (presets) {
+    out = syncRequirementBoundaries(out, ctx, presets, opts);
     out = syncLockedRequirementsSummary(out, ctx, presets, opts);
     out = syncCloudRunDeliveryDetails(out, presets, opts);
     out = syncGeneratedFileManifest(out, {

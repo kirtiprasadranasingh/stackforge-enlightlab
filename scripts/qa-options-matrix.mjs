@@ -20,7 +20,7 @@ import { mergeLockedBaseFiles } from '../lib/scaffold-base-files.ts';
 import { inferPresetsFromPrompt } from '../lib/infer-presets.ts';
 import { parseScaffoldOptions } from '../lib/scaffold-options.ts';
 import { buildClarifyingQuestions } from '../lib/clarifying-questions.ts';
-import { requiresPlanApproval } from '../lib/stack-intent.ts';
+import { isRequirementCorrectionPrompt, requiresPlanApproval } from '../lib/stack-intent.ts';
 import { validateScaffoldContract } from '../lib/scaffold-contract.ts';
 import { buildArchitectureSpec, createRequirementsManifest, generatedFilePathsForSpec, readRequirementsManifest, validatePlanAgainstSpec } from '../lib/architecture-spec.ts';
 import { sanitizePlanAgainstInterview } from '../lib/sanitize-plan.ts';
@@ -760,6 +760,36 @@ if (correctedDatabase.database !== 'postgres') {
   console.log('PASS  latest corrected database wins');
 }
 
+if (!isRequirementCorrectionPrompt('westeurope')) {
+  fail++;
+  console.error('FAIL  bare valid region is not treated as an interview correction');
+} else {
+  console.log('PASS  bare valid region revises the saved interview');
+}
+
+const correctedAzureSpec = buildArchitectureSpec({
+  prompt: 'Small deployment. Client answers / revision feedback: westeurope',
+  interviewAnswers: 'Microsoft Azure. Azure Kubernetes Service (AKS). us-east-1. PostgreSQL. .NET. Client correction: westeurope',
+  presets: { cloud: 'azure', orchestrator: 'aks', ci: 'github-actions' },
+});
+if (correctedAzureSpec.options.region !== 'westeurope' || correctedAzureSpec.issues.some((issue) => /region/i.test(issue))) {
+  fail++;
+  console.error('FAIL  corrected Azure region remains blocked: ' + correctedAzureSpec.issues.join(' | '));
+} else {
+  console.log('PASS  latest Azure region correction replaces the rejected region');
+}
+
+const invalidNativeCi = buildArchitectureSpec({
+  prompt: 'Microsoft Azure AKS with AWS CodePipeline',
+  interviewAnswers: 'westeurope. Production only. Private and internal only. PostgreSQL. .NET.',
+  presets: { cloud: 'azure', orchestrator: 'aks', ci: 'aws-codepipeline' },
+});
+if (!invalidNativeCi.issues.some((issue) => /provider-native CI\\/CD service/i.test(issue))) {
+  fail++;
+  console.error('FAIL  cross-cloud native CI was not blocked');
+} else {
+  console.log('PASS  cross-cloud native CI is blocked before planning');
+}
 const correctedRegion = parseScaffoldOptions(
   'Azure Container Apps in us-central1 with Python. Corrected region: eastus.',
   { cloud: 'azure', orchestrator: 'container-apps', ci: 'github-actions' }
@@ -791,6 +821,11 @@ const outputCases: Array<{ name: string; presets: Presets; database: 'none' | 'p
     forbidden: [/google_redis_instance\.cache/, /redis_host/],
   },
   {
+    name: 'GKE no-data removes all data outputs',
+    presets: { cloud: 'gcp', orchestrator: 'gke', ci: 'github-actions' },
+    database: 'none',
+    forbidden: [/google_redis_instance\.main/, /google_sql_database_instance\.main/, /redis_host/, /redis_port/, /sql_connection_name/],
+  },  {
     name: 'Cloud Run no-data removes all data outputs',
     presets: { cloud: 'gcp', orchestrator: 'cloud-run', ci: 'gitlab-ci' },
     database: 'none',
@@ -838,14 +873,79 @@ const azureDatabase = azureFiles.find((file) => file.path === 'terraform/databas
 if (
   azureDatabase.includes('storage_mb') ||
   !azureDatabase.includes('storage {') ||
-  !azureDatabase.includes('size_gb = 32')
+  !azureDatabase.includes('size_gb = 32') ||
+  !azureDatabase.includes('azurerm_mysql_flexible_server') ||
+  azureDatabase.includes('azurerm_postgresql_flexible_server') ||
+  /GP_Standard_D2s_v3/.test(azureDatabase) ||
+  !/public_network_access\\s*=\\s*"Disabled"/.test(azureDatabase)
 ) {
   fail++;
-  console.error(\`FAIL  Azure flexible server uses obsolete storage syntax: \${azureDatabase}\`);
+  console.error('FAIL  Azure MySQL flexible server schema is inconsistent: ' + azureDatabase);
 } else {
-  console.log('PASS  Azure flexible server uses provider-v4 storage syntax');
+  console.log('PASS  Azure MySQL uses its provider-v4 resource schema');
 }
 
+const azurePostgresFiles = mergeLockedBaseFiles([], azureProfile, {
+  fillMissing: true,
+  forceStubs: true,
+  presets: { cloud: 'azure', orchestrator: 'aks', ci: 'github-actions' },
+  scaffoldOptions: {
+    region: 'westeurope', environments: ['production'], database: 'postgres', databaseMode: 'standard',
+    access: 'private', scale: 'small', runtime: 'dotnet',
+  },
+}).files;
+const azurePostgresDatabase = azurePostgresFiles.find((file) => file.path === 'terraform/database.tf')?.content || '';
+if (!azurePostgresDatabase.includes('storage_mb             = 32768') || azurePostgresDatabase.includes('storage {')) {
+  fail++;
+  console.error('FAIL  Azure PostgreSQL does not use provider-v4 storage_mb: ' + azurePostgresDatabase);
+} else {
+  console.log('PASS  Azure PostgreSQL uses provider-v4 storage_mb');
+}
+const malformedWorkflow = [
+  'name: Deploy',
+  'on:',
+  '  workflow_dispatch:',
+  '    inputs:',
+  '    image_name:',
+  "      description: 'first'",
+  '      required: false',
+  '    image_name:',
+  "      description: 'duplicate'",
+  '      required: false',
+  'env:',
+  '  APP_NAME: health-app',
+  '  IMAGE_NAME: \${{ github.event.inputs.image_name || env.APP_NAME }}',
+  'jobs:',
+  '  build:',
+  '    runs-on: ubuntu-latest',
+  '    steps:',
+  '      - uses: actions/checkout@v4',
+  '      - uses: docker/build-push-action@v6',
+  '        with:',
+  "          context: 'app'",
+  '          file: ./app/Dockerfile',
+].join('\\n');
+const workflowFixture = [
+  { path: '.github/workflows/deploy.yml', content: malformedWorkflow },
+  { path: 'Dockerfile', content: 'FROM eclipse-temurin:17-jre\\nCOPY target/app.jar app.jar\\n' },
+  { path: 'pom.xml', content: '<project />' },
+  { path: 'src/main/java/Application.java', content: 'class Application {}' },
+];
+const normalizedOnce = normalizeScaffoldFiles(workflowFixture, { applyLockedProfile: false });
+const normalizedTwice = normalizeScaffoldFiles(normalizedOnce, { applyLockedProfile: false });
+const repairedWorkflow = normalizedTwice.find((file) => file.path === '.github/workflows/deploy.yml')?.content || '';
+const imageInputCount = (repairedWorkflow.match(/^\\s{6}image_name:/gm) || []).length;
+if (
+  imageInputCount !== 1 ||
+  repairedWorkflow.includes('|| env.APP_NAME') ||
+  !repairedWorkflow.includes("context: '.'") ||
+  repairedWorkflow.includes('app/Dockerfile')
+) {
+  fail++;
+  console.error('FAIL  GitHub workflow repair is not idempotent/root-aligned: ' + repairedWorkflow);
+} else {
+  console.log('PASS  workflow repair is idempotent and serverless Docker paths use root');
+}
 if (!requiresPlanApproval('Re-generate the stack with Go instead of Python', true)) {
   fail++;
   console.error('FAIL  regeneration did not require a replacement plan');

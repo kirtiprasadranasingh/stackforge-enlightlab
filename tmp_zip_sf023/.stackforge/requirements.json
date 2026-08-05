@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "azure",
+    "orchestrator": "aks",
+    "ci": "gitlab-ci"
+  },
+  "options": {
+    "region": "eastus",
+    "environments": [
+      "production"
+    ],
+    "database": "redis",
+    "databaseMode": "ha_backup",
+    "access": "private",
+    "scale": "high",
+    "runtime": "java"
+  }
+}

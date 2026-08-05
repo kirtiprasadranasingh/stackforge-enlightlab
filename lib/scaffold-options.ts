@@ -290,9 +290,17 @@ export function parseScaffoldOptions(
   }
 
   // Scale — allow em/en dashes between "Small" and "2 app copies"
-  if (/\bsmall\b[\s\S]{0,40}2\s*app\s*copies?\b|\b2\s*app\s*copies\b/.test(t)) {
+  if (
+    /\bsmall\b[\s\S]{0,40}2\s*app\s*copies?\b|\b2\s*app\s*copies\b|\bsmall\s+(?:deployment|scale|workload|service)\b/.test(
+      t
+    )
+  ) {
     out.scale = 'small';
-  } else if (/\bmedium\b[\s\S]{0,40}3\s*to\s*5|\b3\s*to\s*5\s*app\s*copies\b/.test(t)) {
+  } else if (
+    /\bmedium\b[\s\S]{0,40}3\s*to\s*5|\b3\s*to\s*5\s*app\s*copies\b|\bmedium\s+(?:deployment|scale|workload|service)\b/.test(
+      t
+    )
+  ) {
     out.scale = 'medium';
   } else if (/\bhigh traffic\b|\bautomatic scaling\b/.test(t)) {
     out.scale = 'high';

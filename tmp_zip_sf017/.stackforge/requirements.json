@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "gcp",
+    "orchestrator": "cloud-run",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "us-central1",
+    "environments": [
+      "production"
+    ],
+    "database": "postgres",
+    "databaseMode": "ha_backup",
+    "access": "public_https",
+    "scale": "high",
+    "runtime": "java"
+  }
+}

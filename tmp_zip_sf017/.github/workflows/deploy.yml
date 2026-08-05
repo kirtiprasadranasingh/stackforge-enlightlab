@@ -1,0 +1,199 @@
+name: Deploy to Google Cloud Run (Production)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - 'Dockerfile'
+      - 'terraform/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - 'production'
+      tag:
+        description: 'Image tag (default is commit SHA)'
+        required: false
+        type: string
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: us-central1
+  SERVICE_NAME: health-api-service
+  ARTIFACT_REGISTRY_REPO: health-api-repo
+  IMAGE_NAME: health-api-java
+
+permissions:
+  contents: 'read'
+  id-token: 'write'
+
+jobs:
+  setup_env:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.generate_tag.outputs.tag }}
+      gcp_project_number: ${{ steps.get_project_number.outputs.project_number }}
+    steps:
+      - name: Generate Image Tag
+        id: generate_tag
+        run: |
+          TAG=${{ github.event.inputs.tag || github.sha }}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Generated image tag: $TAG"
+
+      - name: Get GCP Project Number
+        id: get_project_number
+        uses: google-github-actions/get-gcp-project-id@v0.9.0
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+        env:
+          GCLOUD_PROJECT: ${{ env.PROJECT_ID }}
+        run: |
+          PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} --format='value(projectNumber)')
+          echo "project_number=$PROJECT_NUMBER" >> $GITHUB_OUTPUT
+          echo "GCP Project Number: $PROJECT_NUMBER"
+
+  build_and_push:
+    needs: setup_env
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build Java Application
+        run: mvn clean install -DskipTests
+        working-directory: . # Assuming pom.xml is at the root or within a clear path
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Docker login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GCP_REGION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Build and Push Docker image
+        id: build-image
+        run: |
+          IMAGE_URI=${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ needs.setup_env.outputs.image_tag }}
+          docker build -t $IMAGE_URI ./app           docker push $IMAGE_URI
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+        env:
+          GCLOUD_PROJECT: ${{ env.PROJECT_ID }}
+
+    outputs:
+      image_uri: ${{ steps.build-image.outputs.image_uri }}
+
+  deploy:
+    needs: [setup_env, build_and_push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Get current Cloud Run revision
+        id: get_current_revision
+        run: |
+          CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --project=${{ env.PROJECT_ID }} \
+            --region=${{ env.GCP_REGION }} \
+            --format="value(status.latestReadyRevisionName)" || echo "")
+          echo "current_revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
+          echo "Current revision: $CURRENT_REVISION"
+        env:
+          GCLOUD_PROJECT: ${{ env.PROJECT_ID }}
+
+      - name: Deploy to Cloud Run
+        id: deploy_cloudrun
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.GCP_REGION }}
+          image: ${{ needs.build_and_push.outputs.image_uri }}
+          project_id: ${{ env.PROJECT_ID }}
+          # The service account for the Cloud Run instance itself is managed by Terraform
+          # and does not need to be set here unless overriding.
+
+      - name: Verify Deployment (Health Check)
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --project=${{ env.PROJECT_ID }} \
+            --region=${{ env.GCP_REGION }} \
+            --format="value(status.url)")
+          echo "Cloud Run Service URL: $SERVICE_URL"
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          until [ $RETRY_COUNT -ge $MAX_RETRIES ]; do
+            STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$SERVICE_URL/health")
+            if [ "$STATUS_CODE" -eq 200 ]; then
+              echo "Health check passed with status $STATUS_CODE."
+              exit 0
+            else
+              echo "Health check failed with status $STATUS_CODE. Retrying in 10 seconds..."
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              sleep 10
+            fi
+          done
+          echo "Health check failed after $MAX_RETRIES retries."
+          exit 1
+        env:
+          GCLOUD_PROJECT: ${{ env.PROJECT_ID }}
+
+  rollback:
+    needs: [deploy]
+    if: failure() && needs.deploy.outputs.current_revision != '' # Only rollback if deploy failed and a previous revision exists
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Rollback to previous revision
+        run: |
+          PREVIOUS_REVISION=${{ needs.deploy.outputs.current_revision }}
+          if [ -n "$PREVIOUS_REVISION" ]; then
+            echo "Deployment failed. Rolling back to revision: $PREVIOUS_REVISION"
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --to-latest=0 \
+              --to-revisions=${PREVIOUS_REVISION}=100 \
+              --project=${{ env.PROJECT_ID }} \
+              --region=${{ env.GCP_REGION }} --platform managed
+            echo "Successfully rolled back to $PREVIOUS_REVISION"
+          else
+            echo "No previous revision found to roll back to."
+            exit 1 # Mark as failure if rollback could not happen
+          fi
+        env:
+          GCLOUD_PROJECT: ${{ env.PROJECT_ID }}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "gcp",
+    "orchestrator": "cloud-run",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "europe-west1",
+    "environments": [
+      "production"
+    ],
+    "database": "mysql",
+    "databaseMode": "standard",
+    "access": "public_https",
+    "scale": "medium",
+    "runtime": "java"
+  }
+}

@@ -77,8 +77,37 @@ resource "azurerm_subnet" "nodes" {
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.70.0.0/22"]
 }
-`;
 
+resource "azurerm_subnet" "db" {
+  count                = var.enable_database ? 1 : 0
+  name                 = "database"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.70.4.0/24"]
+
+  delegation {
+    name = "postgres-flexible-server"
+    service_delegation {
+      name    = "Microsoft.DBforPostgreSQL/flexibleServers"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+
+resource "azurerm_private_dns_zone" "db" {
+  count               = var.enable_database ? 1 : 0
+  name                = "\${var.project_name}-\${var.environment}.private.postgres.database.azure.com"
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "db" {
+  count                 = var.enable_database ? 1 : 0
+  name                  = "\${var.project_name}-\${var.environment}-db-dns-link"
+  private_dns_zone_name = azurerm_private_dns_zone.db[0].name
+  virtual_network_id    = azurerm_virtual_network.main.id
+  resource_group_name   = azurerm_resource_group.main.name
+}
+`;
 export const TF_AKS_CLUSTER = `resource "azurerm_kubernetes_cluster" "main" {
   name                = "\${var.project_name}-\${var.environment}-aks"
   location            = azurerm_resource_group.main.location
@@ -113,15 +142,16 @@ export const TF_AKS_DATABASE = `resource "azurerm_postgresql_flexible_server" "m
   version                = "15"
   administrator_login    = "appuser"
   administrator_password = random_password.db[0].result
-  sku_name               = "GP_Standard_D2s_v3"
-  storage {
-    size_gb = 32
-  }
+  sku_name               = "B_Standard_B1ms"
+  storage_mb             = 32768
   zone                   = var.availability_zones[0]
+  delegated_subnet_id    = azurerm_subnet.db[0].id
+  private_dns_zone_id    = azurerm_private_dns_zone.db[0].id
   public_network_access_enabled = false
+
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.db]
 }
 `;
-
 export const TF_AKS_REDIS = `resource "azurerm_redis_cache" "main" {
   count                = var.enable_redis ? 1 : 0
   name                 = "\${var.project_name}\${var.environment}redis"

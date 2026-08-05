@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "aws",
+    "orchestrator": "eks",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "us-east-1",
+    "environments": [
+      "production"
+    ],
+    "database": "none",
+    "databaseMode": "standard",
+    "access": "private",
+    "scale": "medium",
+    "runtime": "python"
+  }
+}

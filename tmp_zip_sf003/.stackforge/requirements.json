@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "gcp",
+    "orchestrator": "gke",
+    "ci": "gcp-cloud-build"
+  },
+  "options": {
+    "region": "us-central1",
+    "environments": [
+      "staging"
+    ],
+    "database": "none",
+    "databaseMode": "standard",
+    "access": "private",
+    "scale": "medium",
+    "runtime": "go"
+  }
+}

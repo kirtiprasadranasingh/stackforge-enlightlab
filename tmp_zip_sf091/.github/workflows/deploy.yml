@@ -1,0 +1,850 @@
+name: Deploy to GCP Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    environment:
+      description: 'environment'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    environment:
+      description: 'environment'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    environment:
+      description: 'environment'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    environment:
+      description: 'environment'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    environment:
+      description: 'environment'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    environment:
+      description: 'environment'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    environment:
+      description: 'environment'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+    project_id:
+      description: 'project_id'
+      required: false
+      type: string
+    image_name:
+      description: 'image_name'
+      required: false
+      type: string
+    tag:
+      description: 'tag'
+      required: false
+      type: string
+    cloud_run_service_account_email:
+      description: 'cloud_run_service_account_email'
+      required: false
+      type: string
+    cloud_run_vpc_connector_id:
+      description: 'cloud_run_vpc_connector_id'
+      required: false
+      type: string
+    cloud_run_min_instances:
+      description: 'cloud_run_min_instances'
+      required: false
+      type: string
+    cloud_run_max_instances:
+      description: 'cloud_run_max_instances'
+      required: false
+      type: string
+    mysql_private_ip_address:
+      description: 'mysql_private_ip_address'
+      required: false
+      type: string
+    mysql_database_name:
+      description: 'mysql_database_name'
+      required: false
+      type: string
+    mysql_user_name:
+      description: 'mysql_user_name'
+      required: false
+      type: string
+    db_password_secret:
+      description: 'db_password_secret'
+      required: false
+      type: string
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+      tag:
+        description: 'Image tag to deploy (e.g., latest, a commit SHA)'
+        required: false
+        default: 'latest'
+
+env:
+  PROJECT_ID: ${{ github.event.inputs.project_id || vars.GCP_PROJECT_ID }}
+  REGION: europe-west1
+  APP_NAME: java-healthcheck-app
+  SERVICE_NAME: java-healthcheck-app-${{ github.event.inputs.environment || 'production' }}
+  ARTIFACT_REGISTRY_REPO: java-healthcheck-app-repo-${{ github.event.inputs.environment || 'production' }}
+  IMAGE_NAME: ${{ github.event.inputs.image_name || env.APP_NAME }}
+  SERVICE_ACCOUNT_EMAIL: ${{ vars.SERVICE_ACCOUNT_EMAIL }} # Email for GitHub Actions SA
+  WORKLOAD_IDENTITY_PROVIDER: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+  # Placeholder for DB password from Secret Manager, actual injection happens on Cloud Run side
+  # This is NOT passed directly to the CI/CD pipeline, but used by Cloud Run at runtime
+
+jobs:
+  setup_env:
+    name: Setup Environment
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set-tag.outputs.tag }}
+      service_name: ${{ env.SERVICE_NAME }}
+      artifact_registry_repo: ${{ env.ARTIFACT_REGISTRY_REPO }}
+      image_uri: ${{ steps.set-image-uri.outputs.image_uri }}
+    steps:
+      - name: Set image tag
+        id: set-tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG=${{ github.event.inputs.tag }}
+          else
+            TAG=${{ github.sha }}
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $TAG"
+
+      - name: Set image URI
+        id: set-image-uri
+        run: |
+          IMAGE_URI="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}"
+          echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+          echo "Image URI: $IMAGE_URI"
+
+  build_and_push:
+    name: Build and Push Docker Image
+    needs: setup_env
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write' # For GCP Workload Identity Federation
+    outputs:
+      image_uri: ${{ needs.setup_env.outputs.image_uri }}
+      service_name: ${{ needs.setup_env.outputs.service_name }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build Java application
+        run: mvn clean package -DskipTests
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure Docker to use gcloud as a credential helper
+        run: gcloud auth configure-docker "${{ env.REGION }}-docker.pkg.dev"
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: 'app'
+          push: true
+          tags: ${{ needs.setup_env.outputs.image_uri }}
+          file: ./Dockerfile
+
+  deploy_to_cloud_run:
+    name: Deploy to Cloud Run
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write' # For GCP Workload Identity Federation
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Install gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get current Cloud Run revision (for rollback)
+        id: get-revision
+        run: |
+          CURRENT_REVISION=$(gcloud run services describe ${{ needs.setup_env.outputs.service_name }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format="value(status.latestReadyRevision)")
+          echo "current_revision=$CURRENT_REVISION" >> $GITHUB_OUTPUT
+          echo "Current Cloud Run revision: $CURRENT_REVISION"
+        continue-on-error: true # Allow deployment even if no prior revision exists
+
+      - name: Deploy Cloud Run Service
+        id: deploy
+        run: |
+          gcloud run deploy ${{ needs.setup_env.outputs.service_name }} \
+            --image ${{ needs.setup_env.outputs.image_uri }} \
+            --region ${{ env.REGION }} \
+            --project ${{ env.PROJECT_ID }} \
+            --service-account ${{ github.event.inputs.cloud_run_service_account_email || needs.build_and_push.outputs.cloud_run_service_account_email }} \
+            --no-allow-unauthenticated \
+            --vpc-connector ${{ github.event.inputs.cloud_run_vpc_connector_id || needs.build_and_push.outputs.cloud_run_vpc_connector_id }} \
+            --min-instances ${{ github.event.inputs.cloud_run_min_instances || 3 }} \
+            --max-instances ${{ github.event.inputs.cloud_run_max_instances || 5 }} \
+            --update-env-vars SPRING_DATASOURCE_URL="jdbc:mysql://${{ github.event.inputs.mysql_private_ip_address || needs.build_and_push.outputs.mysql_private_ip_address }}:3306/${{ github.event.inputs.mysql_database_name || 'java-healthcheck-app-db-production' }}?useSSL=false" \
+            --update-env-vars SPRING_DATASOURCE_USERNAME="${{ github.event.inputs.mysql_user_name || 'java-healthcheck-app-user-production' }}" \
+            --set-secrets SPRING_DATASOURCE_PASSWORD=${{ github.event.inputs.db_password_secret || 'java-healthcheck-app-db-password-production' }}:latest \
+            --wait # Wait for the deployment to complete and become stable
+
+      - name: Get deployed service URL
+        id: get-service-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ needs.setup_env.outputs.service_name }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format="value(status.url)")
+          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Deployed service URL: $SERVICE_URL"
+
+      - name: Smoke Test Deployed Service
+        run: |
+          SERVICE_URL="${{ steps.get-service-url.outputs.service_url }}"
+          echo "Pinging ${SERVICE_URL}/health..."
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${SERVICE_URL}/health")
+          if [ "$STATUS_CODE" -ne 200 ]; then
+            echo "Health check failed with status code: $STATUS_CODE"
+            exit 1
+          else
+            echo "Health check passed (status 200)."
+          fi
+
+  scaffold_rollback:
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rollback Cloud Run Service
+        run: |
+          if [ -n "${{ steps.get-revision.outputs.current_revision }}" ]; then
+            echo "Deployment failed. Rolling back to revision ${{ steps.get-revision.outputs.current_revision }}..."
+            gcloud run services update-traffic ${{ needs.setup_env.outputs.service_name }} \
+              --to-revisions ${{ steps.get-revision.outputs.current_revision }}=100 \
+              --region=${{ env.REGION }} \
+              --project=${{ env.PROJECT_ID }} \
+              --wait
+            echo "Rollback to ${{ steps.get-revision.outputs.current_revision }} complete."
+          else
+            echo "No previous revision found for rollback. Service might be in a bad state."
+          fi

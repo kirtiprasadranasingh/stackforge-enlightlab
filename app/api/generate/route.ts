@@ -33,6 +33,7 @@ import {
   isGreetingOnlyPrompt,
   isVagueStackPrompt,
   resolveStackPromptFromAffirmation,
+  resolveDiscoveryPrompt,
 } from '@/lib/stack-intent';
 import { normalizeScaffoldFile, normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import {
@@ -65,6 +66,27 @@ export const maxDuration = 300;
 
 function sse(data: unknown): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+/**
+ * Keep long model/validation operations observable to the browser and any
+ * reverse proxy. Some valid scaffold generations take more than two minutes
+ * before the next file is available, so an otherwise idle SSE connection can
+ * be mistaken for a dropped backend.
+ */
+function startSseKeepAlive(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  intervalMs = 10_000
+): () => void {
+  const timer = setInterval(() => {
+    try {
+      controller.enqueue(sse({ type: 'ping' }));
+    } catch {
+      clearInterval(timer);
+    }
+  }, intervalMs);
+
+  return () => clearInterval(timer);
 }
 
 function ingestParsedFile(
@@ -165,6 +187,7 @@ async function streamPlanningPhase(params: {
   const stream = new ReadableStream({
     async start(controller) {
       const parseState = createParseState();
+      const stopKeepAlive = startSseKeepAlive(controller);
       let fullText = '';
       let questionsSent = false;
       let planSent = false;
@@ -334,6 +357,8 @@ async function streamPlanningPhase(params: {
           })
         );
         controller.close();
+      } finally {
+        stopKeepAlive();
       }
     },
   });
@@ -389,11 +414,16 @@ export async function POST(request: NextRequest) {
     } = validation.data;
     // Affirmative follow-ups ("yes please") after a .NET/runtime offer → continue
     // into clarify with the prior stack prompt (not a welcome reset).
+    const sanitizedRawPrompt = sanitizeInput(rawPrompt);
     const affirmedStack = resolveStackPromptFromAffirmation(
-      sanitizeInput(rawPrompt),
+      sanitizedRawPrompt,
       history as { role: string; content: string }[]
     );
-    const prompt = sanitizeInput(affirmedStack || rawPrompt);
+    const discoveryStack = resolveDiscoveryPrompt(
+      affirmedStack || sanitizedRawPrompt,
+      history as { role: string; content: string }[]
+    );
+    const prompt = sanitizeInput(discoveryStack || affirmedStack || rawPrompt);
     // interviewAnswers is critical: generate clears history for payload size,
     // so region/DB/scale/access live here — not only in the approved plan prose.
     const optionsText = [
@@ -761,6 +791,7 @@ Always format your response by wrapping the chat reply in the following markers:
     const stream = new ReadableStream({
       async start(controller) {
         const parseState = createParseState();
+        const stopKeepAlive = startSseKeepAlive(controller);
         let fullText = '';
         let lastStatus = '';
         let summarySent = false;
@@ -1467,6 +1498,8 @@ ${failLines.join('\n')}`;
             })
           );
           controller.close();
+        } finally {
+          stopKeepAlive();
         }
       },
     });

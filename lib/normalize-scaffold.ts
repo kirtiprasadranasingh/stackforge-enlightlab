@@ -34,7 +34,9 @@ function canonicalPath(path: string): string {
   if (RENAME_MAP[normalized]) return RENAME_MAP[normalized];
   // Keep app/* paths in place so Node/EKS scaffolds are not flattened to root.
   // PATH_ALIASES still treats Dockerfile ↔ app/Dockerfile as satisfying slots.
-  if (normalized.startsWith('app/')) return normalized;
+  if (normalized === 'Dockerfile' || normalized.startsWith('app/')) {
+    return normalized;
+  }
   return CANONICAL_PATH[normalized] || normalized;
 }
 
@@ -131,6 +133,49 @@ function patchWorkflowDispatchInputs(content: string): string {
   );
 }
 
+/**
+ * Rebuild workflow_dispatch inputs from actual expression references. This is
+ * intentionally idempotent: malformed or duplicated model-generated keys are
+ * discarded instead of being appended again on every normalization pass.
+ */
+function rebuildWorkflowDispatchInputs(content: string): string {
+  const referenced = [
+    ...content.matchAll(/github\.event\.inputs\.([A-Za-z_][\w]*)/g),
+  ].map((match) => match[1]);
+  const names = [...new Set(referenced)];
+  if (names.length === 0) return content;
+
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^([ \t]*)workflow_dispatch:\s*(?:\{\})?\s*$/.test(line));
+  if (start < 0) return content;
+  const indent = /^([ \t]*)/.exec(lines[start])?.[1] || '';
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (!line.trim() || /^\s*#/.test(line)) {
+      end++;
+      continue;
+    }
+    const lineIndent = /^([ \t]*)/.exec(line)?.[1].length || 0;
+    if (lineIndent <= indent.length) break;
+    end++;
+  }
+
+  const child = `${indent}  `;
+  const field = `${child}  `;
+  const replacement = [
+    `${indent}workflow_dispatch:`,
+    `${child}inputs:`,
+    ...names.flatMap((name) => [
+      `${field}${name}:`,
+      `${field}  description: '${name}'`,
+      `${field}  required: false`,
+      `${field}  type: string`,
+    ]),
+  ];
+  lines.splice(start, end - start, ...replacement);
+  return lines.join('\n');
+}
 /** Drop `with:` blocks that sit under a `run:` step (invalid YAML / actionlint). */
 function stripOrphanWithBlocks(content: string): string {
   const lines = content.split('\n');
@@ -451,6 +496,10 @@ function trimTruncatedWorkflowTail(content: string): string {
 function patchGithubWorkflow(content: string): string {
   let out = patchWorkflowDispatchInputs(content);
   out = patchMissingWorkflowDispatchInputs(out);
+  out = rebuildWorkflowDispatchInputs(out);
+  // A top-level env value cannot reference another env value in GitHub
+  // expression evaluation. Repository variables are available there.
+  out = out.replace(/(\|\|\s*)env\.([A-Z_][A-Z0-9_]*)/g, '$1vars.$2');
   out = promoteOrphanRollbackSteps(out);
   out = stripOrphanWithBlocks(out);
   out = stripTerraformLeaksFromWorkflow(out);
@@ -778,7 +827,14 @@ function patchPipelineDockerContext(
         'docker build$1 .'
       )
       .replace(/-f\s+app\/Dockerfile/g, '-f Dockerfile')
-      .replace(/context:\s*['"]?app['"]?/gi, "context: '.'");
+      .replace(
+        /(\bcontext:\s*)['"]?(?:\.\/)?app['"]?/gi,
+        "$1'.'"
+      )
+      .replace(
+        /(\bfile:\s*['"]?)(?:\.\/)?app\/Dockerfile(['"]?)/gi,
+        '$1./Dockerfile$2'
+      );
   }
   return out;
 }
@@ -1709,6 +1765,9 @@ export function normalizeScaffoldFiles(
       let content = patchPipelineDockerContext(file.content, layout);
       if (path.startsWith('.github/workflows/')) {
         content = patchGithubWorkflow(content);
+        // Workflow input reconstruction must not reintroduce a stale build
+        // context. Re-apply the repository layout as the final CI repair.
+        content = patchPipelineDockerContext(content, layout);
       }
       byPath.set(path, { ...file, content });
     }

@@ -1,0 +1,10 @@
+region = "europe-west1"
+environment  = "production"
+project_name = "stackforge"
+enable_database = true
+db_engine = "mysql"
+enable_redis = false
+allow_public_access = true
+min_instance_count = 3
+max_instance_count = 5
+# project_id = "YOUR_GCP_PROJECT"

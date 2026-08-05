@@ -9,7 +9,8 @@
     "lint": "eslint",
     "qa:matrix": "node scripts/qa-matrix.mjs",
     "qa:options-matrix": "node scripts/qa-options-matrix.mjs",
-    "qa:contract-matrix": "node scripts/qa-contract-matrix.mjs"
+    "qa:contract-matrix": "node scripts/qa-contract-matrix.mjs",
+    "qa:regression-matrix": "node scripts/qa-regression-matrix.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "azure",
+    "orchestrator": "aks",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "westeurope",
+    "environments": [
+      "production"
+    ],
+    "database": "postgres",
+    "databaseMode": "standard",
+    "access": "private",
+    "scale": "medium",
+    "runtime": "dotnet"
+  }
+}

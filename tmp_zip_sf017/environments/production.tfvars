@@ -1,0 +1,11 @@
+region = "us-central1"
+environment  = "production"
+project_name = "stackforge"
+enable_database = true
+db_engine = "postgres"
+enable_redis = false
+allow_public_access = true
+min_instance_count = 3
+max_instance_count = 20
+backup_retention_count = 7
+# project_id = "YOUR_GCP_PROJECT"

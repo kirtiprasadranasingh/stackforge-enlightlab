@@ -13,6 +13,11 @@ import { mergeLockedBaseFiles } from '@/lib/scaffold-base-files';
 import { normalizeScaffoldFiles } from '@/lib/normalize-scaffold';
 import type { GeneratedFile, Presets } from '@/types';
 
+const NATIVE_CI_CLOUD: Partial<Record<Presets['ci'], Presets['cloud']>> = {
+  'aws-codepipeline': 'aws',
+  'gcp-cloud-build': 'gcp',
+  'oci-devops': 'oracle',
+};
 export const REQUIREMENTS_MANIFEST_PATH = '.stackforge/requirements.json';
 
 export interface ArchitectureSpec {
@@ -214,6 +219,48 @@ function labelForRuntime(runtime: ScaffoldOptions['runtime']): string {
   return runtime === 'node' ? 'Node.js' : runtime === 'dotnet' ? '.NET' : runtime[0].toUpperCase() + runtime.slice(1);
 }
 
+/** Helm is a Kubernetes packaging tool; ECS has a different deployment model. */
+function hasEcsHelmConflict(text: string, presets: Presets): boolean {
+  return (
+    presets.cloud === 'aws' &&
+    presets.orchestrator === 'ecs' &&
+    /\b(?:helm|kubernetes|k8s)\b/i.test(text)
+  );
+}
+
+/** StackForge deliberately produces one coherent provider scaffold per run. */
+function requestsMultipleClouds(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (/\b(?:every|all|multiple|multi)[ -]?(?:cloud|provider)s?\b|\bsimultaneously\b/.test(lower)) {
+    return true;
+  }
+  const clouds = [
+    /\baws\b|amazon web services/,
+    /\bazure\b|microsoft azure/,
+    /\b(?:gcp|google cloud)\b/,
+    /\b(?:oci|oracle cloud)\b/,
+  ].filter((pattern) => pattern.test(lower));
+  return clouds.length > 1 && /\b(?:deploy|provision|build|create|use)\b/.test(lower);
+}
+
+function interviewCorrectedToOneCloud(text: string | undefined): boolean {
+  if (!text?.trim() || requestsMultipleClouds(text)) return false;
+  return /(?:cloud provider|which cloud should we use|client override)\s*(?:\([^)]*\))?\s*:\s*(?:AWS|Microsoft Azure|Azure|Google Cloud|GCP|Oracle Cloud|OCI)\b/i.test(
+    text
+  );
+}
+
+function requestedUnimplementedModules(text: string): string[] {
+  const modules: string[] = [];
+  if (/\b(?:cdn|content delivery network)\b/i.test(text)) modules.push('CDN');
+  if (/\bmonitoring\b/i.test(text)) modules.push('managed monitoring');
+  if (/\blogging\b/i.test(text)) modules.push('centralized logging');
+  if (/\b(?:disaster recovery|cross[- ]region recovery|multi[- ]region recovery)\b/i.test(text)) {
+    modules.push('disaster recovery');
+  }
+  return [...new Set(modules)];
+}
+
 /** Build the final requirements once, with no plan prose as an input. */
 export function buildArchitectureSpec(params: {
   prompt: string;
@@ -249,6 +296,33 @@ export function buildArchitectureSpec(params: {
   // ask again and the API must refuse to make a plan/code from it.
   if (!region.isValid) {
     issues.push(region.feedback || `Invalid ${presets.cloud} region: ${options.region}`);
+  }
+  const nativeCiCloud = NATIVE_CI_CLOUD[presets.ci];
+  if (nativeCiCloud && nativeCiCloud !== presets.cloud) {
+    issues.push(
+      `${CI_LABELS[presets.ci]} is a provider-native CI/CD service and the locked adapter only targets ${nativeCiCloud.toUpperCase()}. Choose GitHub Actions, GitLab CI, Jenkins, or Azure DevOps for cross-cloud delivery, or change the cloud to ${nativeCiCloud.toUpperCase()}.`
+    );
+  }
+  if (hasEcsHelmConflict(rawSource, presets)) {
+    issues.push(
+      'Amazon ECS cannot deploy Kubernetes Helm charts. Choose Amazon EKS with Helm, or keep Amazon ECS and use ECS task definitions/services instead, before generating a plan.'
+    );
+  }
+  if (
+    requestsMultipleClouds(params.prompt) &&
+    !interviewCorrectedToOneCloud(params.interviewAnswers)
+  ) {
+    issues.push(
+      'StackForge generates one cloud provider scaffold per project so the architecture, Terraform, CI/CD, and validation stay consistent. Choose one primary cloud, or create a separate project for each cloud.'
+    );
+  }
+  const unimplementedModules = params.interviewAnswers?.trim()
+    ? requestedUnimplementedModules(params.prompt)
+    : [];
+  if (unimplementedModules.length > 0) {
+    issues.push(
+      `The current locked scaffold does not yet generate these explicitly requested modules: ${unimplementedModules.join(', ')}. Remove them to generate the supported base scaffold, or add provider-specific locked adapters before approval; StackForge will not silently omit them or promise code it cannot generate.`
+    );
   }
   if (options.database === 'mongodb') {
     issues.push(
@@ -381,6 +455,12 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   if (options.database === 'mongodb' && /terraform\/mongodb\.tf|aws_docdb_|mongodbatlas_/i.test(normalized)) {
     issues.push('Plan promises unsupported full MongoDB infrastructure.');
   }
+  if (
+    options.databaseMode === 'standard' &&
+    /\b(?:multi[- ]?az|high availability|regional ha)\b/i.test(normalized)
+  ) {
+    issues.push('Plan adds high availability even though the standard database mode was selected.');
+  }
 
   const runtime = labelForRuntime(options.runtime).toLowerCase();
   if (!lower.includes(runtime)) {
@@ -398,6 +478,9 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   }
   if (options.runtime === 'java' && /health-check runtime was not confirmed|node\.js .*default scaffold placeholder/i.test(normalized)) {
     issues.push('Plan contradicts the confirmed Java runtime with a Node.js default assumption.');
+  }
+  if (options.runtime === 'java' && /\bJava(?:\s*\([^)]*\))?\s+is not selected\b/i.test(normalized)) {
+    issues.push('Plan says Java is not selected even though Java is the confirmed runtime.');
   }
   // The locked .NET stub is deliberately a minimal ASP.NET Core `/health`
   // endpoint. It is an implementation default, not a client choice of
@@ -431,8 +514,26 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   if (options.access === 'private' && /public with secure https|public without a custom domain/i.test(normalized)) {
     issues.push('Plan contradicts the private/internal access selection.');
   }
+  if (
+    options.access === 'private' &&
+    /\b(?:public ingress|internet[- ]facing ingress|public load balancer)\b/i.test(normalized)
+  ) {
+    issues.push('Plan exposes a public ingress/load balancer despite the private/internal access selection.');
+  }
   if (options.access === 'public_basic' && /client confirmed public with secure https/i.test(normalized)) {
     issues.push('Plan changes default-hostname public access into custom-domain HTTPS.');
+  }
+  const presentsHttpOnlyAsFinal = normalized.split('\n').some(
+    (line) =>
+      /\b(?:http-only|http only)\b[^\n]{0,100}\b(?:final|production|custom domain|https)\b|\b(?:final|production|custom domain|https)\b[^\n]{0,100}\b(?:http-only|http only)\b/i.test(line) &&
+      !/\b(?:not final|not the final|do not treat|must not describe)\b/i.test(line)
+  );
+  if (options.access === 'public_https' && presentsHttpOnlyAsFinal) {
+    issues.push('Plan presents HTTP-only delivery as the final result despite the confirmed custom HTTPS requirement.');
+  }
+  const expectedScale = options.scale === 'small' ? 'small' : options.scale === 'medium' ? 'medium' : 'high traffic';
+  if (!new RegExp(`scale tier:\\s*${expectedScale}`, 'i').test(normalized)) {
+    issues.push(`Plan does not preserve the confirmed ${expectedScale} scale tier.`);
   }
   if (presets.cloud === 'aws' && presets.orchestrator === 'eks' && options.access === 'public_https') {
     const promisesUnshippedTls = normalized
@@ -460,6 +561,30 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
       );
     if (unshippedEksIntegration) {
       issues.push('EKS plan promises an ALB/controller/IRSA or Terraform file that the locked EKS scaffold does not generate.');
+    }
+  }
+  if (presets.cloud === 'gcp' && presets.orchestrator === 'cloud-run' && options.access === 'public_https') {
+    const unshippedDomainResources = normalized
+      .split('\n')
+      .some(
+        (line) =>
+          /\bgoogle_dns_(?:managed_zone|record_set)\b|\bCloud Run Domain Mapping\b|\bgoogle_cloud_run_domain_mapping\b|\bGoogle-managed (?:SSL )?certificate\b/i.test(line) &&
+          !/does not|not create|not generated|follow-up|boundary/i.test(line)
+      );
+    if (unshippedDomainResources) {
+      issues.push('Cloud Run plan promises custom-domain/DNS/certificate resources that the locked scaffold does not generate.');
+    }
+  }
+  if (presets.cloud === 'azure' && presets.orchestrator === 'aks' && options.access === 'private') {
+    const unshippedPrivateAks = normalized
+      .split('\n')
+      .some(
+        (line) =>
+          /\bprivate AKS cluster\b|\binternal ingress controller\b|\bAzure Private DNS Zone\b|\bPrivate Link\b|\bPrivate Endpoint\b/i.test(line) &&
+          !/does not|not create|not generated|follow-up|boundary/i.test(line)
+      );
+    if (unshippedPrivateAks) {
+      issues.push('Private AKS plan promises control-plane/ingress/private-network resources that the locked scaffold does not generate.');
     }
   }
   if (presets.cloud === 'gcp' && presets.orchestrator === 'gke') {

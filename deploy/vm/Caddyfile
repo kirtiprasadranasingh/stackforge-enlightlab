@@ -1,0 +1,9 @@
+{$STACKFORGE_DOMAIN} {
+  encode zstd gzip
+
+  # Caddy obtains and renews the TLS certificate after DNS points to this VM.
+  # Disable response buffering for the app's server-sent-event generation flow.
+  reverse_proxy stackforge:3000 {
+    flush_interval -1
+  }
+}

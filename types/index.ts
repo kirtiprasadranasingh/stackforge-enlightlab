@@ -156,7 +156,12 @@ export const CI_OPTIONS: PresetOption[] = [
   },
 ];
 
-/** Preferred CI order for setup / interview options per cloud (all still available). */
+/**
+ * CI choices that StackForge can generate coherently for each target cloud.
+ * Portable CI products remain cross-cloud; provider-native CI is shown only
+ * with its own cloud because the locked adapters do not implement cross-cloud
+ * identity, registry, and deployment wiring.
+ */
 export const CI_OPTIONS_BY_CLOUD: Record<CloudProvider, CIProvider[]> = {
   aws: [
     'github-actions',
@@ -164,8 +169,6 @@ export const CI_OPTIONS_BY_CLOUD: Record<CloudProvider, CIProvider[]> = {
     'gitlab-ci',
     'jenkins',
     'azure-devops',
-    'gcp-cloud-build',
-    'oci-devops',
   ],
   gcp: [
     'gitlab-ci',
@@ -173,17 +176,12 @@ export const CI_OPTIONS_BY_CLOUD: Record<CloudProvider, CIProvider[]> = {
     'github-actions',
     'jenkins',
     'azure-devops',
-    'aws-codepipeline',
-    'oci-devops',
   ],
   azure: [
     'azure-devops',
     'github-actions',
     'gitlab-ci',
     'jenkins',
-    'aws-codepipeline',
-    'gcp-cloud-build',
-    'oci-devops',
   ],
   oracle: [
     'github-actions',
@@ -191,7 +189,5 @@ export const CI_OPTIONS_BY_CLOUD: Record<CloudProvider, CIProvider[]> = {
     'gitlab-ci',
     'jenkins',
     'azure-devops',
-    'aws-codepipeline',
-    'gcp-cloud-build',
   ],
 };

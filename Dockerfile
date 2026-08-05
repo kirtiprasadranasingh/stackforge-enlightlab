@@ -33,30 +33,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     yamllint \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Terraform (1.7.5 stable binary)
-RUN curl --http1.1 -fsSL --retry 5 --retry-connrefused -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip" \
+# BuildKit supplies TARGETARCH for both linux/amd64 and linux/arm64 builds.
+ARG TARGETARCH
+
+# Install Terraform for the image architecture (AMD64 locally, ARM64 on an
+# Always Free Ampere A1 VM).
+RUN curl --http1.1 -fsSL --retry 5 --retry-connrefused -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_${TARGETARCH}.zip" \
   && unzip /tmp/terraform.zip -d /usr/local/bin/ \
   && rm /tmp/terraform.zip
 
-# Pre-cache common Terraform providers (image build). Runtime validate uses a
-# writable /tmp cache so the nextjs user can install additional provider versions.
-ENV TF_PLUGIN_CACHE_DIR=/usr/share/terraform/plugin-cache
-RUN mkdir -p /usr/share/terraform/plugin-cache /tmp/stackforge-tf-plugin-cache \
-  && cd /tmp \
-  && printf 'terraform {\n  required_providers {\n    aws = {\n      source = "hashicorp/aws"\n      version = "~> 5.84.0"\n    }\n    google = {\n      source = "hashicorp/google"\n      version = "~> 5.0"\n    }\n    azurerm = {\n      source = "hashicorp/azurerm"\n      version = "~> 4.0"\n    }\n    kubernetes = {\n      source = "hashicorp/kubernetes"\n      version = "~> 2.23"\n    }\n    helm = {\n      source = "hashicorp/helm"\n      version = "~> 2.11"\n    }\n  }\n}\n' > prep.tf \
-  && terraform init \
-  && rm -f prep.tf \
-  && chmod -R 777 /usr/share/terraform/plugin-cache /tmp/stackforge-tf-plugin-cache
+# Do not bundle every cloud provider into the web image. Those plugins make the
+# image several GB larger and can evict pods on small worker disks. Validation
+# uses this writable cache and Terraform downloads only the selected provider.
+RUN mkdir -p /tmp/stackforge-tf-plugin-cache \
+  && chmod 777 /tmp/stackforge-tf-plugin-cache
 
-# Runtime default: writable cache (avoids chmod EPERM on the shared image cache)
+# Runtime default: writable cache owned by the non-root application user.
 ENV TF_PLUGIN_CACHE_DIR=/tmp/stackforge-tf-plugin-cache
 ENV STACKFORGE_TF_PLUGIN_CACHE=/tmp/stackforge-tf-plugin-cache
 
 # Install Helm (official script)
 RUN curl --http1.1 -fsSL --retry 5 --retry-connrefused https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# Install Hadolint
-RUN curl --http1.1 -sSfL --retry 5 --retry-connrefused https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint \
+# Install Hadolint for the current image architecture.
+RUN case "${TARGETARCH}" in \
+      amd64) HADOLINT_ARCH=x86_64 ;; \
+      arm64) HADOLINT_ARCH=arm64 ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+  && curl --http1.1 -sSfL --retry 5 --retry-connrefused "https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-${HADOLINT_ARCH}" -o /usr/local/bin/hadolint \
   && chmod +x /usr/local/bin/hadolint
 
 # Install Actionlint

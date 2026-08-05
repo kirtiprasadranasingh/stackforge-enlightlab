@@ -37,8 +37,6 @@ export const CI_OPTION_LABELS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
     'GitLab CI',
     'Jenkins',
     'Azure DevOps Pipelines',
-    'Google Cloud Build',
-    'OCI DevOps',
   ],
   gcp: [
     'GitLab CI',
@@ -46,17 +44,12 @@ export const CI_OPTION_LABELS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
     'GitHub Actions',
     'Jenkins',
     'Azure DevOps Pipelines',
-    'AWS CodePipeline',
-    'OCI DevOps',
   ],
   azure: [
     'Azure DevOps Pipelines',
     'GitHub Actions',
     'GitLab CI',
     'Jenkins',
-    'AWS CodePipeline',
-    'Google Cloud Build',
-    'OCI DevOps',
   ],
   oracle: [
     'GitHub Actions',
@@ -64,11 +57,8 @@ export const CI_OPTION_LABELS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
     'GitLab CI',
     'Jenkins',
     'Azure DevOps Pipelines',
-    'AWS CodePipeline',
-    'Google Cloud Build',
   ],
 };
-
 export const REGION_OPTIONS_BY_CLOUD: Record<Presets['cloud'], string[]> = {
   aws: ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-south-1'],
   gcp: ['us-central1', 'europe-west1', 'asia-south1'],

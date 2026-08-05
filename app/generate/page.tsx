@@ -40,8 +40,10 @@ import { inferPresetsFromPrompt } from '@/lib/infer-presets';
 import {
   isFullStackPrompt,
   isIterativeEditPrompt,
+  isRequirementCorrectionPrompt,
   requiresPlanApproval,
   resolveStackPromptFromAffirmation,
+  resolveDiscoveryPrompt,
   isVagueStackPrompt,
 } from '@/lib/stack-intent';
 import { getLanguageFromPath } from '@/lib/utils';
@@ -218,6 +220,10 @@ function deriveProviderLabel(files: GeneratedFile[], presets: Presets): string {
 }
 
 const SAFE_FILE_PATH = /^[a-zA-Z0-9/_.\-]+$/;
+// The API route has a 300-second server budget. Keep the browser deadline
+// slightly longer so a valid plan repair/generation is not labelled as a
+// dropped connection while the server is still within its supported window.
+const STREAM_IDLE_TIMEOUT_MS = 330_000;
 
 /** Keep follow-up payloads small so nginx/browser don't drop the request. */
 function slimExistingFiles(
@@ -451,8 +457,10 @@ export default function GeneratePage() {
         }));
 
       // "yes please" after a .NET/runtime offer → continue with the prior stack ask
-      const text =
+      const affirmedText =
         resolveStackPromptFromAffirmation(typed, priorHistory)?.trim() || typed;
+      const text =
+        resolveDiscoveryPrompt(affirmedText, priorHistory)?.trim() || affirmedText;
 
       // Regeneration is a new reviewed artifact, not a small edit to the
       // existing workspace. It must return to planning so the old plan/files
@@ -462,11 +470,8 @@ export default function GeneratePage() {
       // example, "change to europe-west1" or "use GKE instead"), not only as
       // a bare database name. Treat those messages as a new requirements pass
       // so the plan and final ZIP are rebuilt from the latest choice.
-      const isRequirementCorrection =
-        /^(?:postgres(?:ql)?|mysql|mariadb|redis(?:\s+cache)?|valkey|no data service|development only|staging only|production only)$/i.test(text) ||
-        /\b(?:change|switch|use|set|update|correct|replace)\b[\s\S]{0,100}\b(?:aws|azure|gcp|google cloud|oracle|ecs|eks|gke|cloud run|container apps|aks|oke|github actions|gitlab|jenkins|cloud build|azure devops|us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|private|public|https|http|postgres|mysql|redis|valkey|no data|development|staging|production|node|python|go|java|\.net|dotnet|small|medium|high traffic)\b/i.test(
-          text
-        );
+      const isRequirementCorrection = isRequirementCorrectionPrompt(text);
+
       const startFresh =
         (isFullStackPrompt(text) || isRegenerationRequest) && !isIterativeEditPrompt(text);
       const hasFiles = filesRef.current.length > 0;
@@ -715,10 +720,26 @@ export default function GeneratePage() {
 
         while (true) {
           const readPromise = reader.read();
+          let readTimeoutId: number | undefined;
           const timeoutPromise = new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) =>
-            setTimeout(() => reject(new Error('Stream read timed out — connection lost')), 120000)
+            {
+              readTimeoutId = window.setTimeout(() => {
+                const timeoutError = new Error('Stream read timed out — connection lost');
+                // Do not leave model generation and validation running after
+                // the UI has already declared the connection lost.
+                reject(timeoutError);
+                void reader.cancel(timeoutError).catch(() => {});
+                abortController.current?.abort();
+              }, STREAM_IDLE_TIMEOUT_MS);
+            }
           );
-          const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+          let readResult: ReadableStreamReadResult<Uint8Array>;
+          try {
+            readResult = await Promise.race([readPromise, timeoutPromise]);
+          } finally {
+            if (readTimeoutId !== undefined) window.clearTimeout(readTimeoutId);
+          }
+          const { done, value } = readResult;
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
@@ -933,6 +954,7 @@ export default function GeneratePage() {
         }
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') return;
+        abortController.current?.abort();
         const rawMsg = e instanceof Error ? e.message : 'Something went wrong';
 
         // Never present partial streamed files as a successful scaffold. A

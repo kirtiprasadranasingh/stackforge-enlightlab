@@ -1,0 +1,7 @@
+region = "europe-west1"
+environment  = "development"
+project_name = "stackforge"
+enable_database = false
+# node pool sizing reflected in Helm replicaCount / HPA
+enable_redis = false
+# project_id = "YOUR_GCP_PROJECT"
