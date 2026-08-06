@@ -1193,10 +1193,6 @@ export function mergeLockedBaseFiles(
     const existing = byPath.get(path);
     const emptyExisting = exists && !(existing?.content || '').trim();
 
-    if (path === '.github/workflows/deploy.yml') {
-      console.log('deploy.yml checks:', { forceStubs, shouldForceLockPath: shouldForceLockPath(path), terraformOnly, isTf, skipGhaForce, skipWrongRuntimeStub, shouldForce, shouldFill, emptyExisting });
-    }
-
     if (skipGhaForce || skipWrongRuntimeStub) {
       // Actively drop profile/model GHA when interview chose another CI
       // or drop Node stubs when runtime is Go/Python.

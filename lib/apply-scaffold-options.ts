@@ -1047,7 +1047,8 @@ export function applyScaffoldOptions(
   const existingGhaCandidate = byPath.get('.github/workflows/deploy.yml');
   const existingGha =
     presets.ci === 'github-actions' &&
-    /Locked (?:validated template|base file)/i.test(existingGhaCandidate?.description || '')
+    (/Locked (?:validated template|base file)/i.test(existingGhaCandidate?.description || '') ||
+     (existingGhaCandidate && !existingGhaCandidate.content.includes('Deploy note')))
       ? existingGhaCandidate
       : undefined;
   for (const p of ciPaths) byPath.delete(p);
