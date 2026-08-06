@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "azure",
+    "orchestrator": "aks",
+    "ci": "gitlab-ci"
+  },
+  "options": {
+    "region": "westeurope",
+    "environments": [
+      "development",
+      "staging"
+    ],
+    "database": "postgres",
+    "databaseMode": "standard",
+    "access": "private",
+    "scale": "medium",
+    "runtime": "java"
+  }
+}

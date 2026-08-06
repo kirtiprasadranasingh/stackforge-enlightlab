@@ -1,0 +1,25 @@
+steps:
+  - name: maven:3.9-eclipse-temurin-17
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ -f pom.xml ]; then mvn -B package; fi
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', 'europe-west1-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA', '.']
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', 'europe-west1-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA']
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_SERVICE_NAME
+      - --image=europe-west1-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA
+      - --region=europe-west1
+      - --quiet
+images:
+  - 'europe-west1-docker.pkg.dev/$PROJECT_ID/$_ARTIFACT_REPOSITORY/app:$SHORT_SHA'
+substitutions:
+  _ARTIFACT_REPOSITORY: stackforge
+  _SERVICE_NAME: stackforge-api

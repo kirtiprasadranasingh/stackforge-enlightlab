@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "aws",
+    "orchestrator": "eks",
+    "ci": "aws-codepipeline"
+  },
+  "options": {
+    "region": "us-east-1",
+    "environments": [
+      "production"
+    ],
+    "database": "none",
+    "databaseMode": "standard",
+    "access": "public_basic",
+    "scale": "medium",
+    "runtime": "python"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "azure",
+    "orchestrator": "container-apps",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "westeurope",
+    "environments": [
+      "production"
+    ],
+    "database": "none",
+    "databaseMode": "standard",
+    "access": "private",
+    "scale": "medium",
+    "runtime": "python"
+  }
+}
