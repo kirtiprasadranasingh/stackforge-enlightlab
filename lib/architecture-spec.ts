@@ -69,7 +69,16 @@ export function generatedFilePathsForSpec(spec: ArchitectureSpec): string[] {
     }
     return path;
   });
-  return [REQUIREMENTS_MANIFEST_PATH, ...paths]
+
+  // applyScaffoldOptions generates environments/${env}.tfvars for every selected
+  // environment, but normalizeScaffoldFiles does not call applyScaffoldOptions.
+  // Add them explicitly so validatePlanAgainstSpec knows they are produced files
+  // and doesn't reject a plan that correctly lists them in its file manifest.
+  const envPaths = (spec.options.environments || []).map(
+    (env) => `environments/${env}.tfvars`
+  );
+
+  return [REQUIREMENTS_MANIFEST_PATH, ...paths, ...envPaths]
     .filter((path, index, paths) => paths.indexOf(path) === index);
 }
 

@@ -169,7 +169,15 @@ export function parseScaffoldOptions(
   // "production-grade" / accidental "prod" substrings.
   // "One environment" must win over plan prose that lists all three names.
   // Use development (not staging) so Confirmed/"dev" and tfvars stay aligned (QA #23).
-  if (/\bdevelopment only\b/.test(t)) {
+  const envOverride = raw.match(/\bEnvironments:\s*([^\n]+)/i);
+  if (envOverride) {
+    const matched = envOverride[1].toLowerCase();
+    const envs: string[] = [];
+    if (/\bdevelopment\b/.test(matched)) envs.push('development');
+    if (/\bstaging\b/.test(matched)) envs.push('staging');
+    if (/\bproduction\b/.test(matched)) envs.push('production');
+    if (envs.length) out.environments = envs;
+  } else if (/\bdevelopment only\b/.test(t)) {
     out.environments = ['development'];
   } else if (/\bstaging only\b/.test(t)) {
     out.environments = ['staging'];
