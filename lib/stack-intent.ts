@@ -12,6 +12,17 @@ export function hasInfraSignal(prompt: string): boolean {
   );
 }
 
+/**
+ * Returns true when the prompt explicitly requests a runtime that StackForge
+ * does not support (e.g. PHP, Ruby, Rust). These must never silently fall back
+ * to Node — instead the API should reply with a clear unsupported message.
+ */
+export function isUnsupportedRuntimePrompt(prompt: string): boolean {
+  const lower = prompt.toLowerCase();
+  if (isJailbreakPrompt(lower)) return false;
+  return /\b(php|ruby(?:\s+on\s+rails)?|rails|rust(?:\s+actix)?|elixir|phoenix)\b/i.test(lower);
+}
+
 /** ".NET API", "Java service", etc. — enough to start clarify even without a cloud name. */
 export function hasRuntimeAppSignal(prompt: string): boolean {
   const t = prompt.trim();
@@ -483,6 +494,9 @@ export function isConversationalPrompt(prompt: string): boolean {
   if (isOutOfScopeOpsPrompt(prompt)) return false;
   if (isJailbreakPrompt(prompt)) return false;
 
+  // Block unsupported runtimes
+  if (isUnsupportedRuntimePrompt(prompt)) return false;
+
   if (
     hasInfraSignal(prompt) ||
     hasCloudOrOrchestratorSignal(prompt) ||
@@ -491,6 +505,20 @@ export function isConversationalPrompt(prompt: string): boolean {
     return false;
   }
   if (isVagueStackPrompt(prompt)) return false;
+
+  // Discovery-fragment combined prompts — produced by resolveDiscoveryPrompt when
+  // the user types a short context turn then a cloud/deployment term. These MUST
+  // reach the clarify interview, never be treated as small talk.
+  // Examples: "Small deployment\ngame app and cloud", "Medium deployment\nhealthcare app"
+  const discoveryKeywords =
+    /\b(game|gaming|app|application|cloud|workload|service|health|healthcare|e.?commerce|startup|backend|frontend|api|deployment|scale|scalable)\b/i;
+  const hasMultilineContext = prompt.includes('\n') && discoveryKeywords.test(prompt);
+  if (hasMultilineContext) return false;
+
+  // Single-line fragment with deployment intent that doesn't have a verb — still an interview starter
+  const deploymentContext =
+    /\b(game\s+app|game\s+application|gaming\s+app|healthcare\s+app|health\s+app|ecommerce\s+app|startup\s+app|backend\s+service|cloud\s+app)\b/i;
+  if (deploymentContext.test(prompt)) return false;
 
   const commandVerb =
     /^(add|update|fix|change|remove|delete|rename|move|create|generate|build|make|set\s*up|setup|deploy|scaffold|provision|harden|secure|wire|include|configure|refactor|optimize|design)\b/;
