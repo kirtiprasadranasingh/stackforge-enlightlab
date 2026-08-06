@@ -25,6 +25,7 @@ import { ClarifyingInterview } from '@/components/ClarifyingInterview';
 import {
   buildInterviewChoiceItems,
   formatInterviewAnswersForPlan,
+  replaceInterviewAnswer,
   type InterviewChoiceItem,
 } from '@/lib/interview-choices';
 import {
@@ -44,6 +45,7 @@ import {
   requiresPlanApproval,
   resolveStackPromptFromAffirmation,
   resolveDiscoveryPrompt,
+  isAffirmativeContinuePrompt,
   isVagueStackPrompt,
 } from '@/lib/stack-intent';
 import { getLanguageFromPath } from '@/lib/utils';
@@ -448,6 +450,47 @@ export default function GeneratePage() {
     async (rawText: string, options?: SendOptions) => {
       const typed = rawText.trim();
       if (!typed || isGenerating) return;
+
+      // The interview card is the authoritative input while questions are
+      // active. A short acknowledgement or extra workload context must not
+      // restart question 1 and discard answers already collected.
+      if (!options?.phase && pendingQuestions.length > 0) {
+        if (isAffirmativeContinuePrompt(typed)) {
+          setMessages((previous) => [
+            ...previous,
+            { id: `u-${Date.now()}`, role: 'user', content: typed, kind: 'text' },
+            {
+              id: `a-${Date.now() + 1}`,
+              role: 'assistant',
+              content:
+                'Please choose the current option in the interview card, then select **Next question**. Your earlier answers are still saved.',
+              kind: 'text',
+            },
+          ]);
+          setInput('');
+          return;
+        }
+        if (isVagueStackPrompt(typed) && !isRequirementCorrectionPrompt(typed)) {
+          const combined = [lastStackPromptRef.current, typed]
+            .filter(Boolean)
+            .join('\n');
+          lastStackPromptRef.current = combined;
+          setLastStackPrompt(combined);
+          setMessages((previous) => [
+            ...previous,
+            { id: `u-${Date.now()}`, role: 'user', content: typed, kind: 'text' },
+            {
+              id: `a-${Date.now() + 1}`,
+              role: 'assistant',
+              content:
+                'I’ve added that application context. Continue with the current interview card; your existing selections have not been reset.',
+              kind: 'text',
+            },
+          ]);
+          setInput('');
+          return;
+        }
+      }
 
       const priorHistory = messagesRef.current
         .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -1034,14 +1077,7 @@ export default function GeneratePage() {
     // made React bail out of re-renders, so chips looked selected only briefly
     // (or not at all) and Continue still saw empty answers.
     setQuestionAnswers((current) => {
-      const next = { ...current, [index]: answer };
-      // Purge answers from later questions. When the user goes Back and picks
-      // a different cloud (e.g. Azure → GCP), any stale later answer (e.g.
-      // "Azure Kubernetes Service") must be wiped so it cannot bleed into
-      // adaptClarifyingQuestions and force the wrong cloud's options to appear.
-      Object.keys(next).forEach((k) => {
-        if (Number(k) > index) delete (next as Record<number, string>)[Number(k)];
-      });
+      const next = replaceInterviewAnswer(current, index, answer);
       questionAnswersRef.current = next;
       return next;
     });

@@ -9,6 +9,22 @@ export interface InterviewChoiceItem {
   value: string;
 }
 
+/**
+ * Replace one interview answer and invalidate every dependent answer after it.
+ * A cloud/platform change makes later region, CI, and service answers stale.
+ */
+export function replaceInterviewAnswer(
+  answers: Record<number, string>,
+  index: number,
+  answer: string
+): Record<number, string> {
+  const next: Record<number, string> = { ...answers, [index]: answer };
+  Object.keys(next).forEach((key) => {
+    if (Number(key) > index) delete next[Number(key)];
+  });
+  return next;
+}
+
 function prettifyAnswer(raw: string): string {
   return formatInterviewAnswerForPlan(raw)
     .replace(

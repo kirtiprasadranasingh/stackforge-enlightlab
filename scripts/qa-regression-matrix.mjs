@@ -11,9 +11,11 @@ import { createJiti } from 'jiti';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = path.join(root, 'scripts', '_qa-regression-matrix-runner.mts');
 const runner = `
-import { buildArchitectureSpec } from '../lib/architecture-spec.ts';
+import { buildArchitectureSpec, generatedFilePathsForSpec, validatePlanAgainstSpec } from '../lib/architecture-spec.ts';
+import { adaptClarifyingQuestions, parseClarifyingQuestion, validateRegionForCloud } from '../lib/clarifying-questions.ts';
+import { replaceInterviewAnswer } from '../lib/interview-choices.ts';
 import { sanitizePlanAgainstInterview } from '../lib/sanitize-plan.ts';
-import { isVagueStackPrompt, resolveDiscoveryPrompt, resolveStackPromptFromAffirmation } from '../lib/stack-intent.ts';
+import { isUnsupportedRuntimePrompt, isVagueStackPrompt, resolveDiscoveryPrompt, resolveStackPromptFromAffirmation } from '../lib/stack-intent.ts';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -24,6 +26,68 @@ function check(name: string, ok: boolean, detail = '') {
 for (const fragment of ['Small deployment.', 'Medium deployment', 'Public HTTPS', 'Public without custom domain', 'Private VPC only']) {
   check('requirement fragment starts an interview: ' + fragment, isVagueStackPrompt(fragment));
 }
+
+const switchedAnswers = replaceInterviewAnswer(
+  { 0: 'Microsoft Azure', 1: 'Azure Kubernetes Service (AKS)', 2: 'westeurope' },
+  0,
+  'Google Cloud'
+);
+const switchedQuestions = adaptClarifyingQuestions(
+  [
+    'Which cloud should we use? (options: AWS / Microsoft Azure / Google Cloud / Oracle Cloud Infrastructure)',
+    'Which hosting platform should we use? (options: Azure Kubernetes Service (AKS) / Azure Container Apps)',
+    'Where should we host it? (options: eastus / westeurope)',
+  ],
+  switchedAnswers
+);
+check('back-button cloud change clears dependent answers', !switchedAnswers[1] && !switchedAnswers[2]);
+check(
+  'back-button cloud change renders GCP hosting options',
+  parseClarifyingQuestion(switchedQuestions[1]).options.includes('Google Kubernetes Engine (GKE)'),
+  switchedQuestions[1]
+);
+check('invalid partial Azure region is rejected', !validateRegionForCloud('cen', 'azure').isValid);
+const invalidInterviewRegion = buildArchitectureSpec({
+  prompt: 'Private VPC only on Azure AKS',
+  interviewAnswers: 'Confirmed choices:\\n1. Where should we host it\\n   -> cen\\n2. Which environments do you need\\n   -> Development only',
+  presets: { cloud: 'azure', orchestrator: 'aks', ci: 'azure-devops' },
+});
+check(
+  'invalid free-typed interview region reaches the contract validator',
+  invalidInterviewRegion.options.region === 'cen' && invalidInterviewRegion.issues.some((issue) => /not a valid Azure region/i.test(issue)),
+  invalidInterviewRegion.options.region + ' | ' + invalidInterviewRegion.issues.join(' | ')
+);
+check('unsupported PHP runtime is blocked before interview', isUnsupportedRuntimePrompt('a php app on aws'));
+
+const developmentOnly = buildArchitectureSpec({
+  prompt: 'A Node.js app on AWS',
+  interviewAnswers: 'Amazon EKS. us-east-1. Development only. Private and internal only. No data service. Node.js.',
+  presets: { cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' },
+});
+const developmentOnlyPlan = [
+  '## Architecture',
+  '- Region: us-east-1',
+  '- CI/CD: GitHub Actions',
+  '- Runtime: Node.js',
+  '- Environments: development',
+  '- Production readiness is a later review, not another generated environment.',
+  '## File manifest',
+  ...generatedFilePathsForSpec(developmentOnly).map((file) => '- ' + file),
+].join('\\n');
+const developmentOnlyIssues = validatePlanAgainstSpec(developmentOnlyPlan, developmentOnly);
+check(
+  'single-environment validator ignores harmless production-readiness prose',
+  !developmentOnlyIssues.some((issue) => /invents extra environments/i.test(issue)),
+  developmentOnlyIssues.join(' | ')
+);
+const contradictoryEnvironmentPlan = developmentOnlyPlan.replace(
+  '- Production readiness is a later review, not another generated environment.',
+  '- A staging environment is also generated.'
+);
+check(
+  'single-environment validator still rejects a real extra environment claim',
+  validatePlanAgainstSpec(contradictoryEnvironmentPlan, developmentOnly).some((issue) => /invents extra environments/i.test(issue))
+);
 
 const discoveredSmall = resolveDiscoveryPrompt('AWS', [
   { role: 'user', content: 'Small deployment.' },

@@ -574,7 +574,7 @@ function mapRegionToNewCloud(currentRegion: string, allowed: string[]): string {
           {isCiChange && (
             <FollowUpPanel
               prompt={ciFollowUp.prompt}
-              hint="Includes GitHub/GitLab/Jenkins/Azure DevOps plus AWS CodePipeline, Google Cloud Build, and OCI DevOps."
+              hint="Only CI/CD options compatible with the selected cloud are shown."
               options={ciFollowUp.options}
               selected={ciChoice}
               disabled={disabled}

@@ -145,14 +145,24 @@ export function parseScaffoldOptions(
   const t = stripOptionMenus(raw).toLowerCase();
   const out = defaultScaffoldOptions(p);
 
-  // Region
+  // Region. Capture the value beside the interview label even when it is
+  // invalid (for example `cen`). Validation must see and reject the user's
+  // actual answer instead of silently falling back to the cloud default.
+  const labeledRegionMatches = [
+    ...raw.matchAll(
+      /(?:where should we host it\??|region)\s*(?::|\r?\n\s*(?:→|->)?)\s*([a-z0-9-]+)/gi
+    ),
+  ];
+  const labeledRegion = labeledRegionMatches[labeledRegionMatches.length - 1];
   const regionMatches = [
     ...t.matchAll(
       /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|eastus2|westus|westeurope|northeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/g
     ),
   ];
   const regionMatch = regionMatches[regionMatches.length - 1];
-  if (regionMatch) {
+  if (labeledRegion) {
+    out.region = labeledRegion[1].toLowerCase();
+  } else if (regionMatch) {
     out.region = regionMatch[1];
   } else {
     // Bare region correction or single-word attempt (e.g. "eastusuu", "use eastusuu")

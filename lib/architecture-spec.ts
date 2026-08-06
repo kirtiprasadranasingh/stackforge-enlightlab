@@ -517,7 +517,19 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
   if (options.environments.length === 1) {
     const only = options.environments[0];
     const extras = ['development', 'staging', 'production'].filter((env) => env !== only);
-    if (extras.some((env) => new RegExp(`(?:one environment|confirmed requirements)[\\s\\S]{0,180}\\b${env}\\b`, 'i').test(normalized))) {
+    const environmentClaims = normalized
+      .split('\n')
+      .filter((line) => /\benvironments?\b|environments\//i.test(line));
+    if (
+      extras.some((env) =>
+        environmentClaims.some((line) =>
+          new RegExp(
+            `(?:\\b${env}\\s+environment\\b|\\benvironments?\\s*:[^\\n]*\\b${env}\\b|environments/${env}\\.tfvars)`,
+            'i'
+          ).test(line)
+        )
+      )
+    ) {
       issues.push('Plan invents extra environments for a one-environment selection.');
     }
   }
