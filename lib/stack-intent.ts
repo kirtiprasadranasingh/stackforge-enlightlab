@@ -429,7 +429,7 @@ Rules:
 - actionlint / YAML: put shell with colons in a run: | block.
 - IAM condition keys with colons must be quoted: "ForAllValues:StringLike" = { ... }
 - EKS: do NOT add ECS resources or put kubernetes/helm providers in terraform/ecs.tf — use eks/main/iam/alb_controller only. Delete ecs.tf if this is EKS+Helm.
-- Do NOT modify .github/workflows/deploy.yml, Dockerfiles, package.json, server.js, main.py, main.go, or charts/app/Chart.yaml / _helpers.tpl — those are locked.
+- Do NOT modify Dockerfiles, package.json, server.js, main.py, main.go, or charts/app/Chart.yaml / _helpers.tpl — those are locked. (You may modify .github/workflows/deploy.yml ONLY if the validation errors explicitly complain about it).
 - Emit full corrected file bodies with <<<FILE>>> markers only for Terraform files that still fail validate.
 - Do not ask clarifying questions.
 

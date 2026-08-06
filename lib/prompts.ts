@@ -675,7 +675,7 @@ Do NOT invent EKS/Helm/AWS files for this stack.`;
 3. Internal ALB when access is private; VPC public+private subnets; ECS cluster/service/task with **required** aws_appautoscaling_target + aws_appautoscaling_policy (CPU target tracking); ECR; CloudWatch log group; ElastiCache Redis in private subnets; circuit breaker + lifecycle ignore_changes on task_definition when CI deploys
 4. Security groups: ALB→ECS on container_port; data-store SGs (Redis/MongoDB/RDS) allow inbound from ECS task SG only — NEVER mutual SG ingress (no ecs_tasks↔mongodb/redis cycles)
 5. Access: for "public without custom domain", internet-facing ALB; document in README whether listener is temporary HTTP:80 or HTTPS with ACM on the default ALB DNS — never present plain HTTP as the silent confirmed choice
-6. .github/workflows/deploy.yml — step id set-image-uri writes image_uri to GITHUB_OUTPUT; services-stable wait; rollback; use \${{ env.* }} never \${var.*}
+6. .github/workflows/deploy.yml — MUST USE EXACTLY: aws-actions/amazon-ecr-login@v2, docker build, docker push, and aws-actions/amazon-ecs-deploy-task-definition@v2; step id set-image-uri writes image_uri to GITHUB_OUTPUT; use \${{ env.* }} never \${var.*}
 7. app/Dockerfile (COPY must be two-arg e.g. COPY . .), app/server.js or app/index.js, app/package.json, app/package-lock.json — non-root USER, /health on PORT
 8. README.md — reviewable scaffold disclaimer
 Apply PART B8 rules. Do NOT emit Helm charts or Azure/GCP-only files for this stack.`;
@@ -687,7 +687,7 @@ Apply PART B8 rules. Do NOT emit Helm charts or Azure/GCP-only files for this st
 2. Plus as needed: terraform/rds.tf or database.tf, terraform/ecr.tf, terraform/alb_controller.tf / network.tf
 3. charts/app/Chart.yaml, values.yaml, templates/deployment.yaml, service.yaml, ingress.yaml, hpa.yaml (+ secrets.yaml if DB)
 4. app/Dockerfile, app/package.json, app/package-lock.json (or yarn.lock), app/server.js (or index.js) — /health stub only
-5. .github/workflows/deploy.yml — build/push ECR, helm upgrade, wait for rollout, rollback
+5. .github/workflows/deploy.yml — MUST USE EXACTLY: aws-actions/amazon-ecr-login@v2, docker build, docker push, and helm upgrade with --set image.repository=... and --set image.tag=...
 6. README.md — reviewable scaffold disclaimer
 Never stop after terraform/variables.tf alone. Incomplete EKS scaffolds are failures.`;
   }
