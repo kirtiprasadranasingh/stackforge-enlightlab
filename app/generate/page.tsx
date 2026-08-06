@@ -1035,6 +1035,13 @@ export default function GeneratePage() {
     // (or not at all) and Continue still saw empty answers.
     setQuestionAnswers((current) => {
       const next = { ...current, [index]: answer };
+      // Purge answers from later questions. When the user goes Back and picks
+      // a different cloud (e.g. Azure → GCP), any stale later answer (e.g.
+      // "Azure Kubernetes Service") must be wiped so it cannot bleed into
+      // adaptClarifyingQuestions and force the wrong cloud's options to appear.
+      Object.keys(next).forEach((k) => {
+        if (Number(k) > index) delete (next as Record<number, string>)[Number(k)];
+      });
       questionAnswersRef.current = next;
       return next;
     });
