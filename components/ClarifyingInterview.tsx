@@ -11,6 +11,7 @@ import {
   isCiSystemQuestion,
   parseClarifyingQuestion,
   detectCloudLabel,
+  validateRegionForCloud,
 } from '@/lib/clarifying-questions';
 import { validateInterviewAnswer } from '@/lib/interview-answer-validation';
 
@@ -233,6 +234,20 @@ export function ClarifyingInterview({
       .filter(({ question }) => !(skipCi && isCiSystemQuestion(question)));
   }, [adaptedQuestions, answers]);
 
+  // Keep 'Change the hosting platform' within the cloud proposed in question 1
+  // so we never mix, e.g., Oracle OKE compute with a Google Cloud SQL database.
+  const baseCloud = baseCloudFromSetupQuestion(adaptedQuestions[0]);
+
+  const activeCloud = useMemo(() => {
+    let cloud = baseCloud;
+    const indices = Object.keys(answers).map(Number).sort((a, b) => a - b);
+    for (const index of indices) {
+      const c = cloudFromInterviewAnswer(answers[index]);
+      if (c) cloud = c;
+    }
+    return cloud;
+  }, [baseCloud, answers]);
+
   if (!steps.length) return null;
 
   const stepIndex = Math.min(step, steps.length - 1);
@@ -250,9 +265,6 @@ export function ClarifyingInterview({
   const isCiChange = selectedOption === 'Change CI/CD';
   const isDataOther = selectedOption === 'Another service';
 
-  // Keep 'Change the hosting platform' within the cloud proposed in question 1
-  // so we never mix, e.g., Oracle OKE compute with a Google Cloud SQL database.
-  const baseCloud = baseCloudFromSetupQuestion(adaptedQuestions[0]);
   const hostingChangeOptions = baseCloud
     ? HOSTING_OPTIONS_BY_CLOUD[baseCloud]
     : ALL_HOSTING_OPTIONS;
@@ -284,11 +296,18 @@ export function ClarifyingInterview({
   const customDataService =
     isDataOther && detail.trim() && detail !== 'Other' ? detail.trim() : '';
 
-  const answerValidation = validateInterviewAnswer(
+  let answerValidation = validateInterviewAnswer(
     steps[stepIndex].question,
     currentAnswer,
     options
   );
+
+  if (answerValidation.ok && /^Where should we host it\?/i.test(steps[stepIndex].question) && activeCloud) {
+    const regionValidation = validateRegionForCloud(answerValidation.normalized || currentAnswer.trim(), activeCloud);
+    if (!regionValidation.isValid) {
+      answerValidation = { ok: false, error: regionValidation.feedback! };
+    }
+  }
 
   const answerComplete = (() => {
     if (isCloudChange) {

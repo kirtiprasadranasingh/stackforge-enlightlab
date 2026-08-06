@@ -110,7 +110,15 @@ export function resolveDiscoveryPrompt(
     const message = history[i];
     if (message.role !== 'user') continue;
     const value = (message.content || '').trim();
-    if (!value || value === current || isAffirmativeContinuePrompt(value) || isGreetingOnlyPrompt(value)) {
+    if (
+      !value || 
+      value === current || 
+      isAffirmativeContinuePrompt(value) || 
+      isGreetingOnlyPrompt(value) ||
+      isUnsupportedRuntimePrompt(value) ||
+      isOutOfScopeOpsPrompt(value) ||
+      isJailbreakPrompt(value)
+    ) {
       continue;
     }
     // Stop at an older fully specified request; only collect the short
