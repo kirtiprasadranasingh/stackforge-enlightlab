@@ -242,10 +242,14 @@ export function validateInterviewAnswer(
   if (isLanguageQuestion(question)) {
     const known = normalizeRuntimeAnswer(answer);
     if (known) return { ok: true, normalized: known };
+    
+    // Capitalize the unsupported language for the message
+    const unsupported = answer.length < 20 ? answer.charAt(0).toUpperCase() + answer.slice(1).toLowerCase() : 'That language';
+    
     return {
       ok: false,
       error:
-        'Pick Node.js, Go, Python, Java, or .NET — unsupported languages are not accepted',
+        `${unsupported} is not a supported language. Pick Node.js, Go, Python, Java, or .NET.`,
     };
   }
 
@@ -270,13 +274,10 @@ export function validateInterviewAnswer(
     ) {
       return { ok: true, normalized: compact };
     }
-    if (looksLikeGibberish(answer)) {
-      return { ok: false, error: GIBBERISH_ERROR };
-    }
-    // Allow clear region-like custom answers (e.g. "Mumbai", "Frankfurt")
-    if (answer.length < 3 || !/[a-z]/i.test(answer) || !/[aeiouy]/i.test(answer)) {
-      return { ok: false, error: GIBBERISH_ERROR };
-    }
+    return {
+      ok: false,
+      error: `'${answer}' is not recognized as a valid region. Please pick an option from the list or type a full region ID (e.g. us-east-1, westeurope).`,
+    };
   }
 
   // Setup / CI / env / access / traffic: prefer list; always block mash

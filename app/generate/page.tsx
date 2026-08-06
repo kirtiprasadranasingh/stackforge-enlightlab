@@ -490,6 +490,22 @@ export default function GeneratePage() {
           setInput('');
           return;
         }
+
+        if (!isFullStackPrompt(typed)) {
+          setMessages((previous) => [
+            ...previous,
+            { id: `u-${Date.now()}`, role: 'user', content: typed, kind: 'text' },
+            {
+              id: `a-${Date.now() + 1}`,
+              role: 'assistant',
+              content:
+                'Please use the interview card above to answer the current question. (If you want to completely restart, describe your new stack in detail).',
+              kind: 'text',
+            },
+          ]);
+          setInput('');
+          return;
+        }
       }
 
       const priorHistory = messagesRef.current
