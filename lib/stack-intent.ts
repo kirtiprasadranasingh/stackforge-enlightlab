@@ -195,7 +195,7 @@ export function isOffTopicPrompt(prompt: string): boolean {
   const lower = prompt.toLowerCase().trim();
   if (hasCloudOrOrchestratorSignal(lower) || hasInfraSignal(lower)) return false;
   if (
-    /\b(recipe|cake|cookie|cook|bake|chocolate|pasta|pizza|song|lyrics|poem|joke|story|homework|essay|translate|weather|stock\s*price)\b/.test(
+    /\b(recipe|cake|cookie|cook|bake|chocolate|pasta|pizza|song|lyrics|poem|joke|story|homework|essay|translate|weather|stock\s*price|sex|porn|nsfw|dating|chat\s*roulette)\b/.test(
       lower
     )
   ) {

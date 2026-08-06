@@ -47,6 +47,9 @@ import {
   resolveDiscoveryPrompt,
   isAffirmativeContinuePrompt,
   isVagueStackPrompt,
+  isOffTopicPrompt,
+  isJailbreakPrompt,
+  isUnsupportedRuntimePrompt,
 } from '@/lib/stack-intent';
 import { getLanguageFromPath } from '@/lib/utils';
 
@@ -484,6 +487,41 @@ export default function GeneratePage() {
               role: 'assistant',
               content:
                 'I’ve added that application context. Continue with the current interview card; your existing selections have not been reset.',
+              kind: 'text',
+            },
+          ]);
+          setInput('');
+          return;
+        }
+
+        if (isJailbreakPrompt(typed) || isOffTopicPrompt(typed)) {
+          setMessages((previous) => [
+            ...previous,
+            { id: `u-${Date.now()}`, role: 'user', content: typed, kind: 'text' },
+            {
+              id: `a-${Date.now() + 1}`,
+              role: 'assistant',
+              content:
+                "I'm StackForge — I only help design and scaffold cloud infrastructure (Terraform, CI/CD, Kubernetes/Helm, plus a minimal health stub) for AWS, Azure, GCP, or Oracle.\n\nI can't run prompt overrides or write unrelated scripts/recipes. Describe a cloud stack (for example: \"a Node API on EKS with Postgres and GitHub Actions\") and I'll interview you, draft a plan, then generate files.",
+              kind: 'text',
+            },
+          ]);
+          setInput('');
+          return;
+        }
+
+        if (isUnsupportedRuntimePrompt(typed)) {
+          const runtimeMatch = typed.match(/\b(php|ruby(?:\s+on\s+rails)?|rails|rust(?:\s+actix)?|elixir|phoenix)\b/i);
+          const requestedRuntime = runtimeMatch ? runtimeMatch[0] : 'that runtime';
+          const label = requestedRuntime.charAt(0).toUpperCase() + requestedRuntime.slice(1);
+          setMessages((previous) => [
+            ...previous,
+            { id: `u-${Date.now()}`, role: 'user', content: typed, kind: 'text' },
+            {
+              id: `a-${Date.now() + 1}`,
+              role: 'assistant',
+              content:
+                `**${label} is not a supported runtime stub.**\n\nStackForge generates a minimal health-check stub for: **Python**, **Node.js**, **Java**, **Go**, and **.NET (C#)**. These are the only runtimes with locked Dockerfile and app-source templates.\n\nChoose one of the supported runtimes and I'll start the interview — for example: _"a Node.js API on AWS EKS with PostgreSQL"_.`,
               kind: 'text',
             },
           ]);
