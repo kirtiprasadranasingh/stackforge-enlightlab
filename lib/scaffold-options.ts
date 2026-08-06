@@ -169,7 +169,7 @@ export function parseScaffoldOptions(
     const bareAttempt = t.replace(/^(?:use|set|change|switch|to)\s+/i, '').trim();
     if (
       /^[a-z0-9-]+$/i.test(bareAttempt) &&
-      (bareAttempt.includes('us') || bareAttempt.includes('europe') || bareAttempt.includes('india') || bareAttempt.includes('east') || bareAttempt.includes('west') || bareAttempt.includes('south') || bareAttempt.includes('north') || bareAttempt.includes('central'))
+      (bareAttempt.includes('us') || bareAttempt.includes('eu') || bareAttempt.includes('europe') || bareAttempt.includes('india') || bareAttempt.includes('east') || bareAttempt.includes('west') || bareAttempt.includes('south') || bareAttempt.includes('north') || bareAttempt.includes('central'))
     ) {
       out.region = bareAttempt;
     }
