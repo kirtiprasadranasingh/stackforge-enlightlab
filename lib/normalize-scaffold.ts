@@ -493,6 +493,14 @@ function trimTruncatedWorkflowTail(content: string): string {
   return out.endsWith('\n') ? out : `${out}\n`;
 }
 
+/** GitHub Actions does not support ternary operators (?). Replace with && || */
+function patchTernaryOperators(content: string): string {
+  return content.replace(
+    /\$\{\{\s*(.*?)\s*\?\s*(.*?)\s*:\s*(.*?)\s*\}\}/g,
+    '${{ $1 && $2 || $3 }}'
+  );
+}
+
 function patchGithubWorkflow(content: string): string {
   let out = patchWorkflowDispatchInputs(content);
   out = patchMissingWorkflowDispatchInputs(out);
@@ -509,6 +517,7 @@ function patchGithubWorkflow(content: string): string {
   out = indentHeredocClosers(out);
   out = trimTruncatedWorkflowTail(out);
   out = quoteUnsafeRunLines(out);
+  out = patchTernaryOperators(out);
   return out;
 }
 
