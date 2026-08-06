@@ -954,6 +954,27 @@ function honestScaffoldDelivery(plan: string, context: string, presets?: Presets
         .replace(/single development environment/gi, `single ${selectedEnvironment} environment`)
         .replace(/One environment \(development\)/gi, `One environment (${selectedEnvironment})`);
     }
+
+    const extras = ['development', 'staging', 'production'].filter((e) => e !== selectedEnvironment);
+    // Strip prose bullets that introduce extra unselected environments
+    out = out
+      .split('\n')
+      .filter((line) => {
+        if (/^\s*[-*]?\s*Environments?:/i.test(line)) return true;
+        if (extras.some((extra) => new RegExp(`\\b${extra}\\b`, 'i').test(line))) {
+          if (/environment isolation|separate staging|staging and production|additional environments|multi-env/i.test(line)) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .join('\n');
+
+    // Scrub extra environment names within 180 characters of "one environment" or "confirmed requirements" or "locked requirements"
+    for (const extra of extras) {
+      const reg = new RegExp(`((?:one environment|confirmed requirements|locked requirements)[\\s\\S]{0,180})\\b${extra}\\b`, 'gi');
+      out = out.replace(reg, '$1');
+    }
   }
 
   // Azure DevOps CI — never leave GitHub Actions AWS Auth template lines

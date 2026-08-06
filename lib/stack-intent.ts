@@ -240,10 +240,14 @@ export function isVagueStackPrompt(prompt: string): boolean {
   // Requirement fragments are valid interview starters even without a cloud.
   // Keep them out of casual chat so the missing axes are collected.
   if (
-    /^(?:small|medium|large|high[- ]traffic)\s+(?:deployment|scale|workload|service)$/.test(lower) ||
-    /^(?:public\s+(?:https?|without (?:a )?custom domain)|private(?:\s+vpc)?(?:\s+only)?|private and internal only)$/.test(lower)
+    /\b(?:small|medium|large|high[- ]traffic)\s+(?:deployment|scale|workload|service)\b/i.test(lower) ||
+    /\b(?:public\s+(?:https?|without (?:a )?custom domain)|private(?:\s+vpc)?(?:\s+only)?|private and internal only)\b/i.test(lower) ||
+    /\b(?:game|gaming|healthcare|health|e-?commerce|startup|web|api|service|app|application|backend|frontend)\b.{0,40}\b(?:app|application|service|backend|cloud|deployment|workload|infra(?:structure)?)\b/i.test(lower) ||
+    /\b(?:app|application|service|backend|cloud)\b.{0,40}\b(?:game|gaming|healthcare|health|e-?commerce|startup|web|api|cloud)\b/i.test(lower)
   ) {
-    return true;
+    if (!hasCloudOrOrchestratorSignal(lower)) {
+      return true;
+    }
   }
   // Named cloud/orchestrator/CI → not vague (interview still runs via other gates)
   if (hasCloudOrOrchestratorSignal(lower)) return false;

@@ -411,28 +411,6 @@ function mapRegionToNewCloud(currentRegion: string, allowed: string[]): string {
 
   const selectCiFollowUp = (option: string) => {
     if (!selectedOption) return;
-    // Native CI implies its cloud — never leave silent AWS/EKS when user picks OCI DevOps etc.
-    if (option === 'OCI DevOps') {
-      onAnswer(
-        currentIndex,
-        `${selectedOption}: ${option} | Cloud: Oracle Cloud Infrastructure | Hosting: Oracle Kubernetes Engine (OKE)`
-      );
-      return;
-    }
-    if (option === 'Google Cloud Build') {
-      onAnswer(
-        currentIndex,
-        `${selectedOption}: ${option} | Cloud: Google Cloud | Hosting: Google Kubernetes Engine (GKE)`
-      );
-      return;
-    }
-    if (option === 'AWS CodePipeline') {
-      onAnswer(
-        currentIndex,
-        `${selectedOption}: ${option} | Cloud: AWS | Hosting: Amazon EKS`
-      );
-      return;
-    }
     onAnswer(currentIndex, `${selectedOption}: ${option}`);
   };
 

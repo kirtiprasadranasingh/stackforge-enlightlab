@@ -1927,6 +1927,10 @@ CMD ["node", "server.js"]
         if (presets.cloud === 'azure') {
           content = content
             .replace(/azurerm_mysql_flexible_server/g, 'azurerm_postgresql_flexible_server')
+            .replace(/version\s*=\s*"8\.0\.21"/g, 'version = "15"')
+            .replace(/sku_name\s*=\s*"[^"]+"/g, 'sku_name               = "B_Standard_B1ms"')
+            .replace(/^\s*storage\s*\{\s*\n\s*size_gb\s*=\s*\d+\s*\n\s*\}/gm, '  storage_mb             = 32768')
+            .replace(/public_network_access\s*=\s*"Disabled"/g, 'public_network_access_enabled = false')
             .replace(/-mysql"/g, '-pg"');
         } else if (presets.cloud === 'aws') {
           content = content

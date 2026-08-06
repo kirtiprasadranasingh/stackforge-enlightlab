@@ -123,7 +123,8 @@ function hasExplicitValue(text: string, key: OptionKey): boolean {
   const value = text.toLowerCase();
   switch (key) {
     case 'region':
-      return /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/.test(value);
+      return /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|eastus2|westus|westeurope|northeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/.test(value) ||
+        /^(?:use|set|change|switch|to\s+)?([a-z0-9-]+)$/i.test(value.trim());
     case 'environments':
       return /\b(one environment|development|staging|production)\b/.test(value);
     case 'database':
@@ -140,9 +141,9 @@ function hasExplicitValue(text: string, key: OptionKey): boolean {
 }
 
 /**
- * Preserve requirements named in the original prompt.  An interview response
- * overrides a field only when it actually names a value for that field; its
- * parser defaults must never erase (for example) "Java" from the prompt.
+ * Preserve requirements named in the original prompt. An explicit user prompt
+ * (such as a bare region correction "westeurope" or "eastus") overrides older
+ * interview answers.
  */
 function mergePromptAndInterviewOptions(
   prompt: string,
@@ -153,10 +154,11 @@ function mergePromptAndInterviewOptions(
   if (!interviewAnswers?.trim()) return promptOptions;
 
   const answerOptions = parseScaffoldOptions(interviewAnswers, presets);
-  const merged = { ...promptOptions };
+  const merged = { ...answerOptions };
+
   for (const key of Object.keys(merged) as OptionKey[]) {
-    if (hasExplicitValue(interviewAnswers, key)) {
-      merged[key] = answerOptions[key] as never;
+    if (hasExplicitValue(prompt, key)) {
+      merged[key] = promptOptions[key] as never;
     }
   }
   return merged;

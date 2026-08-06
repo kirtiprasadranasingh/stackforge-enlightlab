@@ -148,14 +148,22 @@ export function parseScaffoldOptions(
   // Region
   const regionMatches = [
     ...t.matchAll(
-      /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|westeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/g
+      /\b(us-east-1|us-west-2|eu-west-1|ap-south-1|us-central1|europe-west1|asia-south1|eastus|eastus2|westus|westeurope|northeurope|centralindia|ap-mumbai-1|us-ashburn-1|eu-frankfurt-1|uk-london-1|me-jeddah-1)\b/g
     ),
   ];
-  // The most recent explicit answer wins during a correction turn. This
-  // prevents an earlier rejected region from continuing to block a valid
-  // replacement later in the conversation.
   const regionMatch = regionMatches[regionMatches.length - 1];
-  if (regionMatch) out.region = regionMatch[1];
+  if (regionMatch) {
+    out.region = regionMatch[1];
+  } else {
+    // Bare region correction or single-word attempt (e.g. "eastusuu", "use eastusuu")
+    const bareAttempt = t.replace(/^(?:use|set|change|switch|to)\s+/i, '').trim();
+    if (
+      /^[a-z0-9-]+$/i.test(bareAttempt) &&
+      (bareAttempt.includes('us') || bareAttempt.includes('europe') || bareAttempt.includes('india') || bareAttempt.includes('east') || bareAttempt.includes('west') || bareAttempt.includes('south') || bareAttempt.includes('north') || bareAttempt.includes('central'))
+    ) {
+      out.region = bareAttempt;
+    }
+  }
 
   // Environments — prefer explicit interview phrases; avoid matching
   // "production-grade" / accidental "prod" substrings.

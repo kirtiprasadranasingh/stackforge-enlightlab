@@ -1,5 +1,6 @@
 import type { Presets } from '@/types';
 import { promptNamesCloud } from '@/lib/infer-presets';
+import { isAffirmativeContinuePrompt } from '@/lib/stack-intent';
 
 export const CLOUD_LABELS: Record<Presets['cloud'], string> = {
   aws: 'AWS',
@@ -104,8 +105,16 @@ export function validateRegionForCloud(
   }
 
   if (cloud === 'azure') {
-    const isAzureSyntax = /^(eastus\d?|westus\d?|centralus|westeurope|northeurope|centralindia|southindia|southeastasia|japaneast|brazilsouth|[a-z]+)$/.test(r) && !/-/.test(r);
-    if (isAzureSyntax) {
+    const validAzureRegions = new Set([
+      'eastus', 'eastus2', 'westus', 'westus2', 'westus3', 'centralus',
+      'northcentralus', 'southcentralus', 'westeurope', 'northeurope',
+      'centralindia', 'southindia', 'westindia', 'southeastasia', 'eastasia',
+      'japaneast', 'japanwest', 'australiaeast', 'australiasoutheast',
+      'brazilsouth', 'uksouth', 'ukwest', 'canadacentral', 'canadaeast',
+      'switzerlandnorth', 'francecentral', 'germanywestcentral', 'norwayeast',
+      'swedencentral', 'qatarcentral', 'uaenorth', 'southafricanorth'
+    ]);
+    if (validAzureRegions.has(r)) {
       return { isValid: true, validatedRegion: r };
     }
     let mapped = 'eastus';
@@ -649,6 +658,11 @@ export function buildClarifyingQuestions(
     questions.push(
       'How much traffic should we plan for? (options: Small — 2 app copies / Medium — 3 to 5 app copies / High traffic — automatic scaling)'
     );
+  }
+
+  const isAffirmative = isAffirmativeContinuePrompt(prompt);
+  if (isAffirmative && namedCloud && questions[0] === setupQuestion) {
+    questions.shift();
   }
 
   return questions.slice(0, 8);
