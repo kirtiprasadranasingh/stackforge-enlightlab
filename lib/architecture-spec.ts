@@ -306,6 +306,21 @@ export function buildArchitectureSpec(params: {
     `Data service: ${labelForDatabase(options.database)}`,
     `Health-check runtime: ${labelForRuntime(options.runtime)}`,
   ].join('\n');
+  const multipleClouds = requestsMultipleClouds(params.prompt) &&
+    !interviewCorrectedToOneCloud(params.interviewAnswers) &&
+    !interviewCorrectedToOneCloud(params.prompt);
+
+  if (multipleClouds) {
+    return {
+      isValid: false,
+      issues: [
+        'StackForge generates one cloud provider scaffold per project so the architecture, Terraform, CI/CD, and validation stay consistent. Choose one primary cloud, or create a separate project for each cloud.'
+      ],
+      presets,
+      options,
+    };
+  }
+
   const region = validateRegionForCloud(options.region, presets.cloud);
   const issues: string[] = [];
 
@@ -325,15 +340,7 @@ export function buildArchitectureSpec(params: {
       'Amazon ECS cannot deploy Kubernetes Helm charts. Choose Amazon EKS with Helm, or keep Amazon ECS and use ECS task definitions/services instead, before generating a plan.'
     );
   }
-  if (
-    requestsMultipleClouds(params.prompt) &&
-    !interviewCorrectedToOneCloud(params.interviewAnswers) &&
-    !interviewCorrectedToOneCloud(params.prompt)
-  ) {
-    issues.push(
-      'StackForge generates one cloud provider scaffold per project so the architecture, Terraform, CI/CD, and validation stay consistent. Choose one primary cloud, or create a separate project for each cloud.'
-    );
-  }
+  
   const unimplementedModules = params.interviewAnswers?.trim()
     ? requestedUnimplementedModules(params.prompt)
     : [];

@@ -492,8 +492,11 @@ export async function POST(request: NextRequest) {
     if (architectureSpec.issues.length > 0) {
       const stream = new ReadableStream({
         start(controller) {
+          const hasMultipleCloudsError = architectureSpec.issues.some(i => i.includes('StackForge generates one cloud provider'));
           controller.enqueue(sse({ type: 'status', message: 'Gathering requirements...' }));
-          controller.enqueue(sse({ type: 'questions', questions: buildClarifyingQuestions(prompt, presets) }));
+          if (!hasMultipleCloudsError) {
+            controller.enqueue(sse({ type: 'questions', questions: buildClarifyingQuestions(prompt, presets) }));
+          }
           controller.enqueue(
             sse({
               type: 'summary',
