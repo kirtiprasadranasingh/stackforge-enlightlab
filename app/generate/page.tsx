@@ -710,7 +710,7 @@ export default function GeneratePage() {
             [lastStackPrompt || text, options.approvedPlan].join('\n'),
             presets
           )
-        : phase === 'plan' && lastStackPrompt && text !== lastStackPrompt
+        : (phase === 'plan' || phase === 'generate' || isRequirementCorrection) && lastStackPrompt && text !== lastStackPrompt
           ? inferPresetsFromPrompt(text, originalRequestPresets)
           : originalRequestPresets;
       if (
