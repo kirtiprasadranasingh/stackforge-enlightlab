@@ -169,7 +169,10 @@ export function inferPresetsFromPrompt(prompt: string, current: Presets): Preset
 
   // Check the latest prompt line first so history from previous turns does not override new requests
   const promptLines = prompt.split('\n').map((l) => l.trim()).filter(Boolean);
-  const latestPrompt = promptLines[0] || prompt;
+  const revisionIndex = promptLines.findIndex(l => l.toLowerCase().includes('revision feedback'));
+  const latestPrompt = revisionIndex !== -1 && revisionIndex + 1 < promptLines.length 
+    ? promptLines.slice(revisionIndex + 1).join('\n') 
+    : promptLines[promptLines.length - 1] || prompt;
   const latestCloud = detectCloudFromText(latestPrompt);
 
   let cloud = overrides.cloud ?? latestCloud ?? detectCloudFromText(prompt) ?? current.cloud;

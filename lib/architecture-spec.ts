@@ -241,7 +241,13 @@ function hasEcsHelmConflict(text: string, presets: Presets): boolean {
 
 /** StackForge deliberately produces one coherent provider scaffold per run. */
 function requestsMultipleClouds(text: string): boolean {
-  const lower = text.toLowerCase();
+  const promptLines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  const revisionIndex = promptLines.findIndex((l) => l.toLowerCase().includes('revision feedback'));
+  const latestPrompt = revisionIndex !== -1 && revisionIndex + 1 < promptLines.length 
+    ? promptLines.slice(revisionIndex + 1).join('\n') 
+    : promptLines[promptLines.length - 1] || text;
+  
+  const lower = latestPrompt.toLowerCase();
   if (/\b(?:every|all|multiple|multi)[ -]?(?:cloud|provider)s?\b|\bsimultaneously\b/.test(lower)) {
     return true;
   }
@@ -321,7 +327,8 @@ export function buildArchitectureSpec(params: {
   }
   if (
     requestsMultipleClouds(params.prompt) &&
-    !interviewCorrectedToOneCloud(params.interviewAnswers)
+    !interviewCorrectedToOneCloud(params.interviewAnswers) &&
+    !interviewCorrectedToOneCloud(params.prompt)
   ) {
     issues.push(
       'StackForge generates one cloud provider scaffold per project so the architecture, Terraform, CI/CD, and validation stay consistent. Choose one primary cloud, or create a separate project for each cloud.'

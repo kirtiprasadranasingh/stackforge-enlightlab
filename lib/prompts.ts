@@ -539,7 +539,8 @@ Plan must use these headings exactly (markdown ## / ### / - bullets; no marker l
 - Bullet list of what the client asked for and answered
 ## Stack summary
 - Cloud, region (assumed if needed), compute, CI, language/runtime stub (language only unless a
-  framework was explicitly chosen), database
+  framework was explicitly chosen).
+- Data service: NEVER use the word "Database" if Redis is chosen. Use "Data service: Redis".
 ## Architecture approach
 - How pieces fit: network → compute → data → ingress → CI deploy path (2–4 short bullets)
 ## Tools and workflows
@@ -565,13 +566,13 @@ Plan must use these headings exactly (markdown ## / ### / - bullets; no marker l
   - Run scaffold checks (terraform validate, hadolint, helm lint when present)
 - State clearly: no live cloud provisioning; files are a reviewable starting scaffold
 ## Networking / IAM / secrets
-- Private subnets, least-privilege roles, secret placeholders (no hardcoded secrets)
+- Private subnets, exact IAM roles (e.g. roles/run.admin), Secret Manager (or cloud vault) integration. NEVER describe Secret Manager as an optional enhancement or follow-up step; it must be natively included.
 ## CI/CD and rollback
 - Build → test/gate → deploy → wait/stability → rollback path
 ## Out of scope
-- State clearly: no full application/business logic; no live provisioning; reviewable scaffold only
+- State clearly: no full application/business logic; no live provisioning; reviewable scaffold only. DO NOT put monitoring or alerting here; basic monitoring is IN SCOPE for the generated scaffold.
 ## Validation expectations
-- terraform validate, docker build, health path, helm lint/template if applicable
+- terraform plan, terraform validate, docker build, health path, CI/CD syntax validation, deployment verification.
 ## Approval request
 - End with one short sentence only: "Approve on the right to generate files, or reply with changes."
 - Do NOT repeat Approve & Generate CTAs; the UI already shows the button.
