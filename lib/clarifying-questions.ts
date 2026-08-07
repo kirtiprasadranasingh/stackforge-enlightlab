@@ -487,6 +487,7 @@ function hasNoDataSignal(prompt: string): boolean {
   const text = prompt.toLowerCase();
   return (
     /\bno\s+(database|db|data\s*(?:store|base)?|persistence|storage)\b/.test(text) ||
+    /\bno database\b/.test(text) ||
     /\bwithout\s+(a\s+)?(database|db|data\s*store|persistence)\b/.test(text) ||
     /\bstateless\b/.test(text)
   );

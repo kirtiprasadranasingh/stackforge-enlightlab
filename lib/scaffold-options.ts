@@ -124,7 +124,7 @@ function parseRuntimeFromText(raw: string): RuntimeKind | null {
 
 function databaseFromPhrase(phrase: string): DatabaseKind | null {
   const v = phrase.toLowerCase();
-  if (/\bno data service\b|\bnone\b|\bwithout (a )?database\b/.test(v)) {
+  if (/\bno data service\b|\bno database\b|\bnone\b|\bwithout (a )?database\b/.test(v)) {
     return 'none';
   }
   if (/\bmongodb\b|\bmongo\b|\bdocumentdb\b/.test(v)) return 'mongodb';
@@ -240,7 +240,7 @@ export function parseScaffoldOptions(
   } else {
     const databaseMentions = [
       ...t.matchAll(
-        /\b(no data service|without (?:a )?database|mongodb|mongo|documentdb|redis|valkey|mysql|mariadb|postgresql|postgres)\b/g
+        /\b(no data service|no database|without (?:a )?database|mongodb|mongo|documentdb|redis|valkey|mysql|mariadb|postgresql|postgres)\b/g
       ),
     ];
     const latestDatabase = databaseMentions[databaseMentions.length - 1];
@@ -255,6 +255,7 @@ export function parseScaffoldOptions(
     // Keyword scan on text with option menus stripped (QA #4: don't wipe Mongo via "stateless")
     const askedNoData =
       /\bno data service\b/.test(t) ||
+      /\bno database\b/.test(t) ||
       /\bwithout (a )?database\b/.test(t) ||
       /database\s*\(client override\):\s*none\b/.test(t) ||
       /→\s*no data service\b/.test(t);
