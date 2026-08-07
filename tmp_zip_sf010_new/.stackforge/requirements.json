@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "presets": {
+    "cloud": "azure",
+    "orchestrator": "container-apps",
+    "ci": "github-actions"
+  },
+  "options": {
+    "region": "westeurope",
+    "environments": [
+      "development",
+      "staging"
+    ],
+    "database": "mysql",
+    "databaseMode": "standard",
+    "access": "public_basic",
+    "scale": "medium",
+    "runtime": "python"
+  }
+}

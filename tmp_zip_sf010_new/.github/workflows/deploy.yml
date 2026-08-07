@@ -1,0 +1,208 @@
+name: Deploy to Azure Container Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'environment'
+        required: false
+        type: string
+      git_ref:
+        description: 'git_ref'
+        required: false
+        type: string
+  push:
+    branches:
+      - development
+      - staging
+
+env:
+  AZURE_RESOURCE_GROUP_PREFIX: "stackforge-aca-mysql"
+  AZURE_LOCATION: "westeurope"
+  SERVICE_NAME: "pyhealthapp"
+  PYTHON_VERSION: "3.9"
+
+jobs:
+  validate_terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Determine environment
+        id: set_environment
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            ENV_NAME="${{ github.ref_name }}"
+          else
+            ENV_NAME="${{ github.event.inputs.environment }}"
+          fi
+          echo "environment=$ENV_NAME" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init (for validation)
+        working-directory: ./terraform
+        run: |
+          terraform init -backend=false
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Format
+        working-directory: ./terraform
+        run: terraform fmt -check
+
+      - name: Terraform Validate
+        working-directory: ./terraform
+        run: terraform validate -var-file=../environments/${{ steps.set_environment.outputs.environment }}.tfvars
+
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    needs: validate_terraform
+    environment: ${{ needs.validate_terraform.outputs.environment }} # Use environment from previous job
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git_ref || github.ref }}
+
+      - name: Determine environment
+        id: set_environment_deploy
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            ENV_NAME="${{ github.ref_name }}"
+          else
+            ENV_NAME="${{ github.event.inputs.environment }}"
+          fi
+          echo "environment=$ENV_NAME" >> $GITHUB_OUTPUT
+          echo "tag=${ENV_NAME}-latest" >> $GITHUB_OUTPUT
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Terraform Outputs
+        id: tf_outputs
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          cd terraform
+          terraform init -backend-config="resource_group_name=tfstate-rg" -backend-config="storage_account_name=$(az storage account list --resource-group tfstate-rg --query '[0].name' -o tsv)" -backend-config="container_name=tfstate" -backend-config="key=container-app-mysql.tfstate"
+          echo "acr_name=$(terraform output -raw acr_name)" >> $GITHUB_OUTPUT
+          echo "acr_login_server=$(terraform output -raw acr_login_server)" >> $GITHUB_OUTPUT
+          echo "container_app_name=$(terraform output -raw container_app_name)" >> $GITHUB_OUTPUT
+          echo "resource_group_name=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "aca_managed_identity_client_id=$(terraform output -raw aca_managed_identity_client_id)" >> $GITHUB_OUTPUT
+          cd ..
+
+      - name: Set up Docker BuildX
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.tf_outputs.outputs.acr_login_server }}
+          username: ${{ secrets.AZURE_CLIENT_ID }} # Use SPN ID as username
+          password: ${{ secrets.AZURE_CLIENT_SECRET }} # Use SPN secret as password
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tf_outputs.outputs.acr_login_server }}/${{ env.SERVICE_NAME }}:${{ steps.set_environment_deploy.outputs.tag }}
+          file: ./Dockerfile
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to Azure Container Apps
+        id: deploy
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          containerAppSourcePath: '.' # Or specify Dockerfile path if not in root
+          azureSubscription: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          acrName: ${{ steps.tf_outputs.outputs.acr_name }}
+          containerAppName: ${{ steps.tf_outputs.outputs.container_app_name }}
+          resourceGroup: ${{ steps.tf_outputs.outputs.resource_group_name }}
+          imageToDeploy: ${{ steps.tf_outputs.outputs.acr_login_server }}/${{ env.SERVICE_NAME }}:${{ steps.set_environment_deploy.outputs.tag }}
+          # Use system-assigned identity to pull from ACR and access Key Vault
+          # The container app itself uses the UserAssigned MI, which needs AcrPull role
+          # This action requires an SPN with Contributor role to manage the CA
+          managedEnvironmentsSettings: |
+            {
+              "infrastructureSubnetId": "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ steps.tf_outputs.outputs.resource_group_name }}/providers/Microsoft.Network/virtualNetworks/${{ env.SERVICE_NAME }}-vnet-${{ steps.set_environment_deploy.outputs.environment }}/subnets/${{ env.SERVICE_NAME }}-aca-subnet-${{ steps.set_environment_deploy.outputs.environment }}"
+            }
+        continue-on-error: true # Allow subsequent steps to run for rollback
+
+      - name: Check Deployment Status and Trigger Rollback
+        if: steps.deploy.outputs.deployment-status != 'success'
+        run: |
+          echo "Deployment failed! Initiating rollback..."
+          CURRENT_REVISION=$(az containerapp revision list \
+            --name "${{ steps.tf_outputs.outputs.container_app_name }}" \
+            --resource-group "${{ steps.tf_outputs.outputs.resource_group_name }}" \
+            --query "[?properties.active == \`true\` && properties.healthState == 'Healthy'].name" -o tsv)
+          
+          echo "Current active revision (if healthy): $CURRENT_REVISION"
+
+          # Get the last successful revision that is not the currently failed one
+          LAST_SUCCESSFUL_REVISION=$(az containerapp revision list \
+            --name "${{ steps.tf_outputs.outputs.container_app_name }}" \
+            --resource-group "${{ steps.tf_outputs.outputs.resource_group_name }}" \
+            --query "sort_by(@, &properties.createdTimeUtc)[?properties.healthState == 'Healthy' && properties.active == \`false\`].name | [-1]" -o tsv)
+
+          if [ -n "$LAST_SUCCESSFUL_REVISION" ]; then
+            echo "Activating last successful revision: $LAST_SUCCESSFUL_REVISION"
+            az containerapp revision activate \
+              --revision "$LAST_SUCCESSFUL_REVISION" \
+              --name "${{ steps.tf_outputs.outputs.container_app_name }}" \
+              --resource-group "${{ steps.tf_outputs.outputs.resource_group_name }}"
+            echo "Rollback to $LAST_SUCCESSFUL_REVISION completed."
+          else
+            echo "No previous successful revision found for rollback. Manual intervention may be required."
+          fi
+          exit 1 # Fail the job to reflect deployment failure and potential rollback issues
+
+      - name: Smoke Test (optional, if app has a public endpoint)
+        if: steps.deploy.outputs.deployment-status == 'success'
+        run: |
+          APP_URL=$(az containerapp show --name "${{ steps.tf_outputs.outputs.container_app_name }}" --resource-group "${{ steps.tf_outputs.outputs.resource_group_name }}" --query "properties.latestRevisionFqdn" -o tsv)
+          HEALTH_URL="https://$APP_URL/health"
+          echo "Running smoke test on: $HEALTH_URL"
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL || true)
+            if [ "$STATUS_CODE" -eq 200 ]; then
+              echo "Smoke test passed (status code: $STATUS_CODE)"
+              exit 0
+            else
+              echo "Smoke test failed with status code $STATUS_CODE. Retrying in 5 seconds..."
+              sleep 5
+              RETRY_COUNT=$((RETRY_COUNT+1))
+            fi
+          done
+          echo "Smoke test failed after $MAX_RETRIES retries."
+          exit 1

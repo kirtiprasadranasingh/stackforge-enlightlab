@@ -123,7 +123,7 @@ export function resolveDiscoveryPrompt(
     }
     // Stop at an older fully specified request; only collect the short
     // discovery fragments immediately leading into this project.
-    if (hasCloudOrOrchestratorSignal(value) && value.length > 80) break;
+    if (hasCloudOrOrchestratorSignal(value)) break;
     if (
       /\b(?:small|medium|large|high traffic|scalable|deployment|workload|service|api|app|application|game|gaming|healthcare|health[- ]?related|e-?commerce|public|private|https?|vpc|cloud|production|staging|development)\b/i.test(
         value

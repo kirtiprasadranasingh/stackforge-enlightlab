@@ -472,6 +472,7 @@ cloud/platform when the client overrode it.
   independent databases. Put "one managed DB per environment via separate terraform apply /
   tfvars" under **Assumptions** (or say it is configurable / shared DB is an alternative) —
   never under Confirmed requirements unless they explicitly asked for separate DBs.
+- **CRITICAL:** If only one environment is selected (e.g., Staging), do NOT mention the words "development" or "production" anywhere in your plan. Inventing extra environments causes strict validation failures.
 - **"Public without a custom domain"** means internet-facing on the **default load-balancer
   hostname**. Confirmed requirements may keep that access *intent*. Under Architecture /
   Assumptions / Implement you **must** state that Approve & Generate emits an **HTTP:80**

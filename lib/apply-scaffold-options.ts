@@ -1901,6 +1901,7 @@ CMD ["node", "server.js"]
       if (options.database === 'mysql') {
         if (presets.cloud === 'azure') {
           content = content
+            .replace(/azurerm_postgresql_flexible_server_database/g, 'azurerm_mysql_flexible_database')
             .replace(/azurerm_postgresql_flexible_server/g, 'azurerm_mysql_flexible_server')
             .replace(/version\s*=\s*"15"/g, 'version = "8.0.21"')
             .replace(/sku_name\s*=\s*"[^"]+"/g, 'sku_name               = "GP_Standard_D2ds_v4"')
@@ -1973,7 +1974,7 @@ CMD ["node", "server.js"]
     if (options.database !== 'redis') {
       content = removeOutputsReferencing(content, redisReference);
     }
-    if (presets.cloud === 'azure' && presets.orchestrator === 'aks' && options.database === 'mysql') {
+    if (presets.cloud === 'azure' && options.database === 'mysql') {
       content = content.replace(
         /output\s+"postgres_fqdn"\s*\{\s*value\s*=\s*try\(azurerm_postgresql_flexible_server\.main\[0\]\.fqdn, null\)\s*\}/g,
         'output "mysql_fqdn" {\n  value = try(azurerm_mysql_flexible_server.main[0].fqdn, null)\n}'
