@@ -592,7 +592,7 @@ export default function GeneratePage() {
       } else if (isNewStackRequest) {
         // Brand-new stack prompt typed in chat → reset interview and start fresh clarify phase
         setPendingQuestions([]);
-        phase = (isRegenerationRequest || isRequirementCorrection) && lastStackPromptRef.current ? 'plan' : 'clarify';
+        phase = (isRegenerationRequest || isRequirementCorrection) && lastStackPromptRef.current && lastInterviewAnswersRef.current ? 'plan' : 'clarify';
       } else if (awaitingApproval && pendingPlan) {
         // User is revising an existing plan
         phase = 'plan';
