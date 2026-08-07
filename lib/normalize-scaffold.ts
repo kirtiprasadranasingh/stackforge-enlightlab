@@ -1867,6 +1867,18 @@ export function normalizeScaffoldFiles(
     }
   }
 
+  // For serverless orchestrators, the manifest expects runtime stubs at root.
+  // Move any remaining app/ files to root to match the contract.
+  if (preferred?.presets?.orchestrator === 'cloud-run' || preferred?.presets?.orchestrator === 'container-apps') {
+    for (const [p, file] of [...byPath.entries()]) {
+      if (/^app\/(?:Dockerfile|Program\.cs|app\.csproj|main\.py|requirements\.txt|main\.go|go\.mod|go\.sum)$/.test(p)) {
+        const newPath = p.slice(4);
+        byPath.set(newPath, { ...file, path: newPath });
+        byPath.delete(p);
+      }
+    }
+  }
+
   return dedupeTerraformResources(Array.from(byPath.values()));
 }
 

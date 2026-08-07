@@ -1221,7 +1221,7 @@ export function mergeLockedBaseFiles(
   // Drop every competing workflow when CI is not GitHub Actions
   if (options.presets?.ci && options.presets.ci !== 'github-actions') {
     for (const p of [...byPath.keys()]) {
-      if (p.replace(/\\/g, '/').startsWith('.github/workflows/')) {
+      if (p.replace(/\\/g, '/').startsWith('.github/')) {
         byPath.delete(p);
         seeded.push(`removed:${p}`);
       }

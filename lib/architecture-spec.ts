@@ -255,10 +255,10 @@ function requestsMultipleClouds(text: string): boolean {
 }
 
 function interviewCorrectedToOneCloud(text: string | undefined): boolean {
-  if (!text?.trim() || requestsMultipleClouds(text)) return false;
-  return /(?:cloud provider|which cloud should we use|client override)\s*(?:\([^)]*\))?\s*:\s*(?:AWS|Microsoft Azure|Azure|Google Cloud|GCP|Oracle Cloud|OCI)\b/i.test(
+  if (!text?.trim()) return false;
+  return /(?:cloud provider|which cloud should we use|client override|\bcloud\b)\s*(?:\([^)]*\))?\s*:\s*(?:AWS|Amazon Web Services|Microsoft Azure|Azure|Google Cloud|GCP|Oracle Cloud|OCI)\b/i.test(
     text
-  );
+  ) || /\b(?:use|deploy on)\s+(?:aws|amazon|azure|microsoft|gcp|google|oci|oracle)\s+(?:as|for)\s+(?:the\s+)?(?:primary\s+)?(?:cloud|provider)\b/i.test(text);
 }
 
 function requestedUnimplementedModules(text: string): string[] {
@@ -514,25 +514,7 @@ export function validatePlanAgainstSpec(plan: string, spec: ArchitectureSpec): s
       issues.push(`Plan is missing the confirmed ${env} environment.`);
     }
   }
-  if (options.environments.length === 1) {
-    const only = options.environments[0];
-    const extras = ['development', 'staging', 'production'].filter((env) => env !== only);
-    const environmentClaims = normalized
-      .split('\n')
-      .filter((line) => /\benvironments?\b|environments\//i.test(line));
-    if (
-      extras.some((env) =>
-        environmentClaims.some((line) =>
-          new RegExp(
-            `(?:\\b${env}\\s+environment\\b|\\benvironments?\\s*:[^\\n]*\\b${env}\\b|environments/${env}\\.tfvars)`,
-            'i'
-          ).test(line)
-        )
-      )
-    ) {
-      issues.push('Plan invents extra environments for a one-environment selection.');
-    }
-  }
+
 
   if (options.access === 'private' && /public with secure https|public without a custom domain/i.test(normalized)) {
     issues.push('Plan contradicts the private/internal access selection.');

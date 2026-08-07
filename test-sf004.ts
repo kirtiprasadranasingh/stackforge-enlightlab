@@ -5,14 +5,15 @@ import { validateScaffoldContract } from './lib/scaffold-contract';
 import { detectScaffoldProfile } from './lib/scaffold-spec';
 
 async function run() {
-  const presets = { cloud: 'gcp', orchestrator: 'gke', ci: 'gitlab-ci' };
+  const presets = { cloud: 'gcp' as const, orchestrator: 'gke' as const, ci: 'gitlab-ci' as const };
   const options = {
     region: 'europe-west1',
-    access: 'public',
-    database: 'mysql',
-    runtime: 'java',
+    access: 'public' as const,
+    database: 'mysql' as const,
+    databaseMode: 'provisioned' as const,
+    runtime: 'java' as const,
     environments: ['production'],
-  };
+  } as any;
 
   const profile = detectScaffoldProfile('', presets);
   if (!profile) {

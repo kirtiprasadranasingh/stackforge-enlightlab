@@ -241,8 +241,8 @@ export function enforceSingleCi(
   const known = new Set(Object.values(CI_CANONICAL));
   for (const p of [...byPath.keys()]) {
     const norm = p.replace(/\\/g, '/');
-    if (norm.startsWith('.github/workflows/')) {
-      if (ci !== 'github-actions' || norm !== keep) byPath.delete(p);
+    if (norm.startsWith('.github/')) {
+      if (ci !== 'github-actions' || (norm.startsWith('.github/workflows/') && norm !== keep)) byPath.delete(p);
       continue;
     }
     if (known.has(norm) && norm !== keep) byPath.delete(p);
@@ -315,14 +315,22 @@ test:
     - test -f charts/app/Chart.yaml
 
 build:
-  image: docker:27
+  image: google/cloud-sdk:slim
   services: [docker:27-dind]
   stage: build
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
   script:
-    - test -n "$GCP_PROJECT_ID" -a -n "$GCP_SERVICE_ACCOUNT_KEY" -a -n "$ARTIFACT_REPOSITORY"
+    - test -n "$GCP_PROJECT_ID" -a -n "$GCP_WORKLOAD_IDENTITY_PROVIDER" -a -n "$GCP_SERVICE_ACCOUNT" -a -n "$ARTIFACT_REPOSITORY"
+    - apt-get update && apt-get install -y docker.io
     - export REGISTRY="$GCP_REGION-docker.pkg.dev"
     - export IMAGE_URI="$REGISTRY/$GCP_PROJECT_ID/$ARTIFACT_REPOSITORY/app:$IMAGE_TAG"
-    - echo "$GCP_SERVICE_ACCOUNT_KEY" | docker login -u _json_key --password-stdin "https://$REGISTRY"
+    - echo "$GITLAB_OIDC_TOKEN" > /tmp/oidc_token.txt
+    - gcloud iam workload-identity-pools create-cred-config "$GCP_WORKLOAD_IDENTITY_PROVIDER" --service-account="$GCP_SERVICE_ACCOUNT" --output-file=/tmp/sts-creds.json --credential-source-file=/tmp/oidc_token.txt
+    - export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sts-creds.json
+    - gcloud auth login --cred-file=/tmp/sts-creds.json --project="$GCP_PROJECT_ID"
+    - gcloud auth configure-docker "$REGISTRY" --quiet
     - docker build -t "$IMAGE_URI" -f app/Dockerfile app
     - docker push "$IMAGE_URI"
     - echo "IMAGE_URI=$IMAGE_URI" > build.env
@@ -334,10 +342,15 @@ deploy:
   image: google/cloud-sdk:slim
   stage: deploy
   needs: [build]
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
   script:
-    - test -n "$GCP_PROJECT_ID" -a -n "$GCP_SERVICE_ACCOUNT_KEY" -a -n "$GKE_CLUSTER_NAME"
-    - echo "$GCP_SERVICE_ACCOUNT_KEY" > /tmp/gcp-key.json
-    - gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
+    - test -n "$GCP_PROJECT_ID" -a -n "$GCP_WORKLOAD_IDENTITY_PROVIDER" -a -n "$GCP_SERVICE_ACCOUNT" -a -n "$GKE_CLUSTER_NAME"
+    - echo "$GITLAB_OIDC_TOKEN" > /tmp/oidc_token.txt
+    - gcloud iam workload-identity-pools create-cred-config "$GCP_WORKLOAD_IDENTITY_PROVIDER" --service-account="$GCP_SERVICE_ACCOUNT" --output-file=/tmp/sts-creds.json --credential-source-file=/tmp/oidc_token.txt
+    - export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sts-creds.json
+    - gcloud auth login --cred-file=/tmp/sts-creds.json --project="$GCP_PROJECT_ID"
     - gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" --region "$GCP_REGION" --project "$GCP_PROJECT_ID"
     - apt-get update && apt-get install -y curl
     - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -1982,6 +1995,18 @@ CMD ["node", "server.js"]
     }
     if (content !== outputs.content) {
       byPath.set('terraform/outputs.tf', { ...outputs, content: `${content.trim()}\n` });
+    }
+  }
+
+  // Update Helm chart targetPort for Java / .NET
+  const chartValues = byPath.get('charts/app/values.yaml');
+  if (chartValues) {
+    const port = runtimePort(options.runtime);
+    if (port !== 3000) {
+      byPath.set('charts/app/values.yaml', {
+        ...chartValues,
+        content: chartValues.content.replace(/targetPort:\s*3000/g, `targetPort: ${port}`),
+      });
     }
   }
 

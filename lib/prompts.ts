@@ -487,7 +487,17 @@ cloud/platform when the client overrode it.
   invent \`src/app.js\` unless that path is truly emitted.
 - Always include **autoscaling** in Architecture / Resources / Implement stage: ECS →
   \`aws_appautoscaling_target\` + CPU (and optionally memory) target-tracking policies; EKS/GKE/AKS/OKE →
-  HPA enabled by default. A DevOps/startup scaffold without scale-out is incomplete.
+  HPA enabled by default; Cloud Run / Container Apps → min/max instances and concurrency target. A DevOps/startup scaffold without explicit scale-out parameters (min/max instances) is incomplete.
+- **Terminology & Resource Completeness (critical):**
+  - If Redis is selected, list it as **Data service: Redis** (or Cache), NOT "Database: Redis".
+  - If Cloud Run is used with private networking, do NOT say "Cloud Run is deployed in private subnets". Cloud Run is serverless; specify it uses a **Serverless VPC Access Connector** (\`google_vpc_access_connector\`) to reach the VPC.
+  - Explain internal-only Cloud Run access explicitly (e.g., using an Internal HTTP(S) Load Balancer).
+  - Do NOT list optional resources as "if needed" (e.g., "router and NAT if needed"). If the architecture requires outbound egress for private services, list them as mandatory.
+  - Specify exact IAM roles in the IAM section (e.g., \`roles/run.admin\`, \`roles/iam.serviceAccountUser\`) instead of generic "least privilege" phrases.
+  - Detail the rollback trigger (e.g., deployment verification gates, health check failures triggering revision rollback).
+  - List comprehensive validation coverage: \`terraform plan\`, CI/CD syntax validation, and deployment verification, not just \`terraform validate\` and \`docker build\`.
+  - Include basic monitoring: explicitly mention logging, metrics, and basic uptime checks if applicable.
+  - For secrets, specify that **Secret Manager** (or equivalent cloud vault) integration is part of the architecture, not just a delayed enhancement.
 
 **Java / .NET language ≠ framework (critical):**
 - Interview answer **"Java"** confirms the **language** only. Do **NOT** list Spring Boot, Quarkus,
