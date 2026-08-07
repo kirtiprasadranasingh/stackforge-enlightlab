@@ -490,10 +490,30 @@ export async function POST(request: NextRequest) {
     // cloud/region pair, invent MongoDB support, or generate a plan/code set
     // that cannot match the client's selected requirements.
     if (architectureSpec.issues.length > 0) {
-      return replyText(
-        `I need one corrected interview answer before I can draft or generate this scaffold. ${architectureSpec.issues.join(' ')}`,
-        'Validating requirements…'
-      );
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(sse({ type: 'status', message: 'Gathering requirements...' }));
+          controller.enqueue(sse({ type: 'questions', questions: buildClarifyingQuestions(prompt, presets) }));
+          controller.enqueue(
+            sse({
+              type: 'summary',
+              summary: `I need one corrected interview answer before I can draft or generate this scaffold. ${architectureSpec.issues.join(' ')}`,
+            })
+          );
+          controller.enqueue(sse({ type: 'warnings', warnings: [] }));
+          controller.enqueue(sse({ type: 'done' }));
+          controller.close();
+        },
+      });
+      return new NextResponse(stream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+          ...cors,
+        },
+      });
     }
 
     if (isGreetingOnlyPrompt(prompt)) {

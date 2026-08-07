@@ -1209,6 +1209,7 @@ export default function GeneratePage() {
     abortController.current?.abort();
     setSetupDone(true);
     setStep(1);
+    setPresets({ cloud: 'aws', orchestrator: 'eks', ci: 'github-actions' });
     setMessages([
       {
         id: 'welcome',
